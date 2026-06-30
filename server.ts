@@ -309,6 +309,12 @@ const brainLogHistory: any[] = [];
 let broadcastBrainLog: ((logObj: any) => void) | null = null;
 
 function startLocalBrainWithFallback() {
+  const scriptPath = path.resolve(process.cwd(), "brain/central_server.py");
+  if (!fs.existsSync(scriptPath)) {
+    console.log("[Brain] brain/central_server.py not found. Running server in pure API/Companion backend mode without Titan local brain.");
+    return;
+  }
+
   const tryStart = (cmd: string) => {
     console.log(`[Brain] Attempting to spawn Titan Neural Kernel with '${cmd}'...`);
     const brainProcess = spawn(cmd, ["brain/central_server.py"], {
@@ -4882,7 +4888,86 @@ Return a JSON-like structured response:
       if (req.path.startsWith('/api') || req.path.startsWith('/ws') || req.path.startsWith('/v1')) {
         return res.status(404).json({ error: "Endpoint not found" });
       }
-      res.sendFile(path.join(distPath, 'index.html'));
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(200).send(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Unison OS Cloud Backend</title>
+              <style>
+                body {
+                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                  background-color: #0b0f19;
+                  color: #e2e8f0;
+                  display: flex;
+                  flex-direction: column;
+                  align-items: center;
+                  justify-content: center;
+                  height: 100vh;
+                  margin: 0;
+                }
+                .container {
+                  text-align: center;
+                  padding: 2.5rem;
+                  background: rgba(255, 255, 255, 0.02);
+                  border-radius: 16px;
+                  border: 1px solid rgba(255, 255, 255, 0.08);
+                  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+                  max-width: 450px;
+                }
+                h1 {
+                  color: #60a5fa;
+                  font-size: 26px;
+                  margin-top: 0;
+                  margin-bottom: 12px;
+                  font-weight: 600;
+                  letter-spacing: -0.025em;
+                }
+                p {
+                  color: #94a3b8;
+                  font-size: 15px;
+                  line-height: 1.6;
+                  margin: 8px 0;
+                }
+                .status {
+                  display: inline-flex;
+                  align-items: center;
+                  gap: 8px;
+                  background: rgba(16, 185, 129, 0.1);
+                  border: 1px solid rgba(16, 185, 129, 0.2);
+                  color: #10b981;
+                  padding: 6px 14px;
+                  border-radius: 9999px;
+                  font-size: 13px;
+                  font-weight: 600;
+                  margin-bottom: 16px;
+                }
+                .dot {
+                  width: 8px;
+                  height: 8px;
+                  background-color: #10b981;
+                  border-radius: 50%;
+                  box-shadow: 0 0 8px #10b981;
+                }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="status">
+                  <span class="dot"></span>
+                  Active & Operational
+                </div>
+                <h1>Unison OS Cloud</h1>
+                <p>Your external backend server is running successfully on Render.</p>
+                <p style="font-size: 13px; color: #64748b;">Ready to serve API requests for companion app, web pipelines, and companion pairings.</p>
+              </div>
+            </body>
+          </html>
+        `);
+      }
     });
   }
 
