@@ -7,7 +7,7 @@ import { createServer } from "http";
 import { GoogleGenAI } from "@google/genai";
 import { spawn, exec } from "child_process";
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, doc, getDocs, getDoc, setDoc, query, where, orderBy, deleteDoc, addDoc } from "firebase/firestore";
+import { getFirestore, collection, doc, getDocs, getDoc, setDoc, query, where, orderBy, deleteDoc, addDoc, writeBatch } from "firebase/firestore";
 import { initializeApp as initializeAdminApp } from "firebase-admin/app";
 import { getFirestore as getAdminFirestore } from "firebase-admin/firestore";
 import { getAuth as getAdminAuth } from "firebase-admin/auth";
@@ -22,6 +22,167 @@ const googleGenAI = new GoogleGenAI({
   }
 });
 
+// Resilient Firebase Adapter Classes to wrap Client Firestore as Admin SDK Fallback
+class AdaptedDocumentSnapshot {
+  id: string;
+  exists: boolean;
+  ref: any;
+  _data: any;
+
+  constructor(id: string, exists: boolean, ref: any, data: any) {
+    this.id = id;
+    this.exists = exists;
+    this.ref = ref;
+    this._data = data;
+  }
+
+  data() {
+    return this._data;
+  }
+}
+
+class AdaptedDocumentReference {
+  db: any;
+  path: string;
+  id: string;
+
+  constructor(db: any, path: string, id: string) {
+    this.db = db;
+    this.path = path;
+    this.id = id;
+  }
+
+  collection(subPath: string) {
+    return new AdaptedCollectionReference(this.db, `${this.path}/${this.id}/${subPath}`);
+  }
+
+  async get() {
+    try {
+      const docRef = doc(this.db, this.path, this.id);
+      const snap = await getDoc(docRef);
+      return new AdaptedDocumentSnapshot(this.id, snap.exists(), this, snap.data());
+    } catch (err) {
+      console.error(`[AdaptedDocumentReference] Error getting ${this.path}/${this.id}:`, err);
+      throw err;
+    }
+  }
+
+  async set(data: any, options?: { merge?: boolean }) {
+    try {
+      const docRef = doc(this.db, this.path, this.id);
+      if (options && options.merge) {
+        await setDoc(docRef, data, { merge: true });
+      } else {
+        await setDoc(docRef, data);
+      }
+    } catch (err) {
+      console.error(`[AdaptedDocumentReference] Error setting ${this.path}/${this.id}:`, err);
+      throw err;
+    }
+  }
+
+  async delete() {
+    try {
+      const docRef = doc(this.db, this.path, this.id);
+      await deleteDoc(docRef);
+    } catch (err) {
+      console.error(`[AdaptedDocumentReference] Error deleting ${this.path}/${this.id}:`, err);
+      throw err;
+    }
+  }
+}
+
+class AdaptedCollectionReference {
+  db: any;
+  path: string;
+  _queries: any[] = [];
+
+  constructor(db: any, path: string, queries: any[] = []) {
+    this.db = db;
+    this.path = path;
+    this._queries = queries;
+  }
+
+  doc(docId?: string) {
+    const id = docId || doc(collection(this.db, this.path)).id;
+    return new AdaptedDocumentReference(this.db, this.path, id);
+  }
+
+  where(field: string, op: any, value: any) {
+    return new AdaptedCollectionReference(this.db, this.path, [
+      ...this._queries,
+      where(field, op, value)
+    ]);
+  }
+
+  async get() {
+    try {
+      const colRef = collection(this.db, this.path);
+      let q;
+      if (this._queries.length > 0) {
+        q = query(colRef, ...this._queries);
+      } else {
+        q = colRef;
+      }
+      const snap = await getDocs(q);
+      const docs = snap.docs.map(d => new AdaptedDocumentSnapshot(d.id, true, new AdaptedDocumentReference(this.db, this.path, d.id), d.data()));
+      return { docs };
+    } catch (err) {
+      console.error(`[AdaptedCollectionReference] Error getting ${this.path}:`, err);
+      throw err;
+    }
+  }
+}
+
+class AdaptedBatch {
+  db: any;
+  _batch: any;
+
+  constructor(db: any) {
+    this.db = db;
+    this._batch = writeBatch(db);
+  }
+
+  set(ref: any, data: any, options?: any) {
+    const clientRef = doc(this.db, ref.path, ref.id);
+    if (options && options.merge) {
+      this._batch.set(clientRef, data, { merge: true });
+    } else {
+      this._batch.set(clientRef, data);
+    }
+  }
+
+  delete(ref: any) {
+    const clientRef = doc(this.db, ref.path, ref.id);
+    this._batch.delete(clientRef);
+  }
+
+  async commit() {
+    try {
+      await this._batch.commit();
+    } catch (err) {
+      console.error("[AdaptedBatch] Error committing batch:", err);
+      throw err;
+    }
+  }
+}
+
+class AdaptedFirestoreAdmin {
+  db: any;
+
+  constructor(db: any) {
+    this.db = db;
+  }
+
+  collection(path: string) {
+    return new AdaptedCollectionReference(this.db, path);
+  }
+
+  batch() {
+    return new AdaptedBatch(this.db);
+  }
+}
+
 // Server-side Firebase reference
 let firestoreDb: any = null;
 let adminDb: any = null;
@@ -34,15 +195,27 @@ try {
     const firebaseApp = initializeApp(firebaseConfig);
     // Use the custom database ID if available
     firestoreDb = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId || "(default)");
-    console.log("Firebase initialized successfully on server-side!");
+    console.log("Firebase client SDK initialized successfully on server-side!");
 
-    // Initialize Admin SDK independently for bypassing security rules on backend companion routes
-    const adminApp = initializeAdminApp({
-      projectId: firebaseConfig.projectId
-    }, "admin-app");
-    adminDb = getAdminFirestore(adminApp, firebaseConfig.firestoreDatabaseId || "(default)");
-    adminAuth = getAdminAuth(adminApp);
-    console.log("Firebase Admin SDK initialized successfully for bypass mode!");
+    // Check if we have credentials to initialize standard Firebase Admin SDK
+    const hasServiceAccountEnv = !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
+    const serviceAccountPath = path.join(process.cwd(), "firebase-service-account.json");
+    const hasServiceAccountFile = fs.existsSync(serviceAccountPath);
+
+    if (hasServiceAccountEnv || hasServiceAccountFile) {
+      console.log("Initializing standard Firebase Admin SDK (credentials found)...");
+      const adminApp = initializeAdminApp({
+        projectId: firebaseConfig.projectId
+      }, "admin-app");
+      adminDb = getAdminFirestore(adminApp, firebaseConfig.firestoreDatabaseId || "(default)");
+      adminAuth = getAdminAuth(adminApp);
+      console.log("Firebase Admin SDK initialized successfully in standard mode!");
+    } else {
+      console.log("No service account credentials found. Using adapted client SDK fallback for Admin database commands...");
+      adminDb = new AdaptedFirestoreAdmin(firestoreDb);
+      adminAuth = null; // Will fallback gracefully to persistent mapping lookups
+      console.log("Firebase Admin SDK initialized successfully via high-resiliency Client Adapter!");
+    }
   } else {
     console.warn("firebase-applet-config.json not found inside server-side init branch.");
   }
@@ -4481,33 +4654,15 @@ ${formattedHistory}`;
       const base64Bytes = response.generatedImages[0].image.imageBytes;
       res.json({ success: true, base64: base64Bytes });
     } catch (err: any) {
-      console.warn(`[GEMINI_PROXY] Google Imagen models were unavailable or restricted (${err.message || err}). Falling back to Pollinations AI generation...`);
+      console.warn(`[GEMINI_PROXY] Google Imagen models were unavailable or restricted (${err.message || err}). Falling back directly to client-side Pollinations AI generation...`);
       const width = aspectRatio === '16:9' ? 1024 : aspectRatio === '9:16' ? 576 : aspectRatio === '4:3' ? 1024 : aspectRatio === '3:4' ? 768 : 1024;
       const height = aspectRatio === '16:9' ? 576 : aspectRatio === '9:16' ? 1024 : aspectRatio === '4:3' ? 768 : aspectRatio === '3:4' ? 1024 : 1024;
       const encodedPrompt = encodeURIComponent(promptStr);
       const seed = Math.floor(Math.random() * 1000000);
-      const fallbackUrl = `https://image.pollinations.ai/p/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}`;
-
-      try {
-        const imageRes = await fetch(fallbackUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
-          }
-        });
-
-        if (!imageRes.ok) {
-          throw new Error(`Pollinations AI fallback responded with status ${imageRes.status}`);
-        }
-
-        const buffer = await imageRes.arrayBuffer();
-        const base64Bytes = Buffer.from(buffer).toString('base64');
-        res.json({ success: true, base64: base64Bytes });
-      } catch (fallbackErr: any) {
-        console.warn("[GEMINI_PROXY] Both server-side layers failed, falling back to client-side direct URL:", fallbackErr.message || fallbackErr);
-        // Serve direct client side URL so user's browser (with residential IP) handles it flawlessly
-        res.json({ success: true, isDirectUrl: true, url: fallbackUrl });
-      }
+      const fallbackUrl = `https://image.pollinations.ai/p/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
+      
+      // Serve direct client side URL so user's browser (with residential IP) handles it flawlessly
+      res.json({ success: true, isDirectUrl: true, url: fallbackUrl });
     }
   });
 
