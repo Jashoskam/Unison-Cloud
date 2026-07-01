@@ -6,11 +6,6 @@ import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
 import { GoogleGenAI } from "@google/genai";
 import { spawn, exec } from "child_process";
-import { initializeApp } from "firebase/app";
-import { getFirestore, collection, doc, getDocs, getDoc, setDoc, query, where, orderBy, deleteDoc, addDoc, writeBatch } from "firebase/firestore";
-import { initializeApp as initializeAdminApp } from "firebase-admin/app";
-import { getFirestore as getAdminFirestore } from "firebase-admin/firestore";
-import { getAuth as getAdminAuth } from "firebase-admin/auth";
 
 const PORT = 3000;
 const googleGenAI = new GoogleGenAI({
@@ -22,206 +17,490 @@ const googleGenAI = new GoogleGenAI({
   }
 });
 
-// Resilient Firebase Adapter Classes to wrap Client Firestore as Admin SDK Fallback
-class AdaptedDocumentSnapshot {
-  id: string;
-  exists: boolean;
-  ref: any;
-  _data: any;
+// Server-side Supabase reference
+import { createClient } from "@supabase/supabase-js";
 
-  constructor(id: string, exists: boolean, ref: any, data: any) {
-    this.id = id;
-    this.exists = exists;
-    this.ref = ref;
-    this._data = data;
+// Initialize backend Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://copravscnxxgyabaftgz.supabase.co";
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "sb_publishable_DSSSJVSZdaAsdv7zbxixMA_mPOwExv7";
+const backendSupabase = createClient(supabaseUrl, supabaseKey);
+
+// Persistent In-Memory caches for high-reliability pairing
+const localDevicePairings = new Map<string, any>();
+const localUserConnections = new Map<string, any>();
+const USER_CONNECTIONS_FILE = path.join(process.cwd(), "user_connections.json");
+
+try {
+  if (fs.existsSync(USER_CONNECTIONS_FILE)) {
+    const content = fs.readFileSync(USER_CONNECTIONS_FILE, "utf-8");
+    const parsed = JSON.parse(content);
+    for (const [k, v] of Object.entries(parsed)) {
+      localUserConnections.set(k, v);
+    }
+    console.log(`[USER_CONNECTIONS] Loaded ${localUserConnections.size} cached connections.`);
   }
+} catch (err) {
+  console.warn("[USER_CONNECTIONS] Error loading cached connections:", err);
+}
 
-  data() {
-    return this._data;
+function saveUserConnections() {
+  try {
+    const data: Record<string, any> = {};
+    for (const [k, v] of localUserConnections.entries()) {
+      data[k] = v;
+    }
+    fs.writeFileSync(USER_CONNECTIONS_FILE, JSON.stringify(data, null, 2), "utf-8");
+  } catch (err) {
+    console.error("[USER_CONNECTIONS] Error saving connections:", err);
   }
 }
 
-class AdaptedDocumentReference {
-  db: any;
+class SupabaseDocumentReference {
   path: string;
   id: string;
 
-  constructor(db: any, path: string, id: string) {
-    this.db = db;
+  constructor(path: string, id: string) {
     this.path = path;
     this.id = id;
   }
 
   collection(subPath: string) {
-    return new AdaptedCollectionReference(this.db, `${this.path}/${this.id}/${subPath}`);
+    return new SupabaseCollectionReference(`${this.path}/${this.id}/${subPath}`);
   }
 
   async get() {
-    try {
-      const docRef = doc(this.db, this.path, this.id);
-      const snap = await getDoc(docRef);
-      return new AdaptedDocumentSnapshot(this.id, snap.exists(), this, snap.data());
-    } catch (err) {
-      console.error(`[AdaptedDocumentReference] Error getting ${this.path}/${this.id}:`, err);
-      throw err;
+    const segments = this.path.split("/");
+    if (this.path === "device_pairings") {
+      const data = localDevicePairings.get(this.id);
+      return {
+        id: this.id,
+        exists: !!data,
+        data: () => data
+      };
     }
+
+    if (this.path === "user_connections") {
+      const data = localUserConnections.get(this.id);
+      return {
+        id: this.id,
+        exists: !!data,
+        data: () => data
+      };
+    }
+
+    if (this.path === "conversations") {
+      const { data, error } = await backendSupabase
+        .from("conversations")
+        .select("*")
+        .eq("id", this.id)
+        .maybeSingle();
+
+      if (error) {
+        console.error(`[Supabase Get Convo Error] ${error.message}`);
+      }
+
+      const formatted = data ? {
+        id: data.id,
+        title: data.title,
+        type: data.type,
+        userId: data.user_id,
+        parentId: data.parent_id,
+        createdAt: data.created_at ? new Date(data.created_at) : undefined,
+        updatedAt: data.updated_at ? new Date(data.updated_at) : undefined
+      } : null;
+
+      return {
+        id: this.id,
+        exists: !!data,
+        data: () => formatted
+      };
+    }
+
+    if (segments.length === 3) {
+      const parentId = segments[1];
+      const subCol = segments[2];
+
+      if (subCol === "messages") {
+        const { data, error } = await backendSupabase
+          .from("messages")
+          .select("*")
+          .eq("id", this.id)
+          .maybeSingle();
+
+        const formatted = data ? {
+          id: data.id,
+          conversationId: data.conversation_id,
+          role: data.role,
+          content: data.content,
+          thoughts: data.thoughts,
+          createdAt: data.created_at ? new Date(data.created_at) : undefined
+        } : null;
+
+        return {
+          id: this.id,
+          exists: !!data,
+          data: () => formatted
+        };
+      }
+
+      if (subCol === "files") {
+        const { data, error } = await backendSupabase
+          .from("files")
+          .select("*")
+          .eq("id", this.id)
+          .maybeSingle();
+
+        const formatted = data ? {
+          id: data.id,
+          conversationId: data.conversation_id,
+          path: data.path,
+          content: data.content,
+          language: data.language,
+          updatedAt: data.created_at ? new Date(data.created_at) : undefined
+        } : null;
+
+        return {
+          id: this.id,
+          exists: !!data,
+          data: () => formatted
+        };
+      }
+    }
+
+    return {
+      id: this.id,
+      exists: false,
+      data: () => null
+    };
   }
 
   async set(data: any, options?: { merge?: boolean }) {
-    try {
-      const docRef = doc(this.db, this.path, this.id);
-      if (options && options.merge) {
-        await setDoc(docRef, data, { merge: true });
-      } else {
-        await setDoc(docRef, data);
+    const segments = this.path.split("/");
+
+    if (this.path === "device_pairings") {
+      localDevicePairings.set(this.id, {
+        ...(localDevicePairings.get(this.id) || {}),
+        ...data,
+        updatedAt: new Date().toISOString()
+      });
+      if (data && data.status === "authorized" && data.email && data.uid) {
+        localUserConnections.set(data.email, {
+          email: data.email,
+          uid: data.uid,
+          updatedAt: new Date().toISOString()
+        });
+        saveUserConnections();
+        console.log(`[PAIRING] Saved user connection mapping: ${data.email} -> ${data.uid}`);
       }
-    } catch (err) {
-      console.error(`[AdaptedDocumentReference] Error setting ${this.path}/${this.id}:`, err);
-      throw err;
+      return;
+    }
+
+    if (this.path === "user_connections") {
+      localUserConnections.set(this.id, {
+        ...(localUserConnections.get(this.id) || {}),
+        ...data,
+        updatedAt: new Date().toISOString()
+      });
+      saveUserConnections();
+      return;
+    }
+
+    if (this.path === "conversations") {
+      const dbPayload = {
+        id: this.id,
+        title: data.title || "New Interface Node",
+        type: data.type || "chat",
+        user_id: data.userId || data.user_id || "test_operator",
+        parent_id: data.parentId || data.parent_id || null,
+        updated_at: data.updatedAt ? new Date(data.updatedAt).toISOString() : new Date().toISOString(),
+      } as any;
+
+      if (!options || !options.merge || data.createdAt) {
+        dbPayload.created_at = data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString();
+      }
+
+      const { error } = await backendSupabase
+        .from("conversations")
+        .upsert(dbPayload);
+
+      if (error) {
+        console.error(`[Supabase Set Convo Error] ${error.message}`);
+        throw error;
+      }
+      return;
+    }
+
+    if (segments.length === 3) {
+      const parentId = segments[1];
+      const subCol = segments[2];
+
+      if (subCol === "messages") {
+        const dbPayload = {
+          id: this.id,
+          conversation_id: parentId,
+          role: data.role || "user",
+          content: data.content || "",
+          thoughts: data.thoughts || null,
+          created_at: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString()
+        };
+
+        const { error } = await backendSupabase
+          .from("messages")
+          .upsert(dbPayload);
+
+        if (error) {
+          console.error(`[Supabase Set Msg Error] ${error.message}`);
+          throw error;
+        }
+        return;
+      }
+
+      if (subCol === "files") {
+        const dbPayload = {
+          id: this.id,
+          conversation_id: parentId,
+          path: data.path || "",
+          content: data.content || "",
+          language: data.language || "typescript",
+          created_at: data.updatedAt ? new Date(data.updatedAt).toISOString() : new Date().toISOString()
+        };
+
+        const { error } = await backendSupabase
+          .from("files")
+          .upsert(dbPayload);
+
+        if (error) {
+          console.error(`[Supabase Set File Error] ${error.message}`);
+          throw error;
+        }
+        return;
+      }
     }
   }
 
   async delete() {
-    try {
-      const docRef = doc(this.db, this.path, this.id);
-      await deleteDoc(docRef);
-    } catch (err) {
-      console.error(`[AdaptedDocumentReference] Error deleting ${this.path}/${this.id}:`, err);
-      throw err;
+    const segments = this.path.split("/");
+
+    if (this.path === "device_pairings") {
+      localDevicePairings.delete(this.id);
+      return;
+    }
+
+    if (this.path === "user_connections") {
+      localUserConnections.delete(this.id);
+      saveUserConnections();
+      return;
+    }
+
+    if (this.path === "conversations") {
+      await backendSupabase.from("messages").delete().eq("conversation_id", this.id);
+      await backendSupabase.from("files").delete().eq("conversation_id", this.id);
+      await backendSupabase.from("checkpoints").delete().eq("conversation_id", this.id);
+      
+      const { error } = await backendSupabase
+        .from("conversations")
+        .delete()
+        .eq("id", this.id);
+
+      if (error) {
+        console.error(`[Supabase Delete Convo Error] ${error.message}`);
+        throw error;
+      }
+      return;
+    }
+
+    if (segments.length === 3) {
+      const subCol = segments[2];
+      if (subCol === "messages") {
+        await backendSupabase.from("messages").delete().eq("id", this.id);
+      } else if (subCol === "files") {
+        await backendSupabase.from("files").delete().eq("id", this.id);
+      }
     }
   }
 }
 
-class AdaptedCollectionReference {
-  db: any;
+class SupabaseCollectionReference {
   path: string;
-  _queries: any[] = [];
+  _filters: { field: string; op: string; value: any }[] = [];
 
-  constructor(db: any, path: string, queries: any[] = []) {
-    this.db = db;
+  constructor(path: string, filters: { field: string; op: string; value: any }[] = []) {
     this.path = path;
-    this._queries = queries;
+    this._filters = filters;
   }
 
-  doc(docId?: string) {
-    const id = docId || doc(collection(this.db, this.path)).id;
-    return new AdaptedDocumentReference(this.db, this.path, id);
+  doc(id?: string) {
+    const resolvedId = id || `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return new SupabaseDocumentReference(this.path, resolvedId);
   }
 
-  where(field: string, op: any, value: any) {
-    return new AdaptedCollectionReference(this.db, this.path, [
-      ...this._queries,
-      where(field, op, value)
+  where(field: string, op: string, value: any) {
+    return new SupabaseCollectionReference(this.path, [
+      ...this._filters,
+      { field, op, value }
     ]);
   }
 
   async get() {
-    try {
-      const colRef = collection(this.db, this.path);
-      let q;
-      if (this._queries.length > 0) {
-        q = query(colRef, ...this._queries);
-      } else {
-        q = colRef;
-      }
-      const snap = await getDocs(q);
-      const docs = snap.docs.map(d => new AdaptedDocumentSnapshot(d.id, true, new AdaptedDocumentReference(this.db, this.path, d.id), d.data()));
-      return { docs };
-    } catch (err) {
-      console.error(`[AdaptedCollectionReference] Error getting ${this.path}:`, err);
-      throw err;
+    const segments = this.path.split("/");
+
+    if (this.path === "device_pairings") {
+      const list = Array.from(localDevicePairings.entries()).map(([id, val]) => {
+        return { id, data: () => val };
+      });
+      return { docs: list };
     }
+
+    if (this.path === "user_connections") {
+      const list = Array.from(localUserConnections.entries()).map(([id, val]) => {
+        return { id, data: () => val };
+      });
+      return { docs: list };
+    }
+
+    if (this.path === "conversations") {
+      let queryBuilder = backendSupabase.from("conversations").select("*");
+
+      for (const filter of this._filters) {
+        if (filter.field === "userId" || filter.field === "user_id") {
+          queryBuilder = queryBuilder.eq("user_id", filter.value);
+        } else if (filter.field === "type") {
+          queryBuilder = queryBuilder.eq("type", filter.value);
+        }
+      }
+
+      const { data, error } = await queryBuilder;
+
+      if (error) {
+        console.error(`[Supabase Get Conv List Error] ${error.message}`);
+        throw error;
+      }
+
+      const list = (data || []).map(convo => {
+        const formatted = {
+          id: convo.id,
+          title: convo.title,
+          type: convo.type,
+          userId: convo.user_id,
+          parentId: convo.parent_id,
+          createdAt: convo.created_at ? new Date(convo.created_at) : undefined,
+          updatedAt: convo.updated_at ? new Date(convo.updated_at) : undefined
+        };
+        return {
+          id: convo.id,
+          data: () => formatted
+        };
+      });
+
+      return { docs: list };
+    }
+
+    if (segments.length === 3) {
+      const parentId = segments[1];
+      const subCol = segments[2];
+
+      if (subCol === "messages") {
+        let queryBuilder = backendSupabase
+          .from("messages")
+          .select("*")
+          .eq("conversation_id", parentId)
+          .order("created_at", { ascending: true });
+
+        const { data, error } = await queryBuilder;
+
+        if (error) {
+          console.error(`[Supabase Get Msg List Error] ${error.message}`);
+          throw error;
+        }
+
+        const list = (data || []).map(m => {
+          const formatted = {
+            id: m.id,
+            conversationId: m.conversation_id,
+            role: m.role,
+            content: m.content,
+            thoughts: m.thoughts,
+            createdAt: m.created_at ? new Date(m.created_at) : undefined
+          };
+          return {
+            id: m.id,
+            data: () => formatted
+          };
+        });
+
+        return { docs: list };
+      }
+
+      if (subCol === "files") {
+        let queryBuilder = backendSupabase
+          .from("files")
+          .select("*")
+          .eq("conversation_id", parentId);
+
+        const { data, error } = await queryBuilder;
+
+        if (error) {
+          console.error(`[Supabase Get File List Error] ${error.message}`);
+          throw error;
+        }
+
+        const list = (data || []).map(f => {
+          const formatted = {
+            id: f.id,
+            conversationId: f.conversation_id,
+            path: f.path,
+            content: f.content,
+            language: f.language,
+            updatedAt: f.created_at ? new Date(f.created_at) : undefined
+          };
+          return {
+            id: f.id,
+            data: () => formatted
+          };
+        });
+
+        return { docs: list };
+      }
+    }
+
+    return { docs: [] };
   }
 }
 
-class AdaptedBatch {
-  db: any;
-  _batch: any;
-
-  constructor(db: any) {
-    this.db = db;
-    this._batch = writeBatch(db);
-  }
+class SupabaseBatch {
+  _ops: (() => Promise<void>)[] = [];
 
   set(ref: any, data: any, options?: any) {
-    const clientRef = doc(this.db, ref.path, ref.id);
-    if (options && options.merge) {
-      this._batch.set(clientRef, data, { merge: true });
-    } else {
-      this._batch.set(clientRef, data);
-    }
+    this._ops.push(async () => {
+      await ref.set(data, options);
+    });
   }
 
   delete(ref: any) {
-    const clientRef = doc(this.db, ref.path, ref.id);
-    this._batch.delete(clientRef);
+    this._ops.push(async () => {
+      await ref.delete();
+    });
   }
 
   async commit() {
-    try {
-      await this._batch.commit();
-    } catch (err) {
-      console.error("[AdaptedBatch] Error committing batch:", err);
-      throw err;
+    for (const op of this._ops) {
+      await op();
     }
   }
 }
 
-class AdaptedFirestoreAdmin {
-  db: any;
-
-  constructor(db: any) {
-    this.db = db;
-  }
-
+class SupabaseAdaptedFirestoreAdmin {
   collection(path: string) {
-    return new AdaptedCollectionReference(this.db, path);
+    return new SupabaseCollectionReference(path);
   }
 
   batch() {
-    return new AdaptedBatch(this.db);
+    return new SupabaseBatch();
   }
 }
 
-// Server-side Firebase reference
-let firestoreDb: any = null;
-let adminDb: any = null;
+let adminDb: any = new SupabaseAdaptedFirestoreAdmin();
 let adminAuth: any = null;
-
-try {
-  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-  if (fs.existsSync(configPath)) {
-    const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    const firebaseApp = initializeApp(firebaseConfig);
-    // Use the custom database ID if available
-    firestoreDb = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId || "(default)");
-    console.log("Firebase client SDK initialized successfully on server-side!");
-
-    // Check if we have credentials to initialize standard Firebase Admin SDK
-    const hasServiceAccountEnv = !!(process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS);
-    const serviceAccountPath = path.join(process.cwd(), "firebase-service-account.json");
-    const hasServiceAccountFile = fs.existsSync(serviceAccountPath);
-
-    if (hasServiceAccountEnv || hasServiceAccountFile) {
-      console.log("Initializing standard Firebase Admin SDK (credentials found)...");
-      const adminApp = initializeAdminApp({
-        projectId: firebaseConfig.projectId
-      }, "admin-app");
-      adminDb = getAdminFirestore(adminApp, firebaseConfig.firestoreDatabaseId || "(default)");
-      adminAuth = getAdminAuth(adminApp);
-      console.log("Firebase Admin SDK initialized successfully in standard mode!");
-    } else {
-      console.log("No service account credentials found. Using adapted client SDK fallback for Admin database commands...");
-      adminDb = new AdaptedFirestoreAdmin(firestoreDb);
-      adminAuth = null; // Will fallback gracefully to persistent mapping lookups
-      console.log("Firebase Admin SDK initialized successfully via high-resiliency Client Adapter!");
-    }
-  } else {
-    console.warn("firebase-applet-config.json not found inside server-side init branch.");
-  }
-} catch (e: any) {
-  console.error("Failed to initialize Firebase on server-side:", e);
-}
 
 // Industrial-Level AI Cache Layer
 const AI_CACHE_FILE = path.join(process.cwd(), "ai_cache.json");
@@ -1453,6 +1732,53 @@ export default function App() {
       res.json({ code: fullCode });
     } catch (err: any) {
       console.error("[COMPANION] start-pairing error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Lightweight pairing endpoints to support custom client-side device pairing wrapper
+  app.post("/api/companion/pairings/set", express.json(), async (req, res) => {
+    try {
+      const { code, data } = req.body;
+      if (!code) return res.status(400).json({ error: "Missing pairing code" });
+      localDevicePairings.set(code, {
+        ...(localDevicePairings.get(code) || {}),
+        ...data,
+        updatedAt: new Date().toISOString()
+      });
+      if (data && data.status === "authorized" && data.email && data.uid) {
+        localUserConnections.set(data.email, {
+          email: data.email,
+          uid: data.uid,
+          updatedAt: new Date().toISOString()
+        });
+        saveUserConnections();
+        console.log(`[API PAIRING] Saved user connection mapping: ${data.email} -> ${data.uid}`);
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/companion/pairings/delete", express.json(), async (req, res) => {
+    try {
+      const { code } = req.body;
+      if (!code) return res.status(400).json({ error: "Missing pairing code" });
+      localDevicePairings.delete(code);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/companion/pairings/get", async (req, res) => {
+    try {
+      const code = req.query.code as string;
+      if (!code) return res.status(400).json({ error: "Missing code parameter" });
+      const data = localDevicePairings.get(code);
+      res.json({ exists: !!data, data });
+    } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
@@ -4746,7 +5072,9 @@ ${formattedHistory}`;
         // Convert any date/timestamp fields to the FastAPI standard `{"seconds": timestamp}`
         for (const k of Object.keys(data)) {
           const v = data[k];
-          if (v && typeof v === "object" && typeof v.toDate === "function") {
+          if (v instanceof Date) {
+            data[k] = { seconds: Math.floor(v.getTime() / 1000) };
+          } else if (v && typeof v === "object" && typeof v.toDate === "function") {
             data[k] = { seconds: Math.floor(v.toDate().getTime() / 1000) };
           } else if (v && typeof v === "object" && v.seconds !== undefined) {
             data[k] = { seconds: v.seconds };
@@ -4797,7 +5125,9 @@ ${formattedHistory}`;
       
       for (const k of Object.keys(retData)) {
         const v = retData[k];
-        if (v && typeof v === "object" && typeof v.toDate === "function") {
+        if (v instanceof Date) {
+          retData[k] = { seconds: Math.floor(v.getTime() / 1000) };
+        } else if (v && typeof v === "object" && typeof v.toDate === "function") {
           retData[k] = { seconds: Math.floor(v.toDate().getTime() / 1000) };
         } else if (v && typeof v === "object" && v.seconds !== undefined) {
           retData[k] = { seconds: v.seconds };
@@ -4846,7 +5176,9 @@ ${formattedHistory}`;
         
         for (const k of Object.keys(data)) {
           const v = data[k];
-          if (v && typeof v === "object" && typeof v.toDate === "function") {
+          if (v instanceof Date) {
+            data[k] = { seconds: Math.floor(v.getTime() / 1000) };
+          } else if (v && typeof v === "object" && typeof v.toDate === "function") {
             data[k] = { seconds: Math.floor(v.toDate().getTime() / 1000) };
           } else if (v && typeof v === "object" && v.seconds !== undefined) {
             data[k] = { seconds: v.seconds };
@@ -4898,7 +5230,9 @@ ${formattedHistory}`;
       
       for (const k of Object.keys(retData)) {
         const v = retData[k];
-        if (v && typeof v === "object" && typeof v.toDate === "function") {
+        if (v instanceof Date) {
+          retData[k] = { seconds: Math.floor(v.getTime() / 1000) };
+        } else if (v && typeof v === "object" && typeof v.toDate === "function") {
           retData[k] = { seconds: Math.floor(v.toDate().getTime() / 1000) };
         } else if (v && typeof v === "object" && v.seconds !== undefined) {
           retData[k] = { seconds: v.seconds };
