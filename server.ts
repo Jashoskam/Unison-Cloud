@@ -343,22 +343,25 @@ class SupabaseCollectionReference {
 
   async get() {
     const segments = this.path.split("/");
+    let list: any[] = [];
 
     if (this.path === "device_pairings") {
-      const list = Array.from(localDevicePairings.entries()).map(([id, val]) => {
-        return { id, data: () => val };
+      list = Array.from(localDevicePairings.entries()).map(([id, val]) => {
+        return {
+          id,
+          ref: new SupabaseDocumentReference(this.path, id),
+          data: () => val
+        };
       });
-      return { docs: list };
-    }
-
-    if (this.path === "user_connections") {
-      const list = Array.from(localUserConnections.entries()).map(([id, val]) => {
-        return { id, data: () => val };
+    } else if (this.path === "user_connections") {
+      list = Array.from(localUserConnections.entries()).map(([id, val]) => {
+        return {
+          id,
+          ref: new SupabaseDocumentReference(this.path, id),
+          data: () => val
+        };
       });
-      return { docs: list };
-    }
-
-    if (this.path === "conversations") {
+    } else if (this.path === "conversations") {
       let queryBuilder = backendSupabase.from("conversations").select("*");
 
       for (const filter of this._filters) {
@@ -376,7 +379,7 @@ class SupabaseCollectionReference {
         throw error;
       }
 
-      const list = (data || []).map(convo => {
+      list = (data || []).map(convo => {
         const formatted = {
           id: convo.id,
           title: convo.title,
@@ -388,14 +391,11 @@ class SupabaseCollectionReference {
         };
         return {
           id: convo.id,
+          ref: new SupabaseDocumentReference(this.path, convo.id),
           data: () => formatted
         };
       });
-
-      return { docs: list };
-    }
-
-    if (segments.length === 3) {
+    } else if (segments.length === 3) {
       const parentId = segments[1];
       const subCol = segments[2];
 
@@ -413,7 +413,7 @@ class SupabaseCollectionReference {
           throw error;
         }
 
-        const list = (data || []).map(m => {
+        list = (data || []).map(m => {
           const formatted = {
             id: m.id,
             conversationId: m.conversation_id,
@@ -424,14 +424,11 @@ class SupabaseCollectionReference {
           };
           return {
             id: m.id,
+            ref: new SupabaseDocumentReference(this.path, m.id),
             data: () => formatted
           };
         });
-
-        return { docs: list };
-      }
-
-      if (subCol === "files") {
+      } else if (subCol === "files") {
         let queryBuilder = backendSupabase
           .from("files")
           .select("*")
@@ -444,7 +441,7 @@ class SupabaseCollectionReference {
           throw error;
         }
 
-        const list = (data || []).map(f => {
+        list = (data || []).map(f => {
           const formatted = {
             id: f.id,
             conversationId: f.conversation_id,
@@ -455,15 +452,20 @@ class SupabaseCollectionReference {
           };
           return {
             id: f.id,
+            ref: new SupabaseDocumentReference(this.path, f.id),
             data: () => formatted
           };
         });
-
-        return { docs: list };
       }
     }
 
-    return { docs: [] };
+    const result = {
+      docs: list,
+      forEach(callback: (doc: any) => void) {
+        list.forEach(callback);
+      }
+    };
+    return result;
   }
 }
 
