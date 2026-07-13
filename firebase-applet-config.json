@@ -1,10 +1,11 @@
 {
-  "projectId": "gen-lang-client-0173028069",
-  "appId": "1:402986352820:web:51779309638dfbcbb617e1",
-  "apiKey": "AIzaSyBrEh_UUayjAtibeAKtwwmO_96FielumDk",
-  "authDomain": "gen-lang-client-0173028069.firebaseapp.com",
-  "firestoreDatabaseId": "remixed-firestore-database-id",
-  "storageBucket": "gen-lang-client-0173028069.firebasestorage.app",
-  "messagingSenderId": "402986352820",
-  "measurementId": ""
+  "projectId": "axial-amplifier-b8gvj",
+  "appId": "1:153051892581:web:afcce0deca87ede5aaef8c",
+  "apiKey": "AIzaSyCwdU3majs1vh-raVZuy2JK_mBGSZ14GcA",
+  "authDomain": "axial-amplifier-b8gvj.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-unisonosv85-885f38b3-d541-4b50-87db-f305a436ca2a",
+  "storageBucket": "axial-amplifier-b8gvj.firebasestorage.app",
+  "messagingSenderId": "153051892581",
+  "measurementId": "",
+  "oAuthClientId": "153051892581-77r64iqimreaena6jlc1p5nnijrd34st.apps.googleusercontent.com"
 }
