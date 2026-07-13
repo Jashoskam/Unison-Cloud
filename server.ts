@@ -2852,6 +2852,24 @@ export default function App() {
         tools = [{ googleSearch: {} }];
       }
 
+      // Append real-time companion native computer control capabilities instruction to Gemini
+      systemInstruction += `\n\nNATIVE COMPUTER CONTROL PROTOCOL ACTIVATED: You have direct physical control over the user's computer through native macOS/iOS automation (mouse clicks, dragging, keyboard text entry, launching applications, opening URLs, and running web searches).
+Whenever the user asks you to perform a physical task on their machine (e.g. go to a website, search for something on Google, open an application, type something, click, or drag), and you are ready to execute it, you MUST append a hidden command tag at the very end of your response using the exact format:
+[COMMAND: <DEVICE_ACTION>]
+
+The supported native <DEVICE_ACTION> formats are:
+- DEVICE_ACTION_OPEN_URL:<url> (e.g. [COMMAND: DEVICE_ACTION_OPEN_URL:https://github.com])
+- DEVICE_ACTION_SEARCH:<query> (e.g. [COMMAND: DEVICE_ACTION_SEARCH:weather in New York])
+- DEVICE_ACTION_LAUNCH_APP:<appName> (e.g. [COMMAND: DEVICE_ACTION_LAUNCH_APP:Safari] or [COMMAND: DEVICE_ACTION_LAUNCH_APP:Terminal])
+- DEVICE_ACTION_TYPE:<text> (e.g. [COMMAND: DEVICE_ACTION_TYPE:hello world])
+- DEVICE_ACTION_CLICK:<xPct>:<yPct>:<label> (e.g. [COMMAND: DEVICE_ACTION_CLICK:50:50:Screen_Center])
+- DEVICE_ACTION_DRAG:<x1>:<y1>:<x2>:<y2> (e.g. [COMMAND: DEVICE_ACTION_DRAG:20:20:80:80])
+
+Rules:
+1. Only output a command when you are actually executing or initiating it (e.g. after the user confirms, or immediately if confirmation isn't needed).
+2. Ensure the URL is fully formed (starts with http:// or https://).
+3. Do not mention the command tag in your natural language text; just place it silently at the very end of your response.`;
+
       // 4. Trigger Gemini
       console.log(`[COMPANION] ${toolMode.toUpperCase()} mode resolved. Invoking Gemini response for companion client...`);
       let geminiReply = "Offline simulation fallback.";
@@ -2937,6 +2955,26 @@ export default function App() {
       } catch (geminiError: any) {
         console.error("[COMPANION] Gemini generation failed:", geminiError);
         geminiReply = `System error on Gemini routing layer: ${geminiError.message || String(geminiError)}`;
+      }
+
+      // Extract any [COMMAND: DEVICE_ACTION_...] tag emitted by Gemini to trigger native devices
+      let companionCmd: string | null = null;
+      const cmdRegex = /\[COMMAND:\s*(DEVICE_ACTION_[^\]]+)\]/i;
+      const cmdMatch = geminiReply.match(cmdRegex);
+      if (cmdMatch) {
+        companionCmd = cmdMatch[1].trim();
+        // Clean the [COMMAND: ...] tag from geminiReply so that it remains hidden in the user's visible messages logs
+        geminiReply = geminiReply.replace(cmdRegex, "").trim();
+      }
+
+      if (companionCmd) {
+        console.log(`[COMPANION] Extracted native command to execute: ${companionCmd}`);
+        activeCompanionCommands.push({
+          id: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          cmd: companionCmd,
+          timestamp: Date.now() / 1000
+        });
+        if (activeCompanionCommands.length > 50) activeCompanionCommands.shift();
       }
       
       // 5. Save Gemini response
