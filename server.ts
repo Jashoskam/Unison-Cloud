@@ -2732,6 +2732,106 @@ export default function App() {
     }
   });
 
+  function extractAndPublishDeviceControlCommands(text: string, wss: any, activeCompanionCommands: any[], siriLogs: any[], broadcastSiriTrigger: any) {
+    try {
+      const titanRegex = /\[TITAN-COMMAND:\s*({[\s\S]*?})\]/g;
+      let match;
+      while ((match = titanRegex.exec(text)) !== null) {
+        try {
+          const cmdObj = JSON.parse(match[1]);
+          if (cmdObj.type === "TITAN_COMMAND") {
+            if (cmdObj.action === "LAUNCH_APP") {
+              const appName = cmdObj.appTitle || cmdObj.appType || "";
+              const url = cmdObj.url || cmdObj.data?.url || cmdObj.appData?.url || "";
+              if (url) {
+                const cmdString = `DEVICE_ACTION_OPEN_URL:${url}`;
+                publishDeviceCommand(cmdString, wss, activeCompanionCommands, siriLogs, broadcastSiriTrigger);
+              } else if (appName) {
+                let normalizedApp = appName;
+                if (appName.toLowerCase() === "safari" || appName.toLowerCase() === "os_browser") normalizedApp = "Safari";
+                else if (appName.toLowerCase() === "xcode") normalizedApp = "Xcode";
+                else if (appName.toLowerCase() === "terminal" || appName.toLowerCase() === "os_terminal") normalizedApp = "Terminal";
+                else if (appName.toLowerCase() === "finder" || appName.toLowerCase() === "core_file_system") normalizedApp = "Finder";
+                else if (appName.toLowerCase() === "spotify") normalizedApp = "Spotify";
+                else if (appName.toLowerCase() === "mail" || appName.toLowerCase() === "core_mail_client") normalizedApp = "Mail";
+                
+                const cmdString = `DEVICE_ACTION_LAUNCH_APP:${normalizedApp}`;
+                publishDeviceCommand(cmdString, wss, activeCompanionCommands, siriLogs, broadcastSiriTrigger);
+              }
+            } else if (cmdObj.action === "SPOTIFY_CONTROL") {
+              const cmd = cmdObj.command || "";
+              const q = cmdObj.query || "";
+              if (cmd === "search_and_play" && q) {
+                const cmdString = `DEVICE_ACTION_SEARCH:${q}`;
+                publishDeviceCommand(cmdString, wss, activeCompanionCommands, siriLogs, broadcastSiriTrigger);
+              }
+            }
+          }
+        } catch (err) {
+          console.error("[COMPANION SERVER INTERCEPT] Error parsing TITAN-COMMAND JSON:", err);
+        }
+      }
+
+      const genuiRegex = /\[GENUI:\s*({[\s\S]*?})\]/g;
+      while ((match = genuiRegex.exec(text)) !== null) {
+        try {
+          const genuiObj = JSON.parse(match[1]);
+          if (genuiObj.type === "OS_AGENT_ACTION") {
+            const act = (genuiObj.action || "").toUpperCase();
+            const x = genuiObj.x;
+            const y = genuiObj.y;
+            if (act === "CLICK" && x !== undefined && y !== undefined) {
+              const cmdString = `DEVICE_ACTION_CLICK:${x}:${y}:Target`;
+              publishDeviceCommand(cmdString, wss, activeCompanionCommands, siriLogs, broadcastSiriTrigger);
+            } else if (act === "TYPE" && genuiObj.text) {
+              const cmdString = `DEVICE_ACTION_TYPE:${genuiObj.text}`;
+              publishDeviceCommand(cmdString, wss, activeCompanionCommands, siriLogs, broadcastSiriTrigger);
+            }
+          }
+        } catch (err) {
+          console.error("[COMPANION SERVER INTERCEPT] Error parsing GENUI JSON:", err);
+        }
+      }
+    } catch (err) {
+      console.error("[COMPANION SERVER INTERCEPT] Error extracting commands:", err);
+    }
+  }
+
+  function publishDeviceCommand(cmdString: string, wss: any, activeCompanionCommands: any[], siriLogs: any[], broadcastSiriTrigger: any) {
+    console.log(`[COMPANION SERVER INTERCEPT] Publishing intercepted command: ${cmdString}`);
+    
+    activeCompanionCommands.push({
+      id: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      cmd: cmdString,
+      timestamp: Date.now() / 1000
+    });
+    if (activeCompanionCommands.length > 50) activeCompanionCommands.shift();
+
+    const wsEvent = {
+      type: "DEVICE_CONTROL_COMMAND",
+      command: cmdString
+    };
+    wss.clients.forEach((c: any) => {
+      if (c.readyState === WebSocket.OPEN) {
+        c.send(JSON.stringify(wsEvent));
+      }
+    });
+
+    const logEntry = {
+      id: `siri_log_${Date.now()}`,
+      timestamp: Date.now(),
+      prompt: "AI Autonomous Control Executed",
+      siriResponse: `Command dispatched: ${cmdString}.`,
+      matchedNodeId: null,
+      matchedNodeName: "System Desktop",
+      status: "success",
+      detail: `AI auto-dispatched '${cmdString}' directly to your live companion device.`
+    };
+    siriLogs.unshift(logEntry);
+    if (siriLogs.length > 50) siriLogs.pop();
+    broadcastSiriTrigger(logEntry);
+  }
+
   function determineAutoToolModeOnServer(prompt: string): 'search' | 'research' | 'convo' {
     const text = prompt.toLowerCase().trim();
     
@@ -2948,6 +3048,9 @@ export default function App() {
         createdAt: new Date(),
         userId: "unison_core"
       });
+      
+      // Extract and execute physical device control commands!
+      extractAndPublishDeviceControlCommands(geminiReply, wss, activeCompanionCommands, siriLogs, broadcastSiriTrigger);
       
       // 6. Update convo updatedAt timestamp
       const convoDocRef = adminDb.collection("conversations").doc(conversationId);
@@ -5549,6 +5652,9 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
           res.write(`data: ${JSON.stringify({ text: sourcesTag })}\n\n`);
         }
       }
+
+      // Extract and execute physical device control commands!
+      extractAndPublishDeviceControlCommands(aggregatedText, wss, activeCompanionCommands, siriLogs, broadcastSiriTrigger);
 
       // Save complete output in local SSD-backed server cache 
       if (aiEnableCache !== false && aggregatedText) {
