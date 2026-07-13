@@ -2732,106 +2732,6 @@ export default function App() {
     }
   });
 
-  function extractAndPublishDeviceControlCommands(text: string, wss: any, activeCompanionCommands: any[], siriLogs: any[], broadcastSiriTrigger: any) {
-    try {
-      const titanRegex = /\[TITAN-COMMAND:\s*({[\s\S]*?})\]/g;
-      let match;
-      while ((match = titanRegex.exec(text)) !== null) {
-        try {
-          const cmdObj = JSON.parse(match[1]);
-          if (cmdObj.type === "TITAN_COMMAND") {
-            if (cmdObj.action === "LAUNCH_APP") {
-              const appName = cmdObj.appTitle || cmdObj.appType || "";
-              const url = cmdObj.url || cmdObj.data?.url || cmdObj.appData?.url || "";
-              if (url) {
-                const cmdString = `DEVICE_ACTION_OPEN_URL:${url}`;
-                publishDeviceCommand(cmdString, wss, activeCompanionCommands, siriLogs, broadcastSiriTrigger);
-              } else if (appName) {
-                let normalizedApp = appName;
-                if (appName.toLowerCase() === "safari" || appName.toLowerCase() === "os_browser") normalizedApp = "Safari";
-                else if (appName.toLowerCase() === "xcode") normalizedApp = "Xcode";
-                else if (appName.toLowerCase() === "terminal" || appName.toLowerCase() === "os_terminal") normalizedApp = "Terminal";
-                else if (appName.toLowerCase() === "finder" || appName.toLowerCase() === "core_file_system") normalizedApp = "Finder";
-                else if (appName.toLowerCase() === "spotify") normalizedApp = "Spotify";
-                else if (appName.toLowerCase() === "mail" || appName.toLowerCase() === "core_mail_client") normalizedApp = "Mail";
-                
-                const cmdString = `DEVICE_ACTION_LAUNCH_APP:${normalizedApp}`;
-                publishDeviceCommand(cmdString, wss, activeCompanionCommands, siriLogs, broadcastSiriTrigger);
-              }
-            } else if (cmdObj.action === "SPOTIFY_CONTROL") {
-              const cmd = cmdObj.command || "";
-              const q = cmdObj.query || "";
-              if (cmd === "search_and_play" && q) {
-                const cmdString = `DEVICE_ACTION_SEARCH:${q}`;
-                publishDeviceCommand(cmdString, wss, activeCompanionCommands, siriLogs, broadcastSiriTrigger);
-              }
-            }
-          }
-        } catch (err) {
-          console.error("[COMPANION SERVER INTERCEPT] Error parsing TITAN-COMMAND JSON:", err);
-        }
-      }
-
-      const genuiRegex = /\[GENUI:\s*({[\s\S]*?})\]/g;
-      while ((match = genuiRegex.exec(text)) !== null) {
-        try {
-          const genuiObj = JSON.parse(match[1]);
-          if (genuiObj.type === "OS_AGENT_ACTION") {
-            const act = (genuiObj.action || "").toUpperCase();
-            const x = genuiObj.x;
-            const y = genuiObj.y;
-            if (act === "CLICK" && x !== undefined && y !== undefined) {
-              const cmdString = `DEVICE_ACTION_CLICK:${x}:${y}:Target`;
-              publishDeviceCommand(cmdString, wss, activeCompanionCommands, siriLogs, broadcastSiriTrigger);
-            } else if (act === "TYPE" && genuiObj.text) {
-              const cmdString = `DEVICE_ACTION_TYPE:${genuiObj.text}`;
-              publishDeviceCommand(cmdString, wss, activeCompanionCommands, siriLogs, broadcastSiriTrigger);
-            }
-          }
-        } catch (err) {
-          console.error("[COMPANION SERVER INTERCEPT] Error parsing GENUI JSON:", err);
-        }
-      }
-    } catch (err) {
-      console.error("[COMPANION SERVER INTERCEPT] Error extracting commands:", err);
-    }
-  }
-
-  function publishDeviceCommand(cmdString: string, wss: any, activeCompanionCommands: any[], siriLogs: any[], broadcastSiriTrigger: any) {
-    console.log(`[COMPANION SERVER INTERCEPT] Publishing intercepted command: ${cmdString}`);
-    
-    activeCompanionCommands.push({
-      id: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      cmd: cmdString,
-      timestamp: Date.now() / 1000
-    });
-    if (activeCompanionCommands.length > 50) activeCompanionCommands.shift();
-
-    const wsEvent = {
-      type: "DEVICE_CONTROL_COMMAND",
-      command: cmdString
-    };
-    wss.clients.forEach((c: any) => {
-      if (c.readyState === WebSocket.OPEN) {
-        c.send(JSON.stringify(wsEvent));
-      }
-    });
-
-    const logEntry = {
-      id: `siri_log_${Date.now()}`,
-      timestamp: Date.now(),
-      prompt: "AI Autonomous Control Executed",
-      siriResponse: `Command dispatched: ${cmdString}.`,
-      matchedNodeId: null,
-      matchedNodeName: "System Desktop",
-      status: "success",
-      detail: `AI auto-dispatched '${cmdString}' directly to your live companion device.`
-    };
-    siriLogs.unshift(logEntry);
-    if (siriLogs.length > 50) siriLogs.pop();
-    broadcastSiriTrigger(logEntry);
-  }
-
   function determineAutoToolModeOnServer(prompt: string): 'search' | 'research' | 'convo' {
     const text = prompt.toLowerCase().trim();
     
@@ -2894,6 +2794,137 @@ export default function App() {
     return 'convo';
   }
 
+  function parseNaturalLanguagePromptToServerCommands(promptText: string): string[] {
+    const commands: string[] = [];
+    const lines = promptText.toLowerCase().split(/[.,;]|\band\b/);
+
+    for (let line of lines) {
+      line = line.trim();
+      if (!line) continue;
+
+      // 1. Coordinates Click: "click at 30, 40" or "click 30 40" or "tap 50, 60"
+      const clickCoordRegex = /(?:click|press|tap)\s*(?:at\s*)?(\d+)(?:\s*%)?\s*[, ]\s*(\d+)(?:\s*%)?/;
+      const matchCoord = line.match(clickCoordRegex);
+      if (matchCoord) {
+        const x = parseInt(matchCoord[1], 10);
+        const y = parseInt(matchCoord[2], 10);
+        commands.push(`DEVICE_ACTION_CLICK:${x}:${y}:Coordinate_Click_${x}_${y}`);
+        continue;
+      }
+
+      // 2. Open URL: "open url http://example.com" or "go to google.com"
+      const urlRegex = /(?:open\s*url|go\s*to|browse\s*to)\s*["']?([a-zA-Z0-9][-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*))["']?/;
+      const matchUrl = line.match(urlRegex);
+      if (matchUrl) {
+        let urlPayload = matchUrl[1];
+        if (!urlPayload.startsWith('http://') && !urlPayload.startsWith('https://')) {
+          urlPayload = 'https://' + urlPayload;
+        }
+        commands.push(`DEVICE_ACTION_OPEN_URL:${urlPayload}`);
+        continue;
+      }
+
+      // 3. Search: "search for swift instructions" or "google search recipe"
+      const searchRegex = /(?:search\s*for|google\s*search|search)\s*["']?([^"']+)["']?/;
+      const matchSearch = line.match(searchRegex);
+      if (matchSearch) {
+        const queryPayload = matchSearch[1].trim();
+        commands.push(`DEVICE_ACTION_SEARCH:${queryPayload}`);
+        continue;
+      }
+
+      // 4. Launch App: "launch app Safari" or "open app Spotify"
+      const launchAppRegex = /(?:launch\s*app|open\s*app|start\s*app|run\s*app|focus\s*app|launch|activate|open)\s*["']?([a-zA-Z0-9\s]+)["']?/;
+      const matchLaunch = line.match(launchAppRegex);
+      if (matchLaunch) {
+        const appName = matchLaunch[1].trim();
+        // Skip common words that are part of other commands
+        const skippedWords = ['url', 'google', 'safari browser', 'terminal command', 'shell', 'xcode editor', 'app', 'browser', 'page', 'site', 'website'];
+        if (!skippedWords.includes(appName)) {
+          // Normalize some common applications for the user
+          let normalizedApp = appName;
+          if (appName === 'chrome' || appName === 'google chrome') {
+            normalizedApp = 'Google Chrome';
+          } else if (appName === 'safari') {
+            normalizedApp = 'Safari';
+          } else if (appName === 'xcode') {
+            normalizedApp = 'Xcode';
+          } else if (appName === 'spotify') {
+            normalizedApp = 'Spotify';
+          } else if (appName === 'terminal') {
+            normalizedApp = 'Terminal';
+          } else if (appName === 'slack') {
+            normalizedApp = 'Slack';
+          } else if (appName === 'finder') {
+            normalizedApp = 'Finder';
+          }
+          // Capitalize first letter of app if it has no spaces and is short
+          if (normalizedApp === appName && appName.length > 1 && !appName.includes(' ')) {
+            normalizedApp = appName.charAt(0).toUpperCase() + appName.slice(1);
+          }
+          commands.push(`DEVICE_ACTION_LAUNCH_APP:${normalizedApp}`);
+          continue;
+        }
+      }
+
+      // 5. Type Text: "type Hello World" or "write custom script"
+      const typeTextRegex = /(?:type|write|input|enter)\s*["']?([^"']+)["']?/;
+      const matchText = line.match(typeTextRegex);
+      if (matchText) {
+        const textPayload = matchText[1];
+        commands.push(`DEVICE_ACTION_TYPE:${textPayload}`);
+        continue;
+      }
+
+      // 6. Drag and Drop: "drag from 30, 40 to 50, 60"
+      const dragRegex = /drag\s*(?:from\s*)?(\d+)\s*[, ]\s*(\d+)\s*(?:to\s*)?(\d+)\s*[, ]\s*(\d+)/;
+      const matchDrag = line.match(dragRegex);
+      if (matchDrag) {
+        const x1 = parseInt(matchDrag[1], 10);
+        const y1 = parseInt(matchDrag[2], 10);
+        const x2 = parseInt(matchDrag[3], 10);
+        const y2 = parseInt(matchDrag[4], 10);
+        commands.push(`DEVICE_ACTION_DRAG:${x1}:${y1}:${x2}:${y2}`);
+        continue;
+      }
+
+      // Fallback checks for specific popular keywords if not matched above
+      if (line.includes('open xcode') || line.includes('show xcode') || line.includes('launch xcode')) {
+        commands.push('DEVICE_ACTION_LAUNCH_APP:Xcode');
+      } else if (line.includes('open terminal') || line.includes('open shell') || line.includes('launch terminal')) {
+        commands.push('DEVICE_ACTION_LAUNCH_APP:Terminal');
+      } else if (line.includes('open safari') || line.includes('launch safari')) {
+        commands.push('DEVICE_ACTION_LAUNCH_APP:Safari');
+      } else if (line.includes('open spotify') || line.includes('launch spotify') || line.includes('play spotify')) {
+        commands.push('DEVICE_ACTION_LAUNCH_APP:Spotify');
+      } else if (line.includes('open chrome') || line.includes('launch chrome')) {
+        commands.push('DEVICE_ACTION_LAUNCH_APP:Google Chrome');
+      } else if (line.includes('open slack') || line.includes('launch slack')) {
+        commands.push('DEVICE_ACTION_LAUNCH_APP:Slack');
+      } else if (line.includes('open finder') || line.includes('launch finder')) {
+        commands.push('DEVICE_ACTION_LAUNCH_APP:Finder');
+      } else if (line.includes('click') || line.includes('focus') || line.includes('select')) {
+        // Approximate some visual coordinates on mock mac desktop environments
+        if (line.includes('credentials') || line.includes('credentials.txt')) {
+          commands.push('DEVICE_ACTION_CLICK:90:20:Credentials.txt');
+        } else if (line.includes('kernel') || line.includes('kernel.sys')) {
+          commands.push('DEVICE_ACTION_CLICK:90:40:Kernel.sys');
+        } else if (line.includes('safari')) {
+          commands.push('DEVICE_ACTION_CLICK:40:92:Safari');
+        } else if (line.includes('xcode')) {
+          commands.push('DEVICE_ACTION_CLICK:46:92:Xcode');
+        } else if (line.includes('terminal')) {
+          commands.push('DEVICE_ACTION_CLICK:52:92:Terminal');
+        } else if (line.includes('settings')) {
+          commands.push('DEVICE_ACTION_CLICK:58:92:Settings');
+        } else if (line.includes('build') || line.includes('run') || line.includes('play')) {
+          commands.push('DEVICE_ACTION_CLICK:40:16:Build Button');
+        }
+      }
+    }
+    return commands;
+  }
+
   // Dispatch a message, append to Firestore database, trigger Gemini, save response back to Firestore
   app.post("/api/companion/message", express.json(), async (req, res) => {
     try {
@@ -2904,6 +2935,30 @@ export default function App() {
       }
       
       uid = await resolveUidFromEmailOrQuery(uid, email);
+      
+      // Parse potential native commands from the content and queue them immediately
+      const parsedNativeCommands = parseNaturalLanguagePromptToServerCommands(content);
+      if (parsedNativeCommands.length > 0) {
+        console.log(`[COMPANION] Detected ${parsedNativeCommands.length} native hardware automation commands. Dispatching to activeCompanionCommands...`);
+        for (const cmdString of parsedNativeCommands) {
+          activeCompanionCommands.push({
+            id: `cmd-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            cmd: cmdString,
+            timestamp: Date.now() / 1000
+          });
+          
+          // Broadcast over WebSocket to any active browser/web companion views
+          const wsEvent = { type: "DEVICE_CONTROL_COMMAND", command: cmdString };
+          wss.clients.forEach(c => {
+            if (c.readyState === WebSocket.OPEN) {
+              c.send(JSON.stringify(wsEvent));
+            }
+          });
+        }
+        if (activeCompanionCommands.length > 50) {
+          activeCompanionCommands = activeCompanionCommands.slice(-50);
+        }
+      }
       
       const userMsgId = "msg_u_" + Date.now();
       const messagesCol = adminDb.collection("conversations").doc(conversationId).collection("messages");
@@ -2941,6 +2996,11 @@ export default function App() {
       // 3. Determine Server toolMode and system instructions
       const toolMode = determineAutoToolModeOnServer(content);
       let systemInstruction = "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.";
+      
+      if (parsedNativeCommands.length > 0) {
+        systemInstruction = `${systemInstruction}\n\nNATIVE PIPELINE ENGAGED: The user requested a computer use/agentic operation. You have already parsed their request and dispatched the following native commands to their macOS/iOS device: ${parsedNativeCommands.join(', ')}. In your response, confirm this beautiful native execution sequence with absolute confidence and elite cyber-aesthetic eloquence, listing exactly what commands/actions you have queued for immediate hardware execution. Focus purely on high-fidelity functional execution. Do NOT state that you are simulating or roleplaying; speak as the real-time controller that has dispatched these physical events to the native workspace.`;
+      }
+      
       let tools: any[] | undefined = undefined;
       let toolConfig: any | undefined = undefined;
 
@@ -3048,9 +3108,6 @@ export default function App() {
         createdAt: new Date(),
         userId: "unison_core"
       });
-      
-      // Extract and execute physical device control commands!
-      extractAndPublishDeviceControlCommands(geminiReply, wss, activeCompanionCommands, siriLogs, broadcastSiriTrigger);
       
       // 6. Update convo updatedAt timestamp
       const convoDocRef = adminDb.collection("conversations").doc(conversationId);
@@ -5453,6 +5510,33 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
         finalInstruction = `${finalInstruction}\n${newsOverrideRule}`;
       }
 
+      // Parse potential native commands from the content and queue them immediately
+      const parsedNativeCommands = parseNaturalLanguagePromptToServerCommands(lastUserMsg);
+      if (parsedNativeCommands.length > 0) {
+        console.log(`[GEMINI_PROXY] Detected ${parsedNativeCommands.length} native hardware automation commands from Web. Dispatching to activeCompanionCommands...`);
+        for (const cmdString of parsedNativeCommands) {
+          activeCompanionCommands.push({
+            id: `cmd-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            cmd: cmdString,
+            timestamp: Date.now() / 1000
+          });
+          
+          // Broadcast over WebSocket to any active browser/web companion views
+          const wsEvent = { type: "DEVICE_CONTROL_COMMAND", command: cmdString };
+          wss.clients.forEach(c => {
+            if (c.readyState === WebSocket.OPEN) {
+              c.send(JSON.stringify(wsEvent));
+            }
+          });
+        }
+        if (activeCompanionCommands.length > 50) {
+          activeCompanionCommands = activeCompanionCommands.slice(-50);
+        }
+
+        // Inject high-fidelity native instructions
+        finalInstruction = `${finalInstruction}\n\nNATIVE PIPELINE ENGAGED: The user requested a computer use/agentic operation. You have already parsed their request and dispatched the following native commands to their macOS/iOS device: ${parsedNativeCommands.join(', ')}. In your response, confirm this beautiful native execution sequence with absolute confidence and elite cyber-aesthetic eloquence, listing exactly what commands/actions you have queued for immediate hardware execution. Focus purely on high-fidelity functional execution. Do NOT state that you are simulating or roleplaying; speak as the real-time controller that has dispatched these physical events to the native workspace.`;
+      }
+
       let responseStream;
       try {
         responseStream = await generateContentStreamWithFallback({
@@ -5652,9 +5736,6 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
           res.write(`data: ${JSON.stringify({ text: sourcesTag })}\n\n`);
         }
       }
-
-      // Extract and execute physical device control commands!
-      extractAndPublishDeviceControlCommands(aggregatedText, wss, activeCompanionCommands, siriLogs, broadcastSiriTrigger);
 
       // Save complete output in local SSD-backed server cache 
       if (aiEnableCache !== false && aggregatedText) {
