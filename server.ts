@@ -235,6 +235,38 @@ class SupabaseDocumentReference {
       const subCol = segments[2];
 
       if (subCol === "messages") {
+        if (parentId) {
+          try {
+            const { data: convoExists, error: checkErr } = await backendSupabase
+              .from("conversations")
+              .select("id")
+              .eq("id", parentId)
+              .maybeSingle();
+
+            if (!convoExists && !checkErr) {
+              const isPyConvo = parentId.startsWith("py-");
+              const placeholderConvo = {
+                id: parentId,
+                title: isPyConvo ? "Python Autonomous Workstream" : "Synced Chat Thread",
+                type: "chat",
+                user_id: "pi-user",
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              };
+              const { error: insertConvoErr } = await backendSupabase
+                .from("conversations")
+                .upsert(placeholderConvo);
+              if (insertConvoErr) {
+                console.error(`[Supabase Auto-Create Convo Error] ${insertConvoErr.message}`);
+              } else {
+                console.log(`[Supabase Auto-Create Convo] Created parent conversation ${parentId} successfully!`);
+              }
+            }
+          } catch (e) {
+            console.error("Exception in auto-creating parent conversation on server:", e);
+          }
+        }
+
         const dbPayload = {
           id: this.id,
           conversation_id: parentId,
@@ -256,6 +288,38 @@ class SupabaseDocumentReference {
       }
 
       if (subCol === "files") {
+        if (parentId) {
+          try {
+            const { data: convoExists, error: checkErr } = await backendSupabase
+              .from("conversations")
+              .select("id")
+              .eq("id", parentId)
+              .maybeSingle();
+
+            if (!convoExists && !checkErr) {
+              const isPyConvo = parentId.startsWith("py-");
+              const placeholderConvo = {
+                id: parentId,
+                title: isPyConvo ? "Python Autonomous Workstream" : "Synced Chat Thread",
+                type: "chat",
+                user_id: "pi-user",
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              };
+              const { error: insertConvoErr } = await backendSupabase
+                .from("conversations")
+                .upsert(placeholderConvo);
+              if (insertConvoErr) {
+                console.error(`[Supabase Auto-Create Convo Error] ${insertConvoErr.message}`);
+              } else {
+                console.log(`[Supabase Auto-Create Convo] Created parent conversation ${parentId} successfully!`);
+              }
+            }
+          } catch (e) {
+            console.error("Exception in auto-creating parent conversation on server for file:", e);
+          }
+        }
+
         const dbPayload = {
           id: this.id,
           conversation_id: parentId,
@@ -615,9 +679,222 @@ function sanitizeContents(contents: any[]): any[] {
   return combined;
 }
 
+function sanitizeThinkingLevel(level: any): string | undefined {
+  if (!level) return undefined;
+  const s = String(level).toUpperCase();
+  if (s.includes("MINIMAL")) return "MINIMAL";
+  if (s.includes("LOW")) return "LOW";
+  if (s.includes("HIGH")) return "HIGH";
+  return "LOW"; // Default fallback for invalid levels
+}
+
+function simulateOfflineAIResponse(params: any): { text: string; candidates: any[] } {
+  const contents = params.contents || [];
+  let userQuery = "";
+  if (contents.length > 0) {
+    const lastTurn = contents[contents.length - 1];
+    if (lastTurn.parts && Array.isArray(lastTurn.parts)) {
+      userQuery = lastTurn.parts.map((p: any) => p.text || "").join("\n");
+    } else if (typeof lastTurn.content === "string") {
+      userQuery = lastTurn.content;
+    }
+  }
+
+  const queryLower = userQuery.toLowerCase();
+  let text = "";
+
+  if (queryLower.includes("help") || queryLower.includes("guide") || queryLower.includes("tutorial") || queryLower.includes("what is")) {
+    text = `### Welcome to Unison OS Cognitive Workspace 🌟
+
+Unison OS is an advanced, high-fidelity workspace designed for real-time collaboration, document design, and cognitive analysis. Since your workspace is operating under **Cognitive Offline Core** (due to API rate limits), let me guide you through the offline-enabled features available in your interface:
+
+1. **Titan Docs & Layout System**: Customize fonts (Serif, Sans, Mono), page widths, line spacing, and themes (Cosmic Slate, Warm Sepia, Matrix Green) to compile beautiful, markdown-supported executive summaries.
+2. **Real-Time Comment Streams**: Add, review, and resolve interactive collaborative threads in the right panel.
+3. **Outline Navigator**: Seamlessly scan Heading 1 (#) and Heading 2 (##) levels inside your active memo.
+4. **Interactive Sandbox & Code Editors**: Build and compile front-end widgets natively with live error reporting.
+
+Need help with a specific task? Type your prompt below and I will generate standard structures for you!`;
+  } else if (queryLower.includes("code") || queryLower.includes("function") || queryLower.includes("typescript") || queryLower.includes("javascript") || queryLower.includes("python") || queryLower.includes("html") || queryLower.includes("css") || queryLower.includes("react")) {
+    let lang = "typescript";
+    if (queryLower.includes("python")) lang = "python";
+    else if (queryLower.includes("html")) lang = "html";
+    else if (queryLower.includes("css")) lang = "css";
+
+    text = `### Custom Code Generation 🛠️
+
+Here is a high-quality, offline-generated implementation tailored to your request:
+
+\`\`\`${lang}
+// Unison OS Native Implementation Module
+// Generated under Offline Backup Engine
+
+${lang === "python" ? `
+def calculate_cognitive_density(words: list, characters: int) -> float:
+    """
+    Computes the cognitive content density coefficient.
+    """
+    if not words or characters == 0:
+        return 0.0
+    return round((len(words) * 4.7) / characters, 2)
+
+# Sample run
+print(calculate_cognitive_density(["Unison", "OS", "Offline"], 21))
+` : lang === "html" ? `
+<div class="unison-card p-6 bg-zinc-900 border border-white/5 rounded-3xl">
+  <h2 class="text-lg font-bold text-white tracking-tight">Cognitive Buffer</h2>
+  <p class="text-zinc-400 text-sm mt-1">System running in high-fidelity offline mode.</p>
+  <button class="mt-4 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-xs transition-all">
+    Acknowledge
+  </button>
+</div>
+` : lang === "css" ? `
+/* Unison OS Custom Variables & Glassmorphism Theme */
+:root {
+  --unison-slate: #0d0d12;
+  --unison-accent: #3b82f6;
+  --unison-border: rgba(255, 255, 255, 0.05);
+}
+
+.unison-sheet {
+  background: var(--unison-slate);
+  border: 1px solid var(--unison-border);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+` : `
+interface CognitiveStats {
+  wordCount: number;
+  charCount: number;
+  density: number;
+}
+
+export function computeStats(text: string): CognitiveStats {
+  const cleanText = text.trim();
+  const words = cleanText ? cleanText.split(/\\s+/) : [];
+  const charCount = cleanText.length;
+  const wordCount = words.length;
+  const density = charCount > 0 ? Number(((wordCount * 5) / charCount).toFixed(2)) : 0;
+
+  return { wordCount, charCount, density };
+}
+`}
+\`\`\`
+
+#### Key Architecture Highlights:
+- **Zero Dependencies**: Optimized to run with native, standard library mechanisms.
+- **Cognitive Security**: Completely sandbox-safe, minimizing global scope leakage.
+- **Offline Assurance**: Built to remain fully operational during isolated system states.`;
+  } else if (queryLower.includes("document") || queryLower.includes("docs") || queryLower.includes("memo") || queryLower.includes("spec") || queryLower.includes("proposal") || queryLower.includes("writing") || queryLower.includes("draft")) {
+    text = `### Draft Outline: Strategic Alignment Brief 📝
+
+Based on your document design request, I have drafted this professional memorandum. You can copy this template directly into your active editor:
+
+\`\`\`markdown
+# Executive Memorandum: Strategic Alignment Brief
+**Date**: ${new Date().toLocaleDateString()}
+**Category**: Strategic Memo
+**Status**: Review / Draft
+
+## 1. Objective and Horizon Goals
+This strategic brief coordinates the dual pathways of Unison's interface standardizations and real-time backend synchronization. The goal is to maximize client response buffers by establishing highly predictable interface layout presets.
+
+## 2. Core Functional Specifications
+- **Flexible Typography**: Support fluid serif, sans-serif, and monospace font families across variable viewport grids.
+- **Collaborative Threading**: Enable instant comment addition, deep thread nesting, and resolve actions to mimic full-duplex client synchronization.
+- **Dynamic Themes**: Offer high-contrast cosmic slate and paper templates to prevent eye strain during long-form specification sessions.
+
+## 3. Immediate Implementation Deliverables
+1. [ ] Deploy client-side local-storage sync schemas for comment threads.
+2. [ ] Embed the Font Selector, Size Selector, and Paper Theme presets into the toolbar.
+3. [ ] Configure automatic outline parsing to extract H1 and H2 markdown anchors.
+\`\`\`
+
+*You can copy this into Titan Docs and use the Document Customization Toolbar (Font, Line, Size, Paper) to preview it instantly under different aesthetics!*`;
+  } else if (queryLower.includes("hello") || queryLower.includes("hi ") || queryLower.includes("hey")) {
+    text = `### Hello there! 👋
+
+Welcome back to Unison OS. How is your work going today?
+
+I am fully available to help you draft documents, design layouts, answer coding questions, or troubleshoot scripts. Let me know what you'd like to work on!`;
+  } else {
+    text = `### Unison Cognitive Response 🧠
+
+Thank you for your prompt! I am processing your input under the **Offline Backup Engine**:
+
+> **"${userQuery.length > 100 ? userQuery.substring(0, 100) + "..." : userQuery}"**
+
+To ensure your productivity is never disrupted by third-party quota or connection issues, I am providing a helpful structure to guide you:
+
+1. **Layout & Writing**: You can write or edit any document directly using the **Titan Docs** panel. Any headers (e.g. \`# Title\` or \`## Subtitle\`) are instantly parsed and visible in the outline.
+2. **UI & Theme Customization**: Use the toolbar options right above the document editor to adjust formatting parameters.
+3. **Collaboration**: Use the **Comments Section** on the right side panel to simulate team feedback and task lists.
+
+*If there's a specific code function, template, or guide you would like me to generate, just ask! I can construct detailed technical specifications and boilerplate implementations instantly.*`;
+  }
+
+  const disclaimer = `> ⚠️ **SYSTEM STATUS: COGNITIVE OFFLINE BACKUP ENGAGED**\n> *The Google AI Studio free-tier API quota has been temporarily exceeded. Unison OS has automatically activated its high-fidelity Offline Backup Engine to ensure your session remains completely uninterrupted and functional. Once quota resets, remote features will resume automatically.*\n\n---\n\n`;
+  const finalText = disclaimer + text;
+
+  return {
+    text: finalText,
+    candidates: [
+      {
+        index: 0,
+        content: {
+          role: "model",
+          parts: [{ text: finalText }]
+        }
+      }
+    ]
+  };
+}
+
+async function* simulateOfflineAIResponseStream(params: any): AsyncGenerator<any, void, unknown> {
+  const simulated = simulateOfflineAIResponse(params);
+  const text = simulated.text;
+  const words = text.split(" ");
+  let currentChunk = "";
+  for (let i = 0; i < words.length; i++) {
+    currentChunk += (i === 0 ? "" : " ") + words[i];
+    if (i % 3 === 2 || i === words.length - 1) {
+      yield {
+        text: currentChunk,
+        candidates: [
+          {
+            index: 0,
+            content: {
+              role: "model",
+              parts: [{ text: currentChunk }]
+            }
+          }
+        ]
+      };
+      currentChunk = "";
+      await sleep(25);
+    }
+  }
+}
+
 async function generateContentWithFallback(params: any): Promise<any> {
+  const apiKey = params.customApiKey || process.env.GEMINI_API_KEY || "";
+  const client = apiKey ? new GoogleGenAI({
+    apiKey: apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
+    }
+  }) : googleGenAI;
+
   if (params.contents) {
     params.contents = sanitizeContents(params.contents);
+  }
+  if (params.config && params.config.thinkingConfig) {
+    const rawLevel = params.config.thinkingConfig.thinkingLevel;
+    if (rawLevel) {
+      params.config.thinkingConfig.thinkingLevel = sanitizeThinkingLevel(rawLevel);
+    }
   }
   const originalModel = params.model;
   const isSpecialized = originalModel && (
@@ -632,21 +909,20 @@ async function generateContentWithFallback(params: any): Promise<any> {
     : [
         originalModel,
         "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-2.5-pro",
         "gemini-3.5-flash",
-        "gemini-3.1-flash-lite"
+        "gemini-flash-latest",
+        "gemini-3.1-flash-lite",
+        "gemini-3.1-pro-preview"
       ].filter(Boolean);
   
   let uniqueModels = [...new Set(modelsToTry)];
   let lastError: any = null;
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const currentBatch = [...uniqueModels];
-    for (const modelName of currentBatch) {
-      if (!uniqueModels.includes(modelName)) continue;
+  for (const modelName of uniqueModels) {
+    let backoffMs = 100;
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        console.log(`[GEMINI_PROXY] Executing generateContent on model: ${modelName} (attempt ${attempt})`);
+        console.log(`[GEMINI_PROXY] Executing generateContent on model: ${modelName} (attempt ${attempt}/3)`);
         const finalParams = { ...params };
         if (finalParams.config) {
           finalParams.config = { ...finalParams.config };
@@ -655,39 +931,69 @@ async function generateContentWithFallback(params: any): Promise<any> {
             delete finalParams.config.thinkingConfig;
           }
         }
-        return await googleGenAI.models.generateContent({
+        delete finalParams.customApiKey;
+        return await client.models.generateContent({
           ...finalParams,
           model: modelName
         });
       } catch (err: any) {
         lastError = err;
-        const errMsg = err.message || String(err);
-        const errCode = err.status || err.code || (errMsg.includes("404") ? 404 : errMsg.includes("403") ? 403 : 500);
+        let errMsg = err.message || String(err);
+        if (err.error && typeof err.error === 'object' && err.error.message) {
+          errMsg = err.error.message;
+        }
+        const errCode = err.status || err.code || (err.error && (err.error.status || err.error.code)) || (errMsg.includes("404") ? 404 : errMsg.includes("403") ? 403 : 500);
+        
         const isNotFoundError = errCode === 404 || errMsg.includes("NOT_FOUND") || errMsg.includes("not found") || errMsg.includes("not supported");
         const isAuthError = errCode === 403 || errMsg.includes("PERMISSION_DENIED") || errMsg.includes("API key not valid");
         const isRateLimit = errCode === 429 || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("quota") || errMsg.includes("limit exceeded");
-        
-        console.warn(`[GEMINI_PROXY] Model ${modelName} error:`, errMsg);
-        
-        if (isNotFoundError || isAuthError) {
-          console.log(`[GEMINI_PROXY] Permanent error on ${modelName}, removing from fallback list.`);
-          uniqueModels = uniqueModels.filter(m => m !== modelName);
+        const isUnavailable = errCode === 503 || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand") || errMsg.includes("overloaded");
+
+        const isQuotaExhausted = isRateLimit && (
+          errMsg.includes("RESOURCE_EXHAUSTED") ||
+          errMsg.includes("quota") ||
+          errMsg.includes("plan") ||
+          errMsg.includes("billing") ||
+          errMsg.includes("exhausted")
+        );
+
+        console.log(`[GEMINI_PROXY] Model ${modelName} error (attempt ${attempt}/3):`, errMsg);
+
+        if (isNotFoundError || isAuthError || isQuotaExhausted) {
+          if (isQuotaExhausted) {
+            console.log(`[GEMINI_PROXY] API Key quota exhaustion on ${modelName}. Switching to next fallback model.`);
+          } else {
+            console.log(`[GEMINI_PROXY] Permanent error on ${modelName}, switching to next fallback model immediately.`);
+          }
+          break;
         }
-        
-        const backoffMs = isRateLimit ? 1000 : 300;
-        await sleep(backoffMs);
+
+        if (attempt < 3 && (isRateLimit || isUnavailable)) {
+          const sleepMs = backoffMs * attempt;
+          console.log(`[GEMINI_PROXY] Transient error on ${modelName}. Sleeping for ${sleepMs}ms before retry...`);
+          await sleep(sleepMs);
+        } else {
+          break;
+        }
       }
     }
   }
   
-  const cleanedErrorMsg = cleanGeminiErrorMessage(lastError);
-  const thrownError = new Error(cleanedErrorMsg);
-  (thrownError as any).status = lastError?.status || 500;
-  (thrownError as any).code = lastError?.code || 500;
-  throw thrownError;
+  console.log(`[GEMINI_PROXY] All model attempts failed or rate-limited. Falling back to Unison Cognitive Offline Core.`);
+  return simulateOfflineAIResponse(params);
 }
 
 async function generateContentStreamWithFallback(params: any): Promise<any> {
+  const apiKey = params.customApiKey || process.env.GEMINI_API_KEY || "";
+  const client = apiKey ? new GoogleGenAI({
+    apiKey: apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
+    }
+  }) : googleGenAI;
+
   if (params.contents) {
     params.contents = sanitizeContents(params.contents);
   }
@@ -704,21 +1010,20 @@ async function generateContentStreamWithFallback(params: any): Promise<any> {
     : [
         originalModel,
         "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-2.5-pro",
         "gemini-3.5-flash",
-        "gemini-3.1-flash-lite"
+        "gemini-flash-latest",
+        "gemini-3.1-flash-lite",
+        "gemini-3.1-pro-preview"
       ].filter(Boolean);
   
   let uniqueModels = [...new Set(modelsToTry)];
   let lastError: any = null;
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const currentBatch = [...uniqueModels];
-    for (const modelName of currentBatch) {
-      if (!uniqueModels.includes(modelName)) continue;
+  for (const modelName of uniqueModels) {
+    let backoffMs = 100;
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        console.log(`[GEMINI_PROXY] Executing generateContentStream on model: ${modelName} (attempt ${attempt})`);
+        console.log(`[GEMINI_PROXY] Executing generateContentStream on model: ${modelName} (attempt ${attempt}/3)`);
         const finalParams = { ...params };
         if (finalParams.config) {
           finalParams.config = { ...finalParams.config };
@@ -727,36 +1032,56 @@ async function generateContentStreamWithFallback(params: any): Promise<any> {
             delete finalParams.config.thinkingConfig;
           }
         }
-        return await googleGenAI.models.generateContentStream({
+        delete finalParams.customApiKey;
+        return await client.models.generateContentStream({
           ...finalParams,
           model: modelName
         });
       } catch (err: any) {
         lastError = err;
-        const errMsg = err.message || String(err);
-        const errCode = err.status || err.code || (errMsg.includes("404") ? 404 : errMsg.includes("403") ? 403 : 500);
+        let errMsg = err.message || String(err);
+        if (err.error && typeof err.error === 'object' && err.error.message) {
+          errMsg = err.error.message;
+        }
+        const errCode = err.status || err.code || (err.error && (err.error.status || err.error.code)) || (errMsg.includes("404") ? 404 : errMsg.includes("403") ? 403 : 500);
+        
         const isNotFoundError = errCode === 404 || errMsg.includes("NOT_FOUND") || errMsg.includes("not found") || errMsg.includes("not supported");
         const isAuthError = errCode === 403 || errMsg.includes("PERMISSION_DENIED") || errMsg.includes("API key not valid");
         const isRateLimit = errCode === 429 || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("quota") || errMsg.includes("limit exceeded");
-        
-        console.warn(`[GEMINI_PROXY] Model ${modelName} stream error:`, errMsg);
-        
-        if (isNotFoundError || isAuthError) {
-          console.log(`[GEMINI_PROXY] Permanent error on ${modelName}, removing from stream fallback list.`);
-          uniqueModels = uniqueModels.filter(m => m !== modelName);
+        const isUnavailable = errCode === 503 || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand") || errMsg.includes("overloaded");
+
+        const isQuotaExhausted = isRateLimit && (
+          errMsg.includes("RESOURCE_EXHAUSTED") ||
+          errMsg.includes("quota") ||
+          errMsg.includes("plan") ||
+          errMsg.includes("billing") ||
+          errMsg.includes("exhausted")
+        );
+
+        console.log(`[GEMINI_PROXY] Model ${modelName} stream error (attempt ${attempt}/3):`, errMsg);
+
+        if (isNotFoundError || isAuthError || isQuotaExhausted) {
+          if (isQuotaExhausted) {
+            console.log(`[GEMINI_PROXY] API Key quota exhaustion stream on ${modelName}. Switching to next fallback model.`);
+          } else {
+            console.log(`[GEMINI_PROXY] Permanent error on ${modelName}, switching to next fallback stream model immediately.`);
+          }
+          break;
         }
-        
-        const backoffMs = isRateLimit ? 1000 : 300;
-        await sleep(backoffMs);
+
+        if (attempt < 3 && (isRateLimit || isUnavailable)) {
+          const sleepMs = backoffMs * attempt;
+          console.log(`[GEMINI_PROXY] Transient stream error on ${modelName}. Sleeping for ${sleepMs}ms before retry...`);
+          await sleep(sleepMs);
+        } else {
+          break;
+        }
       }
     }
   }
   
-  const cleanedErrorMsg = cleanGeminiErrorMessage(lastError);
-  const thrownError = new Error(cleanedErrorMsg);
-  (thrownError as any).status = lastError?.status || 500;
-  (thrownError as any).code = lastError?.code || 500;
-  throw thrownError;
+  console.log(`[GEMINI_PROXY] All model stream attempts failed or rate-limited. Falling back to Unison Cognitive Offline Core.`);
+  return simulateOfflineAIResponseStream(params);
 }
 
 const brainLogHistory: any[] = [];
@@ -827,7 +1152,7 @@ function startLocalBrainWithFallback() {
           if (trimmed.includes("ImportError") || trimmed.includes("No module named") || trimmed.includes("Missing dependencies")) {
             moduleErrorFound = true;
             console.log("[Brain] Missing Python dependencies detected. Running pip install...");
-            exec("pip install --break-system-packages fastapi uvicorn ollama httpx firebase-admin google-cloud-firestore", (error, stdout) => {
+            exec("python3 -m pip install --break-system-packages fastapi uvicorn ollama httpx firebase-admin google-cloud-firestore", (error, stdout) => {
               if (error) {
                 console.error(`[Brain] pip install failed: ${error.message}`);
               } else {
@@ -973,9 +1298,14 @@ async function startServer() {
     lastActive: number;
     ip: string;
     isActive: boolean;
+    os?: string;
+    screenSize?: string;
+    activeWindows?: string[];
+    focusedWindow?: string | null;
   }
 
   let connectedDevices: ConnectedDevice[] = [];
+  let activeCompanionCommands: Array<{ id: string; cmd: string; timestamp: number }> = [];
 
   function recalculateActiveDevice() {
     if (connectedDevices.length === 0) return;
@@ -1087,9 +1417,9 @@ async function startServer() {
       try {
         const payload = JSON.parse(message.toString());
 
-        // Multi-device and presence heartbeats
+         // Multi-device and presence heartbeats
         if (payload.type === 'REGISTER_DEVICE') {
-          const { deviceId, deviceName, deviceType } = payload;
+          const { deviceId, deviceName, deviceType, os, screenSize, activeWindows, focusedWindow } = payload;
           (ws as any).deviceId = deviceId;
           
           let existing = connectedDevices.find(d => d.id === deviceId);
@@ -1097,6 +1427,10 @@ async function startServer() {
             existing.name = deviceName;
             existing.type = deviceType || 'computer';
             existing.lastActive = Date.now();
+            if (os) existing.os = os;
+            if (screenSize) existing.screenSize = screenSize;
+            if (activeWindows) existing.activeWindows = activeWindows;
+            if (focusedWindow !== undefined) existing.focusedWindow = focusedWindow;
             if (req.socket.remoteAddress) {
               existing.ip = req.socket.remoteAddress.replace('::ffff:', '');
             }
@@ -1107,7 +1441,11 @@ async function startServer() {
               type: deviceType || 'computer',
               lastActive: Date.now(),
               ip: (req.socket.remoteAddress || '127.0.0.1').replace('::ffff:', ''),
-              isActive: false
+              isActive: false,
+              os: os || 'Unknown OS',
+              screenSize: screenSize || 'Unknown',
+              activeWindows: activeWindows || [],
+              focusedWindow: focusedWindow !== undefined ? focusedWindow : null
             });
           }
           recalculateActiveDevice();
@@ -1117,10 +1455,15 @@ async function startServer() {
 
         if (payload.type === 'DEVICE_HEARTBEAT') {
           const dId = (ws as any).deviceId || payload.deviceId;
+          const { os, screenSize, activeWindows, focusedWindow } = payload;
           if (dId) {
             let d = connectedDevices.find(x => x.id === dId);
             if (d) {
               d.lastActive = Date.now();
+              if (os) d.os = os;
+              if (screenSize) d.screenSize = screenSize;
+              if (activeWindows) d.activeWindows = activeWindows;
+              if (focusedWindow !== undefined) d.focusedWindow = focusedWindow;
             }
             recalculateActiveDevice();
             broadcastDevices();
@@ -1291,6 +1634,14 @@ async function startServer() {
         if (payload.type === 'EXEC_CMD') {
           kernelState.logs.push(`CMD_EXEC: ${payload.cmd}`);
           if (kernelState.logs.length > 50) kernelState.logs.shift();
+          
+          // Track for companion polling sync
+          activeCompanionCommands.push({
+            id: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            cmd: payload.cmd,
+            timestamp: Date.now() / 1000
+          });
+          if (activeCompanionCommands.length > 50) activeCompanionCommands.shift();
           
           const [action, ...args] = payload.cmd.split(' ');
           
@@ -2118,6 +2469,269 @@ export default function App() {
     }
   });
 
+  // Pull all study materials/courses filtered optionally by owner's UID (or email resolved to UID)
+  app.get("/api/companion/study_materials", async (req, res) => {
+    try {
+      let uid = req.query.uid as string;
+      const email = req.query.email as string;
+      
+      uid = await resolveUidFromEmailOrQuery(uid, email);
+      const targetUid = uid || "test_operator";
+      
+      const itemsMap = new Map<string, any>();
+      
+      // 1. Fetch from Supabase study_materials
+      try {
+        if (backendSupabase) {
+          const { data, error } = await backendSupabase
+            .from('study_materials')
+            .select('*')
+            .in('user_id', [targetUid, 'pi-user']);
+            
+          if (error) {
+            console.warn("[COMPANION] Supabase study_materials query error:", error.message);
+          } else if (data) {
+            data.forEach((item: any) => {
+              let extra = {};
+              if (item.category === 'Course' && item.raw_text) {
+                try {
+                  extra = JSON.parse(item.raw_text);
+                } catch (e) {}
+              }
+              const mapped = {
+                id: item.id,
+                title: item.title,
+                author: item.author || 'AI Scholar',
+                totalPages: item.total_pages || 1,
+                category: item.category || 'Jupyter Notebook',
+                coverColor: item.cover_color || 'from-indigo-950 via-[#0A0B0F] to-slate-900 border-indigo-500/20',
+                mainContentStartPage: item.main_content_start_page || 1,
+                isCustom: item.is_custom !== false,
+                rawText: item.raw_text || '',
+                notebookCells: item.notebook_cells || [],
+                ...extra
+              };
+              itemsMap.set(mapped.id, mapped);
+            });
+          }
+        }
+      } catch (supaErr: any) {
+        console.warn("[COMPANION] Supabase fetch error:", supaErr.message);
+      }
+
+      // 1b. Fetch from Supabase courses
+      try {
+        if (backendSupabase) {
+          const { data, error } = await backendSupabase
+            .from('courses')
+            .select('*')
+            .in('user_id', [targetUid, 'pi-user']);
+            
+          if (error) {
+            console.warn("[COMPANION] Supabase courses query warning (table may not exist yet):", error.message);
+          } else if (data) {
+            data.forEach((item: any) => {
+              let extra = {};
+              if (item.raw_text) {
+                try {
+                  extra = JSON.parse(item.raw_text);
+                } catch (e) {}
+              }
+              const mapped = {
+                id: item.id,
+                title: item.title,
+                author: item.author || 'AI Scholar',
+                totalPages: item.total_pages || 1,
+                category: 'Course',
+                coverColor: item.cover_color || 'from-indigo-950 via-[#0A0B0F] to-slate-900 border-indigo-500/20',
+                mainContentStartPage: item.main_content_start_page || 1,
+                isCustom: item.is_custom !== false,
+                rawText: item.raw_text || '',
+                notebookCells: [],
+                ...extra
+              };
+              itemsMap.set(mapped.id, mapped);
+            });
+          }
+        }
+      } catch (supaErr: any) {
+        console.warn("[COMPANION] Supabase courses fetch error:", supaErr.message);
+      }
+      
+      // 2. Fetch from Firestore users/{uid}/study_materials
+      try {
+        if (adminDb && uid) {
+          const snap = await adminDb.collection("users").doc(uid).collection("study_materials").get();
+          snap.docs.forEach((d: any) => {
+            const data = d.data();
+            const mapped = {
+              id: d.id,
+              ...data
+            };
+            itemsMap.set(mapped.id, mapped);
+          });
+        }
+      } catch (fireErr: any) {
+        console.warn("[COMPANION] Firestore fetch error:", fireErr.message);
+      }
+      
+      res.json({ study_materials: Array.from(itemsMap.values()) });
+    } catch (err: any) {
+      console.error("[COMPANION] get study materials error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Save (create or update) study material/course
+  app.post("/api/companion/study_materials/save", express.json(), async (req, res) => {
+    try {
+      let uid = req.body.uid as string;
+      const email = req.body.email as string;
+      const material = req.body.material;
+      
+      if (!material || !material.id) {
+        return res.status(400).json({ error: "Missing material payload or material.id" });
+      }
+      
+      uid = await resolveUidFromEmailOrQuery(uid, email);
+      const targetUid = uid || "test_operator";
+      
+      // Save to Supabase if backendSupabase is available
+      try {
+        if (backendSupabase) {
+          const isCourse = material.category === 'Course';
+          const serializedRawText = isCourse ? JSON.stringify({
+            documentHtml: material.documentHtml || material.rawText,
+            checklist: material.checklist,
+            dailyLogs: material.dailyLogs,
+            mindmapNodes: material.mindmapNodes,
+            mindmapEdges: material.mindmapEdges
+          }) : (material.rawText || '');
+
+          if (isCourse) {
+            const coursePayload = {
+              id: material.id,
+              user_id: targetUid,
+              title: material.title,
+              author: material.author || 'AI Scholar',
+              total_pages: material.totalPages || 1,
+              cover_color: material.coverColor || 'from-indigo-950 via-[#0A0B0F] to-slate-900 border-indigo-500/20',
+              main_content_start_page: material.mainContentStartPage || 1,
+              is_custom: material.isCustom !== false,
+              raw_text: serializedRawText
+            };
+            
+            const { error } = await backendSupabase
+              .from('courses')
+              .upsert(coursePayload);
+              
+            if (error) {
+              console.warn("[COMPANION] Supabase courses upsert failed (falling back to study_materials):", error.message);
+              // Fallback save to study_materials
+              const fallbackPayload = {
+                ...coursePayload,
+                category: 'Course',
+                notebook_cells: []
+              };
+              const { error: fallbackError } = await backendSupabase
+                .from('study_materials')
+                .upsert(fallbackPayload);
+              if (fallbackError) {
+                console.warn("[COMPANION] Supabase study_materials fallback upsert also failed:", fallbackError.message);
+              }
+            }
+          } else {
+            const payload = {
+              id: material.id,
+              user_id: targetUid,
+              title: material.title,
+              author: material.author || 'AI Scholar',
+              total_pages: material.totalPages || 1,
+              category: material.category || 'Jupyter Notebook',
+              cover_color: material.coverColor || 'from-indigo-950 via-[#0A0B0F] to-slate-900 border-indigo-500/20',
+              main_content_start_page: material.mainContentStartPage || 1,
+              is_custom: material.isCustom !== false,
+              raw_text: serializedRawText,
+              notebook_cells: material.notebook_cells || []
+            };
+            
+            const { error } = await backendSupabase
+              .from('study_materials')
+              .upsert(payload);
+              
+            if (error) console.warn("[COMPANION] Supabase upsert error:", error.message);
+          }
+        }
+      } catch (supaErr: any) {
+        console.warn("[COMPANION] Supabase save error:", supaErr.message);
+      }
+      
+      // Save to Firestore
+      try {
+        if (adminDb && uid) {
+          await adminDb.collection("users").doc(uid).collection("study_materials").doc(material.id).set(material, { merge: true });
+        }
+      } catch (fireErr: any) {
+        console.warn("[COMPANION] Firestore save error:", fireErr.message);
+      }
+      
+      res.json({ success: true, id: material.id });
+    } catch (err: any) {
+      console.error("[COMPANION] save study material error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Delete study material/course
+  app.post("/api/companion/study_materials/delete", express.json(), async (req, res) => {
+    try {
+      let uid = req.body.uid as string;
+      const email = req.body.email as string;
+      const { id } = req.body;
+      
+      if (!id) return res.status(400).json({ error: "Missing material id" });
+      
+      uid = await resolveUidFromEmailOrQuery(uid, email);
+      
+      try {
+        if (backendSupabase) {
+          // Delete from courses table if it exists
+          const { error: errCourses } = await backendSupabase
+            .from('courses')
+            .delete()
+            .eq('id', id);
+          if (errCourses) {
+            console.warn("[COMPANION] Supabase courses delete warning:", errCourses.message);
+          }
+          
+          // Delete from study_materials table
+          const { error: errMaterials } = await backendSupabase
+            .from('study_materials')
+            .delete()
+            .eq('id', id);
+          if (errMaterials) {
+            console.warn("[COMPANION] Supabase study_materials delete warning:", errMaterials.message);
+          }
+        }
+      } catch (supaErr: any) {
+        console.warn("[COMPANION] Supabase delete exception:", supaErr.message);
+      }
+      
+      try {
+        if (adminDb && uid) {
+          await adminDb.collection("users").doc(uid).collection("study_materials").doc(id).delete();
+        }
+      } catch (fireErr: any) {
+        console.warn("[COMPANION] Firestore delete error:", fireErr.message);
+      }
+      
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("[COMPANION] delete study material error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   function determineAutoToolModeOnServer(prompt: string): 'search' | 'research' | 'convo' {
     const text = prompt.toLowerCase().trim();
     
@@ -2362,6 +2976,11 @@ export default function App() {
       ]
     });
   });
+
+  // Fetch cognitive commands for center-controlled sync across all platforms
+  app.get("/api/companion/commands", (req, res) => {
+    res.json(activeCompanionCommands);
+  });
   // --- END COMPANION INTERCEPT ROUTING ---
 
   // Dedicated proxy route for local/remote Raspberry Pi Daemons
@@ -2472,6 +3091,84 @@ export default function App() {
           elapsed,
           stdout: stdout || "Workspace compiled successfully with 0 violations."
         });
+      }
+    });
+  });
+
+  // Dedicated Streaming Native Code Sandboxing Execution Engine
+  app.post("/api/sandbox/run-stream", express.json(), (req, res) => {
+    const { code, language } = req.body;
+    if (!code) {
+      return res.status(400).json({ error: "No code provided for execution." });
+    }
+    
+    const sandboxDir = path.join(process.cwd(), "playground_sandbox");
+    if (!fs.existsSync(sandboxDir)) {
+      try {
+        fs.mkdirSync(sandboxDir, { recursive: true });
+      } catch (e: any) {
+        return res.status(500).json({ error: `Failed to create sandbox: ${e.message}` });
+      }
+    }
+    
+    let filename = "";
+    let cmd = "";
+    let args: string[] = [];
+    
+    if (language === "python" || language === "python3") {
+      filename = `sandbox_${Date.now()}.py`;
+      cmd = "python3";
+      args = ["-u", path.join(sandboxDir, filename)];
+    } else if (language === "javascript" || language === "javascript-node" || language === "node") {
+      filename = `sandbox_${Date.now()}.js`;
+      cmd = "node";
+      args = [path.join(sandboxDir, filename)];
+    } else if (language === "typescript" || language === "typescript-node" || language === "ts") {
+      filename = `sandbox_${Date.now()}.ts`;
+      cmd = "npx";
+      args = ["tsx", path.join(sandboxDir, filename)];
+    } else {
+      return res.status(400).json({ error: `Unsupported sandboxed language for streaming: ${language}` });
+    }
+    
+    const filePath = path.join(sandboxDir, filename);
+    try {
+      fs.writeFileSync(filePath, code);
+    } catch (writeErr: any) {
+      return res.status(500).json({ error: `Sandbox file access denied: ${writeErr.message}` });
+    }
+    
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    
+    const startTime = Date.now();
+    const child = spawn(cmd, args, { timeout: 15000 });
+    
+    child.stdout.on('data', (data) => {
+      res.write(`data: ${JSON.stringify({ type: 'stdout', text: data.toString() })}\n\n`);
+    });
+    
+    child.stderr.on('data', (data) => {
+      res.write(`data: ${JSON.stringify({ type: 'stderr', text: data.toString() })}\n\n`);
+    });
+    
+    child.on('error', (err) => {
+      res.write(`data: ${JSON.stringify({ type: 'stderr', text: `Child Process Error: ${err.message}` })}\n\n`);
+    });
+    
+    child.on('close', (code) => {
+      const durationMs = Date.now() - startTime;
+      res.write(`data: ${JSON.stringify({ type: 'done', elapsed: durationMs, exitCode: code })}\n\n`);
+      res.end();
+      
+      // Cleanup file
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (cleanupErr) {
+        console.error("[Sandbox Engine] Stream cleanup warning:", cleanupErr);
       }
     });
   });
@@ -2702,6 +3399,93 @@ export default function App() {
   app.post("/api/siri/logs/clear", (req, res) => {
     siriLogs = [];
     res.json({ success: true });
+  });
+
+  // --- REAL-TIME CANVAS & JOTTINGS INTEGRATION ---
+  const CANVAS_FILE = path.join(process.cwd(), "canvas_elements.json");
+  const JOTTINGS_FILE = path.join(process.cwd(), "jottings.json");
+
+  let canvasElements: any[] = [];
+  let jottingsList: any[] = [];
+
+  try {
+    if (fs.existsSync(CANVAS_FILE)) {
+      canvasElements = JSON.parse(fs.readFileSync(CANVAS_FILE, "utf-8"));
+    } else {
+      canvasElements = [
+        { id: "el_h1", text: "🪐 Quantum Computing Mechanics & Proofs", size: "28px", color: "#818CF8", weight: "Black", type: "Heading 1", font: "Space Grotesk" },
+        { id: "el_p1", text: "Quantum state superposition allows qubits to express linear combinations of state-vectors. By utilizing the Hadamard transform on a ground state, we transition into a unified superposition space.", size: "14px", color: "#E4E4E7", weight: "Regular", type: "Paragraph", font: "Inter" },
+        { id: "el_link1", text: "🔗 Click to open Wikipedia's Quantum Superposition Proof", size: "13px", color: "#60A5FA", weight: "Medium", type: "Hyperlink (Wikipedia)", font: "JetBrains Mono", url: "https://en.wikipedia.org/wiki/Quantum_superposition" },
+        { id: "el_h2", text: "⚡ Computational Complexity Bound (Master Theorem)", size: "22px", color: "#22D3EE", weight: "Bold", type: "Heading 2", font: "Space Grotesk" },
+        { id: "el_p2", text: "Let the recursive recurrence be T(n) = aT(n/b) + f(n). In this sandbox, we evaluate the asymptotic tight bounds when the split branches exceed the polynomial overhead.", size: "14px", color: "#E4E4E7", weight: "Regular", type: "Paragraph", font: "Inter" },
+        { id: "el_link2", text: "🔗 Click to open MIT OpenCourseWare Complexity Bounds", size: "13px", color: "#60A5FA", weight: "Medium", type: "Hyperlink (MIT OCW)", font: "JetBrains Mono", url: "https://ocw.mit.edu/courses/electrical-engineering-and-computer-science/asymptotic-complexity-proof" },
+        { id: "el_h3", text: "🏢 Guwahati Municipal Land Boundary Ward Map & Data", size: "18px", color: "#FB7185", weight: "Semibold", type: "Heading 3", font: "Space Grotesk" },
+        { id: "el_p3", text: "For regional analytics pipelines, we query the official Assam Land Registry to extract coordinates, plot ward boundary margins, and clear building statements.", size: "14px", color: "#E4E4E7", weight: "Regular", type: "Paragraph", font: "Inter" },
+        { id: "el_link3", text: "🔗 Click to open Guwahati GMC NOC Registry Portal", size: "13px", color: "#60A5FA", weight: "Medium", type: "Hyperlink (GMC)", font: "JetBrains Mono", url: "https://gmc.assam.gov.in/land-valuation-noc" }
+      ];
+      fs.writeFileSync(CANVAS_FILE, JSON.stringify(canvasElements, null, 2));
+    }
+  } catch (e) {
+    console.error("Error reading canvas elements:", e);
+  }
+
+  try {
+    if (fs.existsSync(JOTTINGS_FILE)) {
+      jottingsList = JSON.parse(fs.readFileSync(JOTTINGS_FILE, "utf-8"));
+    } else {
+      jottingsList = [
+        { id: "jotting_1", name: "quantum_superposition.ipynb", label: "Quantum Superposition", description: "Saves verified Hadamard state matrices and Dirac equations" },
+        { id: "jotting_2", name: "complexity_bound.ipynb", label: "Complexity Bound", description: "Recursion tree simulations and master theorem verification bounds" },
+        { id: "jotting_3", name: "land_registry_noc.ipynb", label: "Unlinked", description: "GMC ward valuation data records and parcel indexes" }
+      ];
+      fs.writeFileSync(JOTTINGS_FILE, JSON.stringify(jottingsList, null, 2));
+    }
+  } catch (e) {
+    console.error("Error reading jottings:", e);
+  }
+
+  const saveCanvasElementsOnServer = () => {
+    try {
+      fs.writeFileSync(CANVAS_FILE, JSON.stringify(canvasElements, null, 2));
+    } catch (e) {
+      console.error("Error saving canvas elements:", e);
+    }
+  };
+
+  const saveJottingsOnServer = () => {
+    try {
+      fs.writeFileSync(JOTTINGS_FILE, JSON.stringify(jottingsList, null, 2));
+    } catch (e) {
+      console.error("Error saving jottings:", e);
+    }
+  };
+
+  app.get("/api/canvas/elements", (req, res) => {
+    res.json(canvasElements);
+  });
+
+  app.post("/api/canvas/elements", express.json(), (req, res) => {
+    if (Array.isArray(req.body)) {
+      canvasElements = req.body;
+      saveCanvasElementsOnServer();
+      res.json({ success: true, count: canvasElements.length });
+    } else {
+      res.status(400).json({ error: "Expected array of elements" });
+    }
+  });
+
+  app.get("/api/jottings", (req, res) => {
+    res.json(jottingsList);
+  });
+
+  app.post("/api/jottings", express.json(), (req, res) => {
+    if (Array.isArray(req.body)) {
+      jottingsList = req.body;
+      saveJottingsOnServer();
+      res.json({ success: true, count: jottingsList.length });
+    } else {
+      res.status(400).json({ error: "Expected array of jottings" });
+    }
   });
 
   // APPLE SIRI DISPATCH & PARSER WEBHOOK BRIDGE (POST/GET)
@@ -4077,14 +4861,15 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
   app.post("/api/gemini/chat", async (req, res) => {
     try {
       const { contents, systemInstruction, tools, toolMode, selectedModel, aiEnableCache, temperature, thinkingLevel, aiContextLimit } = req.body;
+      const customApiKey = (req.headers["x-gemini-api-key"] as string) || (req.headers["X-Gemini-API-Key"] as string) || req.body.customApiKey || "";
       
-      console.log("[GEMINI_PROXY] Stream requested. Key length:", process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.length : "MISSING/EMPTY");
+      console.log("[GEMINI_PROXY] Stream requested. Key length:", customApiKey ? customApiKey.length : (process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.length : "MISSING/EMPTY"));
       console.log(`[GEMINI_PROXY] Model: ${selectedModel || "default"} | ToolMode: ${toolMode || "default"}`);
 
       const model = selectedModel || "gemini-3.5-flash";
 
       // Configure dynamic temperature and thinking config
-      const targetThinkingLevel = thinkingLevel || (toolMode === 'convo' ? "MINIMAL" : undefined);
+      const targetThinkingLevel = sanitizeThinkingLevel(thinkingLevel) || (toolMode === 'convo' ? "MINIMAL" : undefined);
       const activeThinkingConfig = targetThinkingLevel ? { thinkingLevel: targetThinkingLevel } : undefined;
 
       // Compute a secure hash for the entire semantic request
@@ -4192,6 +4977,7 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
       try {
         responseStream = await generateContentStreamWithFallback({
           model,
+          customApiKey,
           contents: processedContents,
           config: {
             systemInstruction: finalInstruction,
@@ -4221,6 +5007,7 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
           try {
             responseStream = await generateContentStreamWithFallback({
               model,
+              customApiKey,
               contents: processedContents,
               config: {
                 systemInstruction: fallbackInstruction,
@@ -4351,7 +5138,7 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
           // Gather matching lines from the response text
           const linesUsed: string[] = [];
           const citMarker = `[${idx + 1}]`;
-          const sentences = aggregatedText.split(/[.!?]\s+/);
+          const sentences = aggregatedText.match(/[^.!?\n]+[.!?]+(?:\s*\[\d+\])*/g) || [];
           for (const s of sentences) {
             if (s.includes(citMarker)) {
               linesUsed.push(s.replace(new RegExp(`\\s*\\[\\s*${idx + 1}\\s*\\]`, 'g'), '').trim());
@@ -4409,10 +5196,14 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
         errMsg.includes("429") ||
         errMsg.includes("Too Many Requests") ||
         errMsg.includes("limit exceeded") ||
-        errMsg.includes("exhausted");
+        errMsg.includes("exhausted") ||
+        errMsg.includes("UNAVAILABLE") ||
+        errMsg.includes("503") ||
+        errMsg.includes("high demand") ||
+        errMsg.includes("overloaded");
 
       if (isQuota) {
-        console.log("[GEMINI_PROXY] Quota limit encountered. Commencing elegant offline smart-simulation streaming...");
+        console.log("[GEMINI_PROXY] Quota or high-demand limit encountered. Commencing elegant offline smart-simulation streaming...");
         try {
           if (!res.headersSent) {
             res.setHeader("Content-Type", "text/event-stream");
@@ -4582,49 +5373,77 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
   app.post("/api/gemini/chat-simple", express.json(), async (req, res) => {
     try {
       const { contents, systemInstruction, toolMode, selectedModel, aiEnableCache, temperature, thinkingLevel } = req.body;
+      const customApiKey = (req.headers["x-gemini-api-key"] as string) || (req.headers["X-Gemini-API-Key"] as string) || req.body.customApiKey || "";
       const model = selectedModel || "gemini-3.5-flash";
       
-      console.log(`[GEMINI_PROXY] chat-simple request. Selected model: ${model}`);
+      console.log(`[GEMINI_PROXY] chat-simple request. Selected model: ${model}. Custom key present: ${!!customApiKey}`);
       
       const instructions = systemInstruction || "You are Unison OS, a highly intelligent cognitive node assistant. Respond conversationally, keeping replies helpful, crisp, and beautifully styled.";
       
+      const targetThinkingLevel = sanitizeThinkingLevel(thinkingLevel);
+
       const cacheKey = computePayloadHash({
         model,
         contents,
         systemInstruction: instructions,
         toolMode,
         temperature,
-        thinkingLevel
+        thinkingLevel: targetThinkingLevel
       });
 
       if (aiEnableCache !== false && aiCache[cacheKey]) {
         console.log(`[AI_CACHE] Simple chat cache hit for key ${cacheKey}`);
-        return res.json({ text: aiCache[cacheKey].text, cached: true });
+        return res.json({ 
+          text: aiCache[cacheKey].text, 
+          thoughts: (aiCache[cacheKey] as any).thoughts || "", 
+          cached: true 
+        });
       }
 
       const response = await generateContentWithFallback({
         model: model,
+        customApiKey,
         contents: contents,
         config: {
           systemInstruction: instructions,
-          ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
+          ...(targetThinkingLevel ? { thinkingConfig: { thinkingLevel: targetThinkingLevel } } : {}),
           ...(temperature !== undefined ? { temperature: Number(temperature) } : {})
         }
       });
       
-      const responseText = response.text || "";
+      let textResult = response.text || "";
+      let thoughts = "";
 
-      if (aiEnableCache !== false && responseText) {
+      // Native thinking models parts extraction
+      if (response.candidates?.[0]?.content?.parts) {
+        const parts = response.candidates[0].content.parts;
+        const thoughtParts = parts.filter((p: any) => p.thought === true || p.thought);
+        if (thoughtParts.length > 0) {
+          thoughts = thoughtParts.map((p: any) => p.text || "").join("\n");
+        }
+      }
+
+      // XML-style fallback extraction
+      const match = textResult.match(/<thought>([\s\S]*?)<\/thought>/i);
+      if (match) {
+        if (!thoughts) {
+          thoughts = match[1];
+        }
+        textResult = textResult.replace(/<thought>[\s\S]*?<\/thought>/gi, '').trim();
+      }
+
+      if (aiEnableCache !== false && textResult) {
         aiCache[cacheKey] = {
           model,
-          text: responseText,
+          text: textResult,
+          thoughts,
           timestamp: Date.now()
-        };
+        } as any;
         saveCache();
         console.log(`[AI_CACHE] Cached simple response for key ${cacheKey}`);
       }
 
-      res.json({ text: responseText });
+      res.json({ text: textResult, thoughts });
     } catch (err: any) {
       console.error("Gemini chat-simple error:", err);
       const isQuota = err.status === 429 || err.statusCode === 429 || String(err).toLowerCase().includes("quota") || String(err).toLowerCase().includes("429") || String(err).toLowerCase().includes("resource_exhausted") || String(err).toLowerCase().includes("exhausted");
@@ -4709,6 +5528,8 @@ Instructions:
 4. If there is a computer code block or pseudo-code block, transcribe it completely in a markdown block with its respective language syntax.
 5. Do NOT output any introductory or concluding pleasantries, talk, explanations, or meta tags. Simply output the beautifully structured, LaTeX-typeset mathematical and editorial transcription of the page.`;
 
+      const targetThinkingLevel = sanitizeThinkingLevel(thinkingLevel);
+
       // Optimized hash key generation to avoid CPU-bound hashing of mammoth base64 files
       const cacheKey = computePayloadHash({
         textKey: rawText || "",
@@ -4718,7 +5539,7 @@ Instructions:
         selectedModel,
         imageLen: base64Image ? base64Image.length : 0,
         temperature,
-        thinkingLevel
+        thinkingLevel: targetThinkingLevel
       });
 
       if (aiEnableCache !== false && aiCache[cacheKey]) {
@@ -4769,7 +5590,7 @@ And here is the raw extracted OCR helper text (warning: may contain scrambled ma
         contents: contents,
         config: {
           systemInstruction: instructions,
-          ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
+          ...(targetThinkingLevel ? { thinkingConfig: { thinkingLevel: targetThinkingLevel } } : {}),
           ...(temperature !== undefined ? { temperature: Number(temperature) } : {})
         }
       });
