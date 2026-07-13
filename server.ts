@@ -2852,24 +2852,6 @@ export default function App() {
         tools = [{ googleSearch: {} }];
       }
 
-      // Append real-time companion native computer control capabilities instruction to Gemini
-      systemInstruction += `\n\nNATIVE COMPUTER CONTROL PROTOCOL ACTIVATED: You have direct physical control over the user's computer through native macOS/iOS automation (mouse clicks, dragging, keyboard text entry, launching applications, opening URLs, and running web searches).
-Whenever the user asks you to perform a physical task on their machine (e.g. go to a website, search for something on Google, open an application, type something, click, or drag), and you are ready to execute it, you MUST append a hidden command tag at the very end of your response using the exact format:
-[COMMAND: <DEVICE_ACTION>]
-
-The supported native <DEVICE_ACTION> formats are:
-- DEVICE_ACTION_OPEN_URL:<url> (e.g. [COMMAND: DEVICE_ACTION_OPEN_URL:https://github.com])
-- DEVICE_ACTION_SEARCH:<query> (e.g. [COMMAND: DEVICE_ACTION_SEARCH:weather in New York])
-- DEVICE_ACTION_LAUNCH_APP:<appName> (e.g. [COMMAND: DEVICE_ACTION_LAUNCH_APP:Safari] or [COMMAND: DEVICE_ACTION_LAUNCH_APP:Terminal])
-- DEVICE_ACTION_TYPE:<text> (e.g. [COMMAND: DEVICE_ACTION_TYPE:hello world])
-- DEVICE_ACTION_CLICK:<xPct>:<yPct>:<label> (e.g. [COMMAND: DEVICE_ACTION_CLICK:50:50:Screen_Center])
-- DEVICE_ACTION_DRAG:<x1>:<y1>:<x2>:<y2> (e.g. [COMMAND: DEVICE_ACTION_DRAG:20:20:80:80])
-
-Rules:
-1. Only output a command when you are actually executing or initiating it (e.g. after the user confirms, or immediately if confirmation isn't needed).
-2. Ensure the URL is fully formed (starts with http:// or https://).
-3. Do not mention the command tag in your natural language text; just place it silently at the very end of your response.`;
-
       // 4. Trigger Gemini
       console.log(`[COMPANION] ${toolMode.toUpperCase()} mode resolved. Invoking Gemini response for companion client...`);
       let geminiReply = "Offline simulation fallback.";
@@ -2956,26 +2938,6 @@ Rules:
         console.error("[COMPANION] Gemini generation failed:", geminiError);
         geminiReply = `System error on Gemini routing layer: ${geminiError.message || String(geminiError)}`;
       }
-
-      // Extract any [COMMAND: DEVICE_ACTION_...] tag emitted by Gemini to trigger native devices
-      let companionCmd: string | null = null;
-      const cmdRegex = /\[COMMAND:\s*(DEVICE_ACTION_[^\]]+)\]/i;
-      const cmdMatch = geminiReply.match(cmdRegex);
-      if (cmdMatch) {
-        companionCmd = cmdMatch[1].trim();
-        // Clean the [COMMAND: ...] tag from geminiReply so that it remains hidden in the user's visible messages logs
-        geminiReply = geminiReply.replace(cmdRegex, "").trim();
-      }
-
-      if (companionCmd) {
-        console.log(`[COMPANION] Extracted native command to execute: ${companionCmd}`);
-        activeCompanionCommands.push({
-          id: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          cmd: companionCmd,
-          timestamp: Date.now() / 1000
-        });
-        if (activeCompanionCommands.length > 50) activeCompanionCommands.shift();
-      }
       
       // 5. Save Gemini response
       const modelMsgId = "msg_m_" + Date.now();
@@ -3019,6 +2981,383 @@ Rules:
   app.get("/api/companion/commands", (req, res) => {
     res.json(activeCompanionCommands);
   });
+
+  // --- MODEL CONTEXT PROTOCOL (MCP) INTERFACE ---
+  const mcpSessions = new Map<string, express.Response>();
+
+  // SSE Transport Entry Point
+  app.get("/api/mcp/sse", (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    const sessionId = `mcp-session-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    mcpSessions.set(sessionId, res);
+
+    // Write initial endpoint redirect event telling the client where to send POST messages
+    res.write(`event: endpoint\ndata: /api/mcp/message?sessionId=${sessionId}\n\n`);
+
+    const keepAliveInterval = setInterval(() => {
+      res.write(': keepalive\n\n');
+    }, 15000);
+
+    req.on('close', () => {
+      clearInterval(keepAliveInterval);
+      mcpSessions.delete(sessionId);
+    });
+  });
+
+  // JSON-RPC 2.0 Router for MCP Tools
+  app.post("/api/mcp/message", express.json(), async (req, res) => {
+    try {
+      const { jsonrpc, method, params, id } = req.body;
+      const sessionId = req.query.sessionId as string;
+
+      if (jsonrpc !== "2.0") {
+        return res.status(400).json({
+          jsonrpc: "2.0",
+          error: { code: -32600, message: "Invalid Request: Must be JSON-RPC 2.0" },
+          id
+        });
+      }
+
+      // Handle tool listing request
+      if (method === "tools/list") {
+        const toolsList = [
+          {
+            name: "unison_click",
+            description: "Click at coordinates on macOS screen (coordinates are 0-100 percentage values). Executes on the user's computer via the Unison Native Companion app.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                x: { type: "number", description: "X coordinate as percentage (0 to 100)" },
+                y: { type: "number", description: "Y coordinate as percentage (0 to 100)" },
+                label: { type: "string", description: "Optional description of what is being clicked" }
+              },
+              required: ["x", "y"]
+            }
+          },
+          {
+            name: "unison_drag",
+            description: "Perform drag-and-drop on macOS screen between two coordinates (0-100 percentage values).",
+            inputSchema: {
+              type: "object",
+              properties: {
+                x1: { type: "number", description: "Starting X coordinate percentage (0 to 100)" },
+                y1: { type: "number", description: "Starting Y coordinate percentage (0 to 100)" },
+                x2: { type: "number", description: "Ending X coordinate percentage (0 to 100)" },
+                y2: { type: "number", description: "Ending Y coordinate percentage (0 to 100)" }
+              },
+              required: ["x1", "y1", "x2", "y2"]
+            }
+          },
+          {
+            name: "unison_type",
+            description: "Type specific text via macOS System Events keystroke scripting. Activates keyboard entry on active input focused elements.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                text: { type: "string", description: "The literal string to type. Can include return character." }
+              },
+              required: ["text"]
+            }
+          },
+          {
+            name: "unison_open_url",
+            description: "Open any URL in the system browser natively.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                url: { type: "string", description: "The full URL to open (e.g. https://github.com)" }
+              },
+              required: ["url"]
+            }
+          },
+          {
+            name: "unison_launch_app",
+            description: "Activate and focus on a target desktop application.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                appName: { type: "string", description: "The exact name of the application (e.g. Safari, Xcode, Terminal, Finder)" }
+              },
+              required: ["appName"]
+            }
+          },
+          {
+            name: "unison_search",
+            description: "Dispatch a Google browser search natively on the user's screen.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "The search query term" }
+              },
+              required: ["query"]
+            }
+          },
+          {
+            name: "unison_read_file",
+            description: "Read a text file from the workspace project workspace folder.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                filePath: { type: "string", description: "Relative path to file (e.g. src/App.tsx)" }
+              },
+              required: ["filePath"]
+            }
+          },
+          {
+            name: "unison_write_file",
+            description: "Write or update a file in the workspace folder.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                filePath: { type: "string", description: "Relative path to file" },
+                content: { type: "string", description: "Complete file contents to write" }
+              },
+              required: ["filePath", "content"]
+            }
+          },
+          {
+            name: "unison_list_dir",
+            description: "List files and folders in a relative directory of the workspace.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                dirPath: { type: "string", description: "Relative directory path (defaults to empty/root)" }
+              }
+            }
+          }
+        ];
+
+        return res.json({
+          jsonrpc: "2.0",
+          result: { tools: toolsList },
+          id
+        });
+      }
+
+      // Handle tool call request
+      if (method === "tools/call") {
+        const { name: toolName, arguments: args } = params;
+        let executionMessage = "";
+        let commandToPush = "";
+        let wsEventToSend: any = null;
+
+        if (toolName === "unison_click") {
+          const { x, y, label = "Target" } = args;
+          commandToPush = `DEVICE_ACTION_CLICK:${x}:${y}:${label}`;
+          executionMessage = `[MCP Tool] Dispatched click action at [x: ${x}%, y: ${y}%] on '${label}'`;
+          wsEventToSend = { type: "DEVICE_CONTROL_COMMAND", command: `click:${x}:${y}:${label}` };
+        } else if (toolName === "unison_drag") {
+          const { x1, y1, x2, y2 } = args;
+          commandToPush = `DEVICE_ACTION_DRAG:${x1}:${y1}:${x2}:${y2}`;
+          executionMessage = `[MCP Tool] Dispatched drag action from [${x1}%, ${y1}%] to [${x2}%, ${y2}%]`;
+          wsEventToSend = { type: "DEVICE_CONTROL_COMMAND", command: `drag:${x1}:${y1}:${x2}:${y2}` };
+        } else if (toolName === "unison_type") {
+          const { text } = args;
+          commandToPush = `DEVICE_ACTION_TYPE:${text}`;
+          executionMessage = `[MCP Tool] Dispatched keyboard typing command: "${text}"`;
+          wsEventToSend = { type: "DEVICE_CONTROL_COMMAND", command: `type:${text}` };
+        } else if (toolName === "unison_open_url") {
+          const { url } = args;
+          commandToPush = `DEVICE_ACTION_OPEN_URL:${url}`;
+          executionMessage = `[MCP Tool] Dispatched open browser URL: "${url}"`;
+          wsEventToSend = { type: "DEVICE_CONTROL_COMMAND", command: `open_url:${url}` };
+        } else if (toolName === "unison_launch_app") {
+          const { appName } = args;
+          commandToPush = `DEVICE_ACTION_LAUNCH_APP:${appName}`;
+          executionMessage = `[MCP Tool] Dispatched app launch request for: "${appName}"`;
+          wsEventToSend = { type: "DEVICE_CONTROL_COMMAND", command: `launch_app:${appName}` };
+        } else if (toolName === "unison_search") {
+          const { query } = args;
+          commandToPush = `DEVICE_ACTION_SEARCH:${query}`;
+          executionMessage = `[MCP Tool] Dispatched web search for: "${query}"`;
+          wsEventToSend = { type: "DEVICE_CONTROL_COMMAND", command: `search:${query}` };
+        } else if (toolName === "unison_read_file") {
+          const { filePath } = args;
+          const fullPath = path.join(process.cwd(), filePath.replace(/^\//, ''));
+          try {
+            const content = fs.readFileSync(fullPath, "utf-8");
+            return res.json({
+              jsonrpc: "2.0",
+              result: {
+                content: [{ type: "text", text: content }]
+              },
+              id
+            });
+          } catch (err: any) {
+            return res.json({
+              jsonrpc: "2.0",
+              error: { code: -32602, message: `File read error: ${err.message}` },
+              id
+            });
+          }
+        } else if (toolName === "unison_write_file") {
+          const { filePath, content } = args;
+          const fullPath = path.join(process.cwd(), filePath.replace(/^\//, ''));
+          try {
+            const dirPath = path.dirname(fullPath);
+            if (!fs.existsSync(dirPath)) {
+              fs.mkdirSync(dirPath, { recursive: true });
+            }
+            fs.writeFileSync(fullPath, content, "utf-8");
+            return res.json({
+              jsonrpc: "2.0",
+              result: {
+                content: [{ type: "text", text: `Successfully wrote file at: ${filePath}` }]
+              },
+              id
+            });
+          } catch (err: any) {
+            return res.json({
+              jsonrpc: "2.0",
+              error: { code: -32602, message: `File write error: ${err.message}` },
+              id
+            });
+          }
+        } else if (toolName === "unison_list_dir") {
+          const { dirPath = "" } = args;
+          const fullPath = path.join(process.cwd(), dirPath.replace(/^\//, ''));
+          try {
+            const entries = fs.readdirSync(fullPath, { withFileTypes: true });
+            const list = entries.map(e => `${e.isDirectory() ? '[DIR]' : '[FILE]'} ${e.name}`).join("\n");
+            return res.json({
+              jsonrpc: "2.0",
+              result: {
+                content: [{ type: "text", text: list || "(empty directory)" }]
+              },
+              id
+            });
+          } catch (err: any) {
+            return res.json({
+              jsonrpc: "2.0",
+              error: { code: -32602, message: `Directory read error: ${err.message}` },
+              id
+            });
+          }
+        } else {
+          return res.status(404).json({
+            jsonrpc: "2.0",
+            error: { code: -32601, message: `Method not found: ${toolName}` },
+            id
+          });
+        }
+
+        // Apply control actions to central pipeline trackers
+        if (commandToPush) {
+          activeCompanionCommands.push({
+            id: `cmd-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            cmd: commandToPush,
+            timestamp: Date.now() / 1000
+          });
+          if (activeCompanionCommands.length > 50) activeCompanionCommands.shift();
+
+          // Standardize log outputs
+          kernelState.logs.push(`MCP_AUTOMATION: ${executionMessage}`);
+          if (kernelState.logs.length > 50) kernelState.logs.shift();
+          console.log(`[MCP_SERVER] Executed: ${executionMessage}`);
+
+          // Broadcast instantly over raw WebSocket to the native app if it has active frame link
+          if (wsEventToSend) {
+            const wsPayload = JSON.stringify(wsEventToSend);
+            wss.clients.forEach(c => {
+              if (c.readyState === WebSocket.OPEN) {
+                c.send(wsPayload);
+              }
+            });
+          }
+        }
+
+        return res.json({
+          jsonrpc: "2.0",
+          result: {
+            content: [{ type: "text", text: executionMessage }]
+          },
+          id
+        });
+      }
+
+      // Default fallback error
+      return res.status(400).json({
+        jsonrpc: "2.0",
+        error: { code: -32601, message: `Unrecognized MCP method: ${method}` },
+        id
+      });
+
+    } catch (err: any) {
+      console.error("[MCP_SERVER] Internal Route Exception:", err);
+      res.status(500).json({
+        jsonrpc: "2.0",
+        error: { code: -32603, message: err.message || "Internal server error" },
+        id: req.body.id || null
+      });
+    }
+  });
+
+  // Direct REST Execution Gateway (Bypasses JSON-RPC for simple custom scripts)
+  app.post("/api/mcp/execute", express.json(), (req, res) => {
+    try {
+      const { action, params = {} } = req.body;
+      if (!action) return res.status(400).json({ error: "Missing action parameter" });
+
+      let cmdString = "";
+      let desc = "";
+
+      switch (action) {
+        case "click":
+          cmdString = `DEVICE_ACTION_CLICK:${params.x || 50}:${params.y || 50}:${params.label || "Target"}`;
+          desc = `Clicked coordinate [x: ${params.x}%, y: ${params.y}%]`;
+          break;
+        case "drag":
+          cmdString = `DEVICE_ACTION_DRAG:${params.x1}:${params.y1}:${params.x2}:${params.y2}`;
+          desc = `Dragged from [${params.x1}%, ${params.y1}%] to [${params.x2}%, ${params.y2}%]`;
+          break;
+        case "type":
+          cmdString = `DEVICE_ACTION_TYPE:${params.text || ""}`;
+          desc = `Typed keystrokes: "${params.text}"`;
+          break;
+        case "open_url":
+          cmdString = `DEVICE_ACTION_OPEN_URL:${params.url}`;
+          desc = `Opened web URL: ${params.url}`;
+          break;
+        case "launch_app":
+          cmdString = `DEVICE_ACTION_LAUNCH_APP:${params.appName}`;
+          desc = `Launched native app: ${params.appName}`;
+          break;
+        case "search":
+          cmdString = `DEVICE_ACTION_SEARCH:${params.query}`;
+          desc = `Searched Google for: "${params.query}"`;
+          break;
+        default:
+          return res.status(400).json({ error: `Unsupported action: ${action}` });
+      }
+
+      activeCompanionCommands.push({
+        id: `cmd-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        cmd: cmdString,
+        timestamp: Date.now() / 1000
+      });
+      if (activeCompanionCommands.length > 50) activeCompanionCommands.shift();
+
+      kernelState.logs.push(`MCP_DIRECT: ${desc}`);
+      if (kernelState.logs.length > 50) kernelState.logs.shift();
+
+      // Broadcast over WebSocket
+      const wsEvent = { type: "DEVICE_CONTROL_COMMAND", command: cmdString };
+      wss.clients.forEach(c => {
+        if (c.readyState === WebSocket.OPEN) {
+          c.send(JSON.stringify(wsEvent));
+        }
+      });
+
+      res.json({ success: true, description: desc, cmdString });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // --- END COMPANION INTERCEPT ROUTING ---
 
   // Dedicated proxy route for local/remote Raspberry Pi Daemons
