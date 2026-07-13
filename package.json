@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "node -e \"const fs = require('fs'); if (fs.existsSync('index.html')) { console.log('Building frontend with Vite...'); require('child_process').execSync('vite build', {stdio: 'inherit'}); } else { console.log('No index.html found. Skipping frontend build.'); }\" && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "node build.js",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "eslint src --quiet",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\"",
+    "test": "vitest run"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
@@ -54,6 +56,13 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@types/jszip": "^3.4.0"
+    "@types/jszip": "^3.4.0",
+    "@typescript-eslint/eslint-plugin": "^8.62.1",
+    "@typescript-eslint/parser": "^8.62.1",
+    "@vitejs/plugin-react-swc": "^4.3.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "vitest": "^4.1.9"
   }
 }
