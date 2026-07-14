@@ -7,7 +7,7 @@ import { createServer } from "http";
 import { GoogleGenAI } from "@google/genai";
 import { spawn, exec } from "child_process";
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const googleGenAI = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY || "",
   httpOptions: {
@@ -1302,6 +1302,7 @@ async function startServer() {
     screenSize?: string;
     activeWindows?: string[];
     focusedWindow?: string | null;
+    screenshot?: string;
   }
 
   let connectedDevices: ConnectedDevice[] = [];
@@ -1464,6 +1465,21 @@ async function startServer() {
               if (screenSize) d.screenSize = screenSize;
               if (activeWindows) d.activeWindows = activeWindows;
               if (focusedWindow !== undefined) d.focusedWindow = focusedWindow;
+            }
+            recalculateActiveDevice();
+            broadcastDevices();
+          }
+          return;
+        }
+
+        if (payload.type === 'DEVICE_SCREENSHOT_UPDATE') {
+          const dId = (ws as any).deviceId || payload.deviceId;
+          const { screenshot } = payload;
+          if (dId && screenshot) {
+            let d = connectedDevices.find(x => x.id === dId);
+            if (d) {
+              d.lastActive = Date.now();
+              d.screenshot = screenshot;
             }
             recalculateActiveDevice();
             broadcastDevices();
@@ -1642,6 +1658,51 @@ async function startServer() {
             timestamp: Date.now() / 1000
           });
           if (activeCompanionCommands.length > 50) activeCompanionCommands.shift();
+
+          // Intercept device-level actions and broadcast/target them over raw WebSockets
+          if (payload.cmd && (payload.cmd.startsWith('DEVICE_ACTION_') || payload.cmd.startsWith('click:') || payload.cmd.startsWith('type:'))) {
+            let cmdString = payload.cmd;
+            
+            // Translate DEVICE_ACTION_* prefixes to shorter unified API if needed
+            if (payload.cmd.startsWith('DEVICE_ACTION_CLICK:')) {
+              const parts = payload.cmd.split(':');
+              cmdString = `click:${parts[1]}:${parts[2]}:${parts.slice(3).join(':') || 'Target'}`;
+            } else if (payload.cmd.startsWith('DEVICE_ACTION_DRAG:')) {
+              const parts = payload.cmd.split(':');
+              cmdString = `drag:${parts[1]}:${parts[2]}:${parts[3]}:${parts[4]}`;
+            } else if (payload.cmd.startsWith('DEVICE_ACTION_TYPE:')) {
+              cmdString = `type:${payload.cmd.substring('DEVICE_ACTION_TYPE:'.length)}`;
+            } else if (payload.cmd.startsWith('DEVICE_ACTION_OPEN_URL:')) {
+              cmdString = `open_url:${payload.cmd.substring('DEVICE_ACTION_OPEN_URL:'.length)}`;
+            } else if (payload.cmd.startsWith('DEVICE_ACTION_LAUNCH_APP:')) {
+              cmdString = `launch_app:${payload.cmd.substring('DEVICE_ACTION_LAUNCH_APP:'.length)}`;
+            } else if (payload.cmd.startsWith('DEVICE_ACTION_SEARCH:')) {
+              cmdString = `search:${payload.cmd.substring('DEVICE_ACTION_SEARCH:'.length)}`;
+            }
+
+            const targetDeviceId = payload.targetDeviceId;
+            const wsPayload = JSON.stringify({
+              type: 'DEVICE_CONTROL_COMMAND',
+              command: cmdString,
+              targetDeviceId: targetDeviceId || null,
+              senderDeviceId: (ws as any).deviceId || null
+            });
+
+            wss.clients.forEach(c => {
+              if (c.readyState === WebSocket.OPEN) {
+                // If targeted, only send to matching deviceId. Otherwise, send to everyone except the sender
+                if (targetDeviceId) {
+                  if ((c as any).deviceId === targetDeviceId) {
+                    c.send(wsPayload);
+                  }
+                } else {
+                  if (c !== ws) {
+                    c.send(wsPayload);
+                  }
+                }
+              }
+            });
+          }
           
           const [action, ...args] = payload.cmd.split(' ');
           
@@ -2802,6 +2863,18 @@ export default function App() {
       line = line.trim();
       if (!line) continue;
 
+      // Special Keystrokes & Keyboard commands
+      if (line === 'type \\n' || line === 'type \n' || line.includes('press enter') || line.includes('press return') || line.includes('hit enter') || line.includes('hit return') || line === 'enter' || line === 'return') {
+        commands.push('DEVICE_ACTION_TYPE:\n');
+        continue;
+      }
+
+      // Special Screenshot commands
+      if (line.includes('take screenshot') || line.includes('take a screenshot') || line.includes('capture screen') || line.includes('screenshot')) {
+        commands.push('DEVICE_ACTION_SCREENSHOT');
+        continue;
+      }
+
       // 1. Coordinates Click: "click at 30, 40" or "click 30 40" or "tap 50, 60"
       const clickCoordRegex = /(?:click|press|tap)\s*(?:at\s*)?(\d+)(?:\s*%)?\s*[, ]\s*(\d+)(?:\s*%)?/;
       const matchCoord = line.match(clickCoordRegex);
@@ -2937,8 +3010,28 @@ export default function App() {
       uid = await resolveUidFromEmailOrQuery(uid, email);
       
       // Parse potential native commands from the content and queue them immediately
-      const parsedNativeCommands = parseNaturalLanguagePromptToServerCommands(content);
+      let parsedNativeCommands = parseNaturalLanguagePromptToServerCommands(content);
+      let screenshotExpected = false;
+      const screenshotPath = path.join(process.cwd(), "unison_screenshot.png");
+
       if (parsedNativeCommands.length > 0) {
+        // Force a screenshot capture to close the realtime verification loop
+        const hasScreenshot = parsedNativeCommands.some(cmd => cmd.includes("DEVICE_ACTION_SCREENSHOT"));
+        if (!hasScreenshot) {
+          parsedNativeCommands.push("DEVICE_ACTION_SCREENSHOT");
+        }
+        screenshotExpected = true;
+
+        // Clear existing screenshot file to avoid stale cache reads
+        if (fs.existsSync(screenshotPath)) {
+          try {
+            fs.unlinkSync(screenshotPath);
+            console.log("[COMPANION] Removed old unison_screenshot.png to prepare for fresh execution.");
+          } catch (unlinkErr) {
+            console.error("[COMPANION] Error clearing stale screenshot:", unlinkErr);
+          }
+        }
+
         console.log(`[COMPANION] Detected ${parsedNativeCommands.length} native hardware automation commands. Dispatching to activeCompanionCommands...`);
         for (const cmdString of parsedNativeCommands) {
           activeCompanionCommands.push({
@@ -3017,67 +3110,149 @@ export default function App() {
       let geminiReply = "Offline simulation fallback.";
       let detectedSources: any[] = [];
 
-      try {
-        const payload: any = {
-          model: "gemini-3.5-flash",
-          contents: contents,
-          config: {
-            systemInstruction,
-            temperature: 0.7
+      if (screenshotExpected) {
+        console.log("[COMPANION] Command pipeline engaged. Polling for physical device visual execution screenshot...");
+        let screenshotUploaded = false;
+        const pollInterval = 300;
+        const maxPollTime = 12000; // 12 seconds max wait
+        let elapsed = 0;
+
+        while (elapsed < maxPollTime) {
+          if (fs.existsSync(screenshotPath)) {
+            const stats = fs.statSync(screenshotPath);
+            if (stats.size > 1000) {
+              screenshotUploaded = true;
+              break;
+            }
           }
-        };
-
-        if (tools) payload.config.tools = tools;
-        if (toolConfig) payload.config.toolConfig = toolConfig;
-
-        const geminiRes = await generateContentWithFallback(payload);
-        
-        let textResult = "";
-        if (geminiRes && typeof geminiRes.text === 'string') {
-          textResult = geminiRes.text;
-        } else if (geminiRes && geminiRes.candidates && geminiRes.candidates[0]?.content?.parts?.[0]?.text) {
-          textResult = geminiRes.candidates[0].content.parts[0].text;
-        } else if (geminiRes && typeof geminiRes.text === 'function') {
-          textResult = await geminiRes.text();
-        } else {
-          textResult = JSON.stringify(geminiRes);
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+          elapsed += pollInterval;
         }
-        geminiReply = textResult;
 
+        if (screenshotUploaded) {
+          console.log(`[COMPANION] Verified execution feedback. Fresh screenshot detected (${fs.statSync(screenshotPath).size} bytes). Generating vision verification report...`);
+          try {
+            const imgBuffer = fs.readFileSync(screenshotPath);
+            const base64Img = imgBuffer.toString("base64");
+            
+            const verificationPrompt = `You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment.
+The user requested this real-time native computer use operation:
+"${content}"
+
+We successfully dispatched these precise commands to their physical computer/device cockpit:
+${parsedNativeCommands.join('\n')}
+
+Analyze this live screenshot of their screen to visually verify if the task succeeded (e.g. terminal is open, terminal console focused, the correct command was entered/run, and shows successful output on the screen).
+
+GUIDELINES:
+1. Examine the visual state of the screen carefully.
+2. If the task succeeded, provide a beautiful, extremely polished, professional confirmation of success, detailing exactly what you see on the screen confirming the success (e.g. active terminal, loaded packages, active browser tab, settings page).
+3. If it failed, is stuck, or has an error, describe exactly what went wrong or what is visible, and outline the required correction.
+4. Speak with absolute composure, confidence, and precision. Only claim success if you are 100% sure based on the visual evidence. Do not mention that you are an AI or simulating.`;
+
+            const result = await generateContentWithFallback({
+              model: "gemini-3.5-flash",
+              contents: [
+                {
+                  role: "user",
+                  parts: [
+                    { text: verificationPrompt },
+                    {
+                      inlineData: {
+                        mimeType: "image/png",
+                        data: base64Img
+                      }
+                    }
+                  ]
+                }
+              ]
+            });
+
+            if (result && typeof result.text === 'string') {
+              geminiReply = result.text;
+            } else if (result && result.candidates && result.candidates[0]?.content?.parts?.[0]?.text) {
+              geminiReply = result.candidates[0].content.parts[0].text;
+            } else if (result && typeof result.text === 'function') {
+              geminiReply = await result.text();
+            } else {
+              geminiReply = JSON.stringify(result);
+            }
+          } catch (visionErr: any) {
+            console.error("[COMPANION] Vision verification failed:", visionErr);
+            geminiReply = `I successfully dispatched the commands to your device cockpit, but the subsequent vision-verification layer failed: ${visionErr.message || String(visionErr)}. Please check your companion configuration.`;
+          }
+        } else {
+          console.log("[COMPANION] Real-time screenshot polling timed out. No feedback received.");
+          geminiReply = `I have queued the native commands in your Unison OS device cockpit:
+${parsedNativeCommands.map(c => `- ${c}`).join('\n')}
+
+**Real-Time Connection Notice**: I initiated a live execution confirmation, but your companion app did not upload a screenshot within the timeout. Please check:
+1. That your Swift UI/macOS app is paired and running.
+2. That Accessibility permissions are granted for Terminal/System Events control on your computer.`;
+        }
+      } else {
         try {
-          const firstCandidate = geminiRes.candidates?.[0];
-          if (firstCandidate && firstCandidate.groundingMetadata) {
-            const meta = firstCandidate.groundingMetadata;
-            const chunks = meta.groundingChunks || [];
-            for (const c of chunks) {
-              if (c.web) {
-                const url = c.web.uri || c.web.url || '';
-                const title = c.web.title || 'Source';
-                if (url && !detectedSources.some(s => s.url === url)) {
-                  detectedSources.push({
-                    title: title,
-                    url: url,
-                    siteName: url.split('/')[2]?.replace('www.', '') || 'Web',
-                    snippet: c.web.snippet || '',
-                    linesUsed: []
-                  });
+          const payload: any = {
+            model: "gemini-3.5-flash",
+            contents: contents,
+            config: {
+              systemInstruction,
+              temperature: 0.7
+            }
+          };
+
+          if (tools) payload.config.tools = tools;
+          if (toolConfig) payload.config.toolConfig = toolConfig;
+
+          const geminiRes = await generateContentWithFallback(payload);
+          
+          let textResult = "";
+          if (geminiRes && typeof geminiRes.text === 'string') {
+            textResult = geminiRes.text;
+          } else if (geminiRes && geminiRes.candidates && geminiRes.candidates[0]?.content?.parts?.[0]?.text) {
+            textResult = geminiRes.candidates[0].content.parts[0].text;
+          } else if (geminiRes && typeof geminiRes.text === 'function') {
+            textResult = await geminiRes.text();
+          } else {
+            textResult = JSON.stringify(geminiRes);
+          }
+          geminiReply = textResult;
+
+          try {
+            const firstCandidate = geminiRes.candidates?.[0];
+            if (firstCandidate && firstCandidate.groundingMetadata) {
+              const meta = firstCandidate.groundingMetadata;
+              const chunks = meta.groundingChunks || [];
+              for (const c of chunks) {
+                if (c.web) {
+                  const url = c.web.uri || c.web.url || '';
+                  const title = c.web.title || 'Source';
+                  if (url && !detectedSources.some(s => s.url === url)) {
+                    detectedSources.push({
+                      title: title,
+                      url: url,
+                      siteName: url.split('/')[2]?.replace('www.', '') || 'Web',
+                      snippet: c.web.snippet || '',
+                      linesUsed: []
+                    });
+                  }
                 }
               }
-            }
-            const supports = meta.groundingSupports || [];
-            for (const s of supports) {
-              const segmentText = s.segment?.text || '';
-              if (segmentText && s.groundingChunkIndices) {
-                for (const chunkIdx of s.groundingChunkIndices) {
-                  const chunk = chunks[chunkIdx];
-                  if (chunk && chunk.web) {
-                    const url = chunk.web.uri || chunk.web.url || '';
-                    if (url) {
-                      const existingSource = detectedSources.find(src => src.url === url);
-                      if (existingSource) {
-                        if (!existingSource.linesUsed) existingSource.linesUsed = [];
-                        if (!existingSource.linesUsed.includes(segmentText)) {
-                          existingSource.linesUsed.push(segmentText);
+              const supports = meta.groundingSupports || [];
+              for (const s of supports) {
+                const segmentText = s.segment?.text || '';
+                if (segmentText && s.groundingChunkIndices) {
+                  for (const chunkIdx of s.groundingChunkIndices) {
+                    const chunk = chunks[chunkIdx];
+                    if (chunk && chunk.web) {
+                      const url = chunk.web.uri || chunk.web.url || '';
+                      if (url) {
+                        const existingSource = detectedSources.find(src => src.url === url);
+                        if (existingSource) {
+                          if (!existingSource.linesUsed) existingSource.linesUsed = [];
+                          if (!existingSource.linesUsed.includes(segmentText)) {
+                            existingSource.linesUsed.push(segmentText);
+                          }
                         }
                       }
                     }
@@ -3085,18 +3260,18 @@ export default function App() {
                 }
               }
             }
+          } catch (groundingErr) {
+            console.error("[COMPANION] Grounding metadata parse failed:", groundingErr);
           }
-        } catch (groundingErr) {
-          console.error("[COMPANION] Grounding metadata parse failed:", groundingErr);
-        }
 
-        if (detectedSources.length > 0) {
-          console.log(`[COMPANION] Parsed ${detectedSources.length} grounded web sources. Inserting SOURCES indexing metadata...`);
-          geminiReply += `\n\n[SOURCES: ${JSON.stringify(detectedSources)}]`;
+          if (detectedSources.length > 0) {
+            console.log(`[COMPANION] Parsed ${detectedSources.length} grounded web sources. Inserting SOURCES indexing metadata...`);
+            geminiReply += `\n\n[SOURCES: ${JSON.stringify(detectedSources)}]`;
+          }
+        } catch (geminiError: any) {
+          console.error("[COMPANION] Gemini generation failed:", geminiError);
+          geminiReply = `System error on Gemini routing layer: ${geminiError.message || String(geminiError)}`;
         }
-      } catch (geminiError: any) {
-        console.error("[COMPANION] Gemini generation failed:", geminiError);
-        geminiReply = `System error on Gemini routing layer: ${geminiError.message || String(geminiError)}`;
       }
       
       // 5. Save Gemini response
@@ -3581,8 +3756,16 @@ export default function App() {
         fs.mkdirSync(dirPath, { recursive: true });
       }
       
-      fs.writeFileSync(fullPath, content);
-      console.log(`[Workspace FS Dynamic Sync] Synced file: ${cleanPath}`);
+      let writeData: string | Buffer = content;
+      if (typeof content === 'string' && content.startsWith('data:') && content.includes(';base64,')) {
+        const parts = content.split(';base64,');
+        writeData = Buffer.from(parts[1], 'base64');
+      } else if (typeof content === 'string' && content.startsWith('base64:')) {
+        writeData = Buffer.from(content.substring(7), 'base64');
+      }
+      
+      fs.writeFileSync(fullPath, writeData);
+      console.log(`[Workspace FS Dynamic Sync] Synced file: ${cleanPath} (base64 decoded if binary)`);
       res.json({ success: true, path: cleanPath });
     } catch (err: any) {
       console.error("[Workspace FS Dynamic Sync] Error writing file:", err);
@@ -5511,9 +5694,26 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
       }
 
       // Parse potential native commands from the content and queue them immediately
-      const parsedNativeCommands = parseNaturalLanguagePromptToServerCommands(lastUserMsg);
+      let parsedNativeCommands = parseNaturalLanguagePromptToServerCommands(lastUserMsg);
       if (parsedNativeCommands.length > 0) {
-        console.log(`[GEMINI_PROXY] Detected ${parsedNativeCommands.length} native hardware automation commands from Web. Dispatching to activeCompanionCommands...`);
+        // Force a screenshot capture to close the realtime verification loop
+        const hasScreenshot = parsedNativeCommands.some(cmd => cmd.includes("DEVICE_ACTION_SCREENSHOT"));
+        if (!hasScreenshot) {
+          parsedNativeCommands.push("DEVICE_ACTION_SCREENSHOT");
+        }
+
+        // Clear existing screenshot file to make sure we don't read a stale one
+        const screenshotPath = path.join(process.cwd(), "unison_screenshot.png");
+        if (fs.existsSync(screenshotPath)) {
+          try {
+            fs.unlinkSync(screenshotPath);
+            console.log("[GEMINI_PROXY] Stale unison_screenshot.png removed.");
+          } catch (err) {
+            console.error("[GEMINI_PROXY] Error clearing stale screenshot:", err);
+          }
+        }
+
+        console.log(`[GEMINI_PROXY] Enqueuing ${parsedNativeCommands.length} real-time commands:`, parsedNativeCommands);
         for (const cmdString of parsedNativeCommands) {
           activeCompanionCommands.push({
             id: `cmd-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -5533,8 +5733,95 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
           activeCompanionCommands = activeCompanionCommands.slice(-50);
         }
 
-        // Inject high-fidelity native instructions
-        finalInstruction = `${finalInstruction}\n\nNATIVE PIPELINE ENGAGED: The user requested a computer use/agentic operation. You have already parsed their request and dispatched the following native commands to their macOS/iOS device: ${parsedNativeCommands.join(', ')}. In your response, confirm this beautiful native execution sequence with absolute confidence and elite cyber-aesthetic eloquence, listing exactly what commands/actions you have queued for immediate hardware execution. Focus purely on high-fidelity functional execution. Do NOT state that you are simulating or roleplaying; speak as the real-time controller that has dispatched these physical events to the native workspace.`;
+        // Set streaming headers
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+
+        const initialStatus = `⚡ **NATIVE HARDWARE PIPELINE ENGAGED**\n\nQueued command sequence:\n${parsedNativeCommands.map(c => `- ${c}`).join('\n')}\n\nWaiting for physical device execution and visual screenshot upload...`;
+        res.write(`data: ${JSON.stringify({ text: initialStatus })}\n\n`);
+
+        // Wait/poll for the screenshot upload
+        let screenshotUploaded = false;
+        const pollInterval = 300;
+        const maxPollTime = 12000; // 12 seconds max
+        let elapsed = 0;
+
+        while (elapsed < maxPollTime) {
+          if (fs.existsSync(screenshotPath)) {
+            const stats = fs.statSync(screenshotPath);
+            if (stats.size > 1000) {
+              screenshotUploaded = true;
+              break;
+            }
+          }
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+          elapsed += pollInterval;
+        }
+
+        let finalReport = "";
+        if (screenshotUploaded) {
+          res.write(`data: ${JSON.stringify({ text: "\n\n📷 **Screenshot Uploaded!** Analyzing live visual state with Gemini Vision to verify successful execution..." })}\n\n`);
+          try {
+            const imgBuffer = fs.readFileSync(screenshotPath);
+            const base64Img = imgBuffer.toString("base64");
+            
+            const verificationPrompt = `You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment.
+The user requested this real-time native computer use operation:
+"${lastUserMsg}"
+
+We successfully dispatched these precise commands to their physical computer/device cockpit:
+${parsedNativeCommands.join('\n')}
+
+Analyze this live screenshot of their screen to verify if the task succeeded (e.g. terminal is open, terminal console focused, the correct command was entered/run, and shows successful output on the screen).
+
+GUIDELINES:
+1. Examine the visual state of the screen carefully.
+2. If the task succeeded, provide a beautiful, extremely polished, professional confirmation of success, detailing exactly what you see on the screen confirming the success (e.g. active terminal, loaded packages, active browser tab, settings page).
+3. If it failed, is stuck, or has an error, describe exactly what went wrong or what is visible, and outline the required correction.
+4. Speak with absolute composure, confidence, and precision. Only claim success if you are 100% sure based on the visual evidence. Do not mention that you are an AI or simulating.`;
+
+            const result = await generateContentWithFallback({
+              model: "gemini-3.5-flash",
+              contents: [
+                {
+                  role: "user",
+                  parts: [
+                    { text: verificationPrompt },
+                    {
+                      inlineData: {
+                        mimeType: "image/png",
+                        data: base64Img
+                      }
+                    }
+                  ]
+                }
+              ]
+            });
+
+            let textResult = "";
+            if (result && typeof result.text === 'string') {
+              textResult = result.text;
+            } else if (result && result.candidates && result.candidates[0]?.content?.parts?.[0]?.text) {
+              textResult = result.candidates[0].content.parts[0].text;
+            } else if (result && typeof result.text === 'function') {
+              textResult = await result.text();
+            } else {
+              textResult = JSON.stringify(result);
+            }
+            finalReport = textResult;
+          } catch (visionErr: any) {
+            finalReport = `\n\n❌ **Vision verification failed**: ${visionErr.message || String(visionErr)}. Please check your companion setup.`;
+          }
+        } else {
+          finalReport = `\n\n⚠️ **Real-Time Status Alert**: I initiated a live execution confirmation, but your companion app didn't report a screenshot within the timeout window. Please check:
+1. That your Swift UI/macOS app is paired and running.
+2. That Accessibility permissions are granted for Terminal / System Events control on your computer.`;
+        }
+
+        res.write(`data: ${JSON.stringify({ text: "\n\n" + finalReport })}\n\n`);
+        res.end();
+        return;
       }
 
       let responseStream;
