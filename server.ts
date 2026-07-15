@@ -7,7 +7,7 @@ import { createServer } from "http";
 import { GoogleGenAI } from "@google/genai";
 import { spawn, exec } from "child_process";
 
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 const googleGenAI = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY || "",
   httpOptions: {
@@ -1298,15 +1298,9 @@ async function startServer() {
     lastActive: number;
     ip: string;
     isActive: boolean;
-    os?: string;
-    screenSize?: string;
-    activeWindows?: string[];
-    focusedWindow?: string | null;
-    screenshot?: string;
   }
 
   let connectedDevices: ConnectedDevice[] = [];
-  let activeCompanionCommands: Array<{ id: string; cmd: string; timestamp: number }> = [];
 
   function recalculateActiveDevice() {
     if (connectedDevices.length === 0) return;
@@ -1418,9 +1412,9 @@ async function startServer() {
       try {
         const payload = JSON.parse(message.toString());
 
-         // Multi-device and presence heartbeats
+        // Multi-device and presence heartbeats
         if (payload.type === 'REGISTER_DEVICE') {
-          const { deviceId, deviceName, deviceType, os, screenSize, activeWindows, focusedWindow } = payload;
+          const { deviceId, deviceName, deviceType } = payload;
           (ws as any).deviceId = deviceId;
           
           let existing = connectedDevices.find(d => d.id === deviceId);
@@ -1428,10 +1422,6 @@ async function startServer() {
             existing.name = deviceName;
             existing.type = deviceType || 'computer';
             existing.lastActive = Date.now();
-            if (os) existing.os = os;
-            if (screenSize) existing.screenSize = screenSize;
-            if (activeWindows) existing.activeWindows = activeWindows;
-            if (focusedWindow !== undefined) existing.focusedWindow = focusedWindow;
             if (req.socket.remoteAddress) {
               existing.ip = req.socket.remoteAddress.replace('::ffff:', '');
             }
@@ -1442,11 +1432,7 @@ async function startServer() {
               type: deviceType || 'computer',
               lastActive: Date.now(),
               ip: (req.socket.remoteAddress || '127.0.0.1').replace('::ffff:', ''),
-              isActive: false,
-              os: os || 'Unknown OS',
-              screenSize: screenSize || 'Unknown',
-              activeWindows: activeWindows || [],
-              focusedWindow: focusedWindow !== undefined ? focusedWindow : null
+              isActive: false
             });
           }
           recalculateActiveDevice();
@@ -1456,30 +1442,10 @@ async function startServer() {
 
         if (payload.type === 'DEVICE_HEARTBEAT') {
           const dId = (ws as any).deviceId || payload.deviceId;
-          const { os, screenSize, activeWindows, focusedWindow } = payload;
           if (dId) {
             let d = connectedDevices.find(x => x.id === dId);
             if (d) {
               d.lastActive = Date.now();
-              if (os) d.os = os;
-              if (screenSize) d.screenSize = screenSize;
-              if (activeWindows) d.activeWindows = activeWindows;
-              if (focusedWindow !== undefined) d.focusedWindow = focusedWindow;
-            }
-            recalculateActiveDevice();
-            broadcastDevices();
-          }
-          return;
-        }
-
-        if (payload.type === 'DEVICE_SCREENSHOT_UPDATE') {
-          const dId = (ws as any).deviceId || payload.deviceId;
-          const { screenshot } = payload;
-          if (dId && screenshot) {
-            let d = connectedDevices.find(x => x.id === dId);
-            if (d) {
-              d.lastActive = Date.now();
-              d.screenshot = screenshot;
             }
             recalculateActiveDevice();
             broadcastDevices();
@@ -1650,59 +1616,6 @@ async function startServer() {
         if (payload.type === 'EXEC_CMD') {
           kernelState.logs.push(`CMD_EXEC: ${payload.cmd}`);
           if (kernelState.logs.length > 50) kernelState.logs.shift();
-          
-          // Track for companion polling sync
-          activeCompanionCommands.push({
-            id: `cmd-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-            cmd: payload.cmd,
-            timestamp: Date.now() / 1000
-          });
-          if (activeCompanionCommands.length > 50) activeCompanionCommands.shift();
-
-          // Intercept device-level actions and broadcast/target them over raw WebSockets
-          if (payload.cmd && (payload.cmd.startsWith('DEVICE_ACTION_') || payload.cmd.startsWith('click:') || payload.cmd.startsWith('type:'))) {
-            let cmdString = payload.cmd;
-            
-            // Translate DEVICE_ACTION_* prefixes to shorter unified API if needed
-            if (payload.cmd.startsWith('DEVICE_ACTION_CLICK:')) {
-              const parts = payload.cmd.split(':');
-              cmdString = `click:${parts[1]}:${parts[2]}:${parts.slice(3).join(':') || 'Target'}`;
-            } else if (payload.cmd.startsWith('DEVICE_ACTION_DRAG:')) {
-              const parts = payload.cmd.split(':');
-              cmdString = `drag:${parts[1]}:${parts[2]}:${parts[3]}:${parts[4]}`;
-            } else if (payload.cmd.startsWith('DEVICE_ACTION_TYPE:')) {
-              cmdString = `type:${payload.cmd.substring('DEVICE_ACTION_TYPE:'.length)}`;
-            } else if (payload.cmd.startsWith('DEVICE_ACTION_OPEN_URL:')) {
-              cmdString = `open_url:${payload.cmd.substring('DEVICE_ACTION_OPEN_URL:'.length)}`;
-            } else if (payload.cmd.startsWith('DEVICE_ACTION_LAUNCH_APP:')) {
-              cmdString = `launch_app:${payload.cmd.substring('DEVICE_ACTION_LAUNCH_APP:'.length)}`;
-            } else if (payload.cmd.startsWith('DEVICE_ACTION_SEARCH:')) {
-              cmdString = `search:${payload.cmd.substring('DEVICE_ACTION_SEARCH:'.length)}`;
-            }
-
-            const targetDeviceId = payload.targetDeviceId;
-            const wsPayload = JSON.stringify({
-              type: 'DEVICE_CONTROL_COMMAND',
-              command: cmdString,
-              targetDeviceId: targetDeviceId || null,
-              senderDeviceId: (ws as any).deviceId || null
-            });
-
-            wss.clients.forEach(c => {
-              if (c.readyState === WebSocket.OPEN) {
-                // If targeted, only send to matching deviceId. Otherwise, send to everyone except the sender
-                if (targetDeviceId) {
-                  if ((c as any).deviceId === targetDeviceId) {
-                    c.send(wsPayload);
-                  }
-                } else {
-                  if (c !== ws) {
-                    c.send(wsPayload);
-                  }
-                }
-              }
-            });
-          }
           
           const [action, ...args] = payload.cmd.split(' ');
           
@@ -2855,149 +2768,6 @@ export default function App() {
     return 'convo';
   }
 
-  function parseNaturalLanguagePromptToServerCommands(promptText: string): string[] {
-    const commands: string[] = [];
-    const lines = promptText.toLowerCase().split(/[.,;]|\band\b/);
-
-    for (let line of lines) {
-      line = line.trim();
-      if (!line) continue;
-
-      // Special Keystrokes & Keyboard commands
-      if (line === 'type \\n' || line === 'type \n' || line.includes('press enter') || line.includes('press return') || line.includes('hit enter') || line.includes('hit return') || line === 'enter' || line === 'return') {
-        commands.push('DEVICE_ACTION_TYPE:\n');
-        continue;
-      }
-
-      // Special Screenshot commands
-      if (line.includes('take screenshot') || line.includes('take a screenshot') || line.includes('capture screen') || line.includes('screenshot')) {
-        commands.push('DEVICE_ACTION_SCREENSHOT');
-        continue;
-      }
-
-      // 1. Coordinates Click: "click at 30, 40" or "click 30 40" or "tap 50, 60"
-      const clickCoordRegex = /(?:click|press|tap)\s*(?:at\s*)?(\d+)(?:\s*%)?\s*[, ]\s*(\d+)(?:\s*%)?/;
-      const matchCoord = line.match(clickCoordRegex);
-      if (matchCoord) {
-        const x = parseInt(matchCoord[1], 10);
-        const y = parseInt(matchCoord[2], 10);
-        commands.push(`DEVICE_ACTION_CLICK:${x}:${y}:Coordinate_Click_${x}_${y}`);
-        continue;
-      }
-
-      // 2. Open URL: "open url http://example.com" or "go to google.com"
-      const urlRegex = /(?:open\s*url|go\s*to|browse\s*to)\s*["']?([a-zA-Z0-9][-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*))["']?/;
-      const matchUrl = line.match(urlRegex);
-      if (matchUrl) {
-        let urlPayload = matchUrl[1];
-        if (!urlPayload.startsWith('http://') && !urlPayload.startsWith('https://')) {
-          urlPayload = 'https://' + urlPayload;
-        }
-        commands.push(`DEVICE_ACTION_OPEN_URL:${urlPayload}`);
-        continue;
-      }
-
-      // 3. Search: "search for swift instructions" or "google search recipe"
-      const searchRegex = /(?:search\s*for|google\s*search|search)\s*["']?([^"']+)["']?/;
-      const matchSearch = line.match(searchRegex);
-      if (matchSearch) {
-        const queryPayload = matchSearch[1].trim();
-        commands.push(`DEVICE_ACTION_SEARCH:${queryPayload}`);
-        continue;
-      }
-
-      // 4. Launch App: "launch app Safari" or "open app Spotify"
-      const launchAppRegex = /(?:launch\s*app|open\s*app|start\s*app|run\s*app|focus\s*app|launch|activate|open)\s*["']?([a-zA-Z0-9\s]+)["']?/;
-      const matchLaunch = line.match(launchAppRegex);
-      if (matchLaunch) {
-        const appName = matchLaunch[1].trim();
-        // Skip common words that are part of other commands
-        const skippedWords = ['url', 'google', 'safari browser', 'terminal command', 'shell', 'xcode editor', 'app', 'browser', 'page', 'site', 'website'];
-        if (!skippedWords.includes(appName)) {
-          // Normalize some common applications for the user
-          let normalizedApp = appName;
-          if (appName === 'chrome' || appName === 'google chrome') {
-            normalizedApp = 'Google Chrome';
-          } else if (appName === 'safari') {
-            normalizedApp = 'Safari';
-          } else if (appName === 'xcode') {
-            normalizedApp = 'Xcode';
-          } else if (appName === 'spotify') {
-            normalizedApp = 'Spotify';
-          } else if (appName === 'terminal') {
-            normalizedApp = 'Terminal';
-          } else if (appName === 'slack') {
-            normalizedApp = 'Slack';
-          } else if (appName === 'finder') {
-            normalizedApp = 'Finder';
-          }
-          // Capitalize first letter of app if it has no spaces and is short
-          if (normalizedApp === appName && appName.length > 1 && !appName.includes(' ')) {
-            normalizedApp = appName.charAt(0).toUpperCase() + appName.slice(1);
-          }
-          commands.push(`DEVICE_ACTION_LAUNCH_APP:${normalizedApp}`);
-          continue;
-        }
-      }
-
-      // 5. Type Text: "type Hello World" or "write custom script"
-      const typeTextRegex = /(?:type|write|input|enter)\s*["']?([^"']+)["']?/;
-      const matchText = line.match(typeTextRegex);
-      if (matchText) {
-        const textPayload = matchText[1];
-        commands.push(`DEVICE_ACTION_TYPE:${textPayload}`);
-        continue;
-      }
-
-      // 6. Drag and Drop: "drag from 30, 40 to 50, 60"
-      const dragRegex = /drag\s*(?:from\s*)?(\d+)\s*[, ]\s*(\d+)\s*(?:to\s*)?(\d+)\s*[, ]\s*(\d+)/;
-      const matchDrag = line.match(dragRegex);
-      if (matchDrag) {
-        const x1 = parseInt(matchDrag[1], 10);
-        const y1 = parseInt(matchDrag[2], 10);
-        const x2 = parseInt(matchDrag[3], 10);
-        const y2 = parseInt(matchDrag[4], 10);
-        commands.push(`DEVICE_ACTION_DRAG:${x1}:${y1}:${x2}:${y2}`);
-        continue;
-      }
-
-      // Fallback checks for specific popular keywords if not matched above
-      if (line.includes('open xcode') || line.includes('show xcode') || line.includes('launch xcode')) {
-        commands.push('DEVICE_ACTION_LAUNCH_APP:Xcode');
-      } else if (line.includes('open terminal') || line.includes('open shell') || line.includes('launch terminal')) {
-        commands.push('DEVICE_ACTION_LAUNCH_APP:Terminal');
-      } else if (line.includes('open safari') || line.includes('launch safari')) {
-        commands.push('DEVICE_ACTION_LAUNCH_APP:Safari');
-      } else if (line.includes('open spotify') || line.includes('launch spotify') || line.includes('play spotify')) {
-        commands.push('DEVICE_ACTION_LAUNCH_APP:Spotify');
-      } else if (line.includes('open chrome') || line.includes('launch chrome')) {
-        commands.push('DEVICE_ACTION_LAUNCH_APP:Google Chrome');
-      } else if (line.includes('open slack') || line.includes('launch slack')) {
-        commands.push('DEVICE_ACTION_LAUNCH_APP:Slack');
-      } else if (line.includes('open finder') || line.includes('launch finder')) {
-        commands.push('DEVICE_ACTION_LAUNCH_APP:Finder');
-      } else if (line.includes('click') || line.includes('focus') || line.includes('select')) {
-        // Approximate some visual coordinates on mock mac desktop environments
-        if (line.includes('credentials') || line.includes('credentials.txt')) {
-          commands.push('DEVICE_ACTION_CLICK:90:20:Credentials.txt');
-        } else if (line.includes('kernel') || line.includes('kernel.sys')) {
-          commands.push('DEVICE_ACTION_CLICK:90:40:Kernel.sys');
-        } else if (line.includes('safari')) {
-          commands.push('DEVICE_ACTION_CLICK:40:92:Safari');
-        } else if (line.includes('xcode')) {
-          commands.push('DEVICE_ACTION_CLICK:46:92:Xcode');
-        } else if (line.includes('terminal')) {
-          commands.push('DEVICE_ACTION_CLICK:52:92:Terminal');
-        } else if (line.includes('settings')) {
-          commands.push('DEVICE_ACTION_CLICK:58:92:Settings');
-        } else if (line.includes('build') || line.includes('run') || line.includes('play')) {
-          commands.push('DEVICE_ACTION_CLICK:40:16:Build Button');
-        }
-      }
-    }
-    return commands;
-  }
-
   // Dispatch a message, append to Firestore database, trigger Gemini, save response back to Firestore
   app.post("/api/companion/message", express.json(), async (req, res) => {
     try {
@@ -3008,50 +2778,6 @@ export default function App() {
       }
       
       uid = await resolveUidFromEmailOrQuery(uid, email);
-      
-      // Parse potential native commands from the content and queue them immediately
-      let parsedNativeCommands = parseNaturalLanguagePromptToServerCommands(content);
-      let screenshotExpected = false;
-      const screenshotPath = path.join(process.cwd(), "unison_screenshot.png");
-
-      if (parsedNativeCommands.length > 0) {
-        // Force a screenshot capture to close the realtime verification loop
-        const hasScreenshot = parsedNativeCommands.some(cmd => cmd.includes("DEVICE_ACTION_SCREENSHOT"));
-        if (!hasScreenshot) {
-          parsedNativeCommands.push("DEVICE_ACTION_SCREENSHOT");
-        }
-        screenshotExpected = true;
-
-        // Clear existing screenshot file to avoid stale cache reads
-        if (fs.existsSync(screenshotPath)) {
-          try {
-            fs.unlinkSync(screenshotPath);
-            console.log("[COMPANION] Removed old unison_screenshot.png to prepare for fresh execution.");
-          } catch (unlinkErr) {
-            console.error("[COMPANION] Error clearing stale screenshot:", unlinkErr);
-          }
-        }
-
-        console.log(`[COMPANION] Detected ${parsedNativeCommands.length} native hardware automation commands. Dispatching to activeCompanionCommands...`);
-        for (const cmdString of parsedNativeCommands) {
-          activeCompanionCommands.push({
-            id: `cmd-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-            cmd: cmdString,
-            timestamp: Date.now() / 1000
-          });
-          
-          // Broadcast over WebSocket to any active browser/web companion views
-          const wsEvent = { type: "DEVICE_CONTROL_COMMAND", command: cmdString };
-          wss.clients.forEach(c => {
-            if (c.readyState === WebSocket.OPEN) {
-              c.send(JSON.stringify(wsEvent));
-            }
-          });
-        }
-        if (activeCompanionCommands.length > 50) {
-          activeCompanionCommands = activeCompanionCommands.slice(-50);
-        }
-      }
       
       const userMsgId = "msg_u_" + Date.now();
       const messagesCol = adminDb.collection("conversations").doc(conversationId).collection("messages");
@@ -3089,11 +2815,6 @@ export default function App() {
       // 3. Determine Server toolMode and system instructions
       const toolMode = determineAutoToolModeOnServer(content);
       let systemInstruction = "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.";
-      
-      if (parsedNativeCommands.length > 0) {
-        systemInstruction = `${systemInstruction}\n\nNATIVE PIPELINE ENGAGED: The user requested a computer use/agentic operation. You have already parsed their request and dispatched the following native commands to their macOS/iOS device: ${parsedNativeCommands.join(', ')}. In your response, confirm this beautiful native execution sequence with absolute confidence and elite cyber-aesthetic eloquence, listing exactly what commands/actions you have queued for immediate hardware execution. Focus purely on high-fidelity functional execution. Do NOT state that you are simulating or roleplaying; speak as the real-time controller that has dispatched these physical events to the native workspace.`;
-      }
-      
       let tools: any[] | undefined = undefined;
       let toolConfig: any | undefined = undefined;
 
@@ -3110,149 +2831,67 @@ export default function App() {
       let geminiReply = "Offline simulation fallback.";
       let detectedSources: any[] = [];
 
-      if (screenshotExpected) {
-        console.log("[COMPANION] Command pipeline engaged. Polling for physical device visual execution screenshot...");
-        let screenshotUploaded = false;
-        const pollInterval = 300;
-        const maxPollTime = 12000; // 12 seconds max wait
-        let elapsed = 0;
-
-        while (elapsed < maxPollTime) {
-          if (fs.existsSync(screenshotPath)) {
-            const stats = fs.statSync(screenshotPath);
-            if (stats.size > 1000) {
-              screenshotUploaded = true;
-              break;
-            }
+      try {
+        const payload: any = {
+          model: "gemini-3.5-flash",
+          contents: contents,
+          config: {
+            systemInstruction,
+            temperature: 0.7
           }
-          await new Promise(resolve => setTimeout(resolve, pollInterval));
-          elapsed += pollInterval;
-        }
+        };
 
-        if (screenshotUploaded) {
-          console.log(`[COMPANION] Verified execution feedback. Fresh screenshot detected (${fs.statSync(screenshotPath).size} bytes). Generating vision verification report...`);
-          try {
-            const imgBuffer = fs.readFileSync(screenshotPath);
-            const base64Img = imgBuffer.toString("base64");
-            
-            const verificationPrompt = `You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment.
-The user requested this real-time native computer use operation:
-"${content}"
+        if (tools) payload.config.tools = tools;
+        if (toolConfig) payload.config.toolConfig = toolConfig;
 
-We successfully dispatched these precise commands to their physical computer/device cockpit:
-${parsedNativeCommands.join('\n')}
-
-Analyze this live screenshot of their screen to visually verify if the task succeeded (e.g. terminal is open, terminal console focused, the correct command was entered/run, and shows successful output on the screen).
-
-GUIDELINES:
-1. Examine the visual state of the screen carefully.
-2. If the task succeeded, provide a beautiful, extremely polished, professional confirmation of success, detailing exactly what you see on the screen confirming the success (e.g. active terminal, loaded packages, active browser tab, settings page).
-3. If it failed, is stuck, or has an error, describe exactly what went wrong or what is visible, and outline the required correction.
-4. Speak with absolute composure, confidence, and precision. Only claim success if you are 100% sure based on the visual evidence. Do not mention that you are an AI or simulating.`;
-
-            const result = await generateContentWithFallback({
-              model: "gemini-3.5-flash",
-              contents: [
-                {
-                  role: "user",
-                  parts: [
-                    { text: verificationPrompt },
-                    {
-                      inlineData: {
-                        mimeType: "image/png",
-                        data: base64Img
-                      }
-                    }
-                  ]
-                }
-              ]
-            });
-
-            if (result && typeof result.text === 'string') {
-              geminiReply = result.text;
-            } else if (result && result.candidates && result.candidates[0]?.content?.parts?.[0]?.text) {
-              geminiReply = result.candidates[0].content.parts[0].text;
-            } else if (result && typeof result.text === 'function') {
-              geminiReply = await result.text();
-            } else {
-              geminiReply = JSON.stringify(result);
-            }
-          } catch (visionErr: any) {
-            console.error("[COMPANION] Vision verification failed:", visionErr);
-            geminiReply = `I successfully dispatched the commands to your device cockpit, but the subsequent vision-verification layer failed: ${visionErr.message || String(visionErr)}. Please check your companion configuration.`;
-          }
+        const geminiRes = await generateContentWithFallback(payload);
+        
+        let textResult = "";
+        if (geminiRes && typeof geminiRes.text === 'string') {
+          textResult = geminiRes.text;
+        } else if (geminiRes && geminiRes.candidates && geminiRes.candidates[0]?.content?.parts?.[0]?.text) {
+          textResult = geminiRes.candidates[0].content.parts[0].text;
+        } else if (geminiRes && typeof geminiRes.text === 'function') {
+          textResult = await geminiRes.text();
         } else {
-          console.log("[COMPANION] Real-time screenshot polling timed out. No feedback received.");
-          geminiReply = `I have queued the native commands in your Unison OS device cockpit:
-${parsedNativeCommands.map(c => `- ${c}`).join('\n')}
-
-**Real-Time Connection Notice**: I initiated a live execution confirmation, but your companion app did not upload a screenshot within the timeout. Please check:
-1. That your Swift UI/macOS app is paired and running.
-2. That Accessibility permissions are granted for Terminal/System Events control on your computer.`;
+          textResult = JSON.stringify(geminiRes);
         }
-      } else {
+        geminiReply = textResult;
+
         try {
-          const payload: any = {
-            model: "gemini-3.5-flash",
-            contents: contents,
-            config: {
-              systemInstruction,
-              temperature: 0.7
-            }
-          };
-
-          if (tools) payload.config.tools = tools;
-          if (toolConfig) payload.config.toolConfig = toolConfig;
-
-          const geminiRes = await generateContentWithFallback(payload);
-          
-          let textResult = "";
-          if (geminiRes && typeof geminiRes.text === 'string') {
-            textResult = geminiRes.text;
-          } else if (geminiRes && geminiRes.candidates && geminiRes.candidates[0]?.content?.parts?.[0]?.text) {
-            textResult = geminiRes.candidates[0].content.parts[0].text;
-          } else if (geminiRes && typeof geminiRes.text === 'function') {
-            textResult = await geminiRes.text();
-          } else {
-            textResult = JSON.stringify(geminiRes);
-          }
-          geminiReply = textResult;
-
-          try {
-            const firstCandidate = geminiRes.candidates?.[0];
-            if (firstCandidate && firstCandidate.groundingMetadata) {
-              const meta = firstCandidate.groundingMetadata;
-              const chunks = meta.groundingChunks || [];
-              for (const c of chunks) {
-                if (c.web) {
-                  const url = c.web.uri || c.web.url || '';
-                  const title = c.web.title || 'Source';
-                  if (url && !detectedSources.some(s => s.url === url)) {
-                    detectedSources.push({
-                      title: title,
-                      url: url,
-                      siteName: url.split('/')[2]?.replace('www.', '') || 'Web',
-                      snippet: c.web.snippet || '',
-                      linesUsed: []
-                    });
-                  }
+          const firstCandidate = geminiRes.candidates?.[0];
+          if (firstCandidate && firstCandidate.groundingMetadata) {
+            const meta = firstCandidate.groundingMetadata;
+            const chunks = meta.groundingChunks || [];
+            for (const c of chunks) {
+              if (c.web) {
+                const url = c.web.uri || c.web.url || '';
+                const title = c.web.title || 'Source';
+                if (url && !detectedSources.some(s => s.url === url)) {
+                  detectedSources.push({
+                    title: title,
+                    url: url,
+                    siteName: url.split('/')[2]?.replace('www.', '') || 'Web',
+                    snippet: c.web.snippet || '',
+                    linesUsed: []
+                  });
                 }
               }
-              const supports = meta.groundingSupports || [];
-              for (const s of supports) {
-                const segmentText = s.segment?.text || '';
-                if (segmentText && s.groundingChunkIndices) {
-                  for (const chunkIdx of s.groundingChunkIndices) {
-                    const chunk = chunks[chunkIdx];
-                    if (chunk && chunk.web) {
-                      const url = chunk.web.uri || chunk.web.url || '';
-                      if (url) {
-                        const existingSource = detectedSources.find(src => src.url === url);
-                        if (existingSource) {
-                          if (!existingSource.linesUsed) existingSource.linesUsed = [];
-                          if (!existingSource.linesUsed.includes(segmentText)) {
-                            existingSource.linesUsed.push(segmentText);
-                          }
+            }
+            const supports = meta.groundingSupports || [];
+            for (const s of supports) {
+              const segmentText = s.segment?.text || '';
+              if (segmentText && s.groundingChunkIndices) {
+                for (const chunkIdx of s.groundingChunkIndices) {
+                  const chunk = chunks[chunkIdx];
+                  if (chunk && chunk.web) {
+                    const url = chunk.web.uri || chunk.web.url || '';
+                    if (url) {
+                      const existingSource = detectedSources.find(src => src.url === url);
+                      if (existingSource) {
+                        if (!existingSource.linesUsed) existingSource.linesUsed = [];
+                        if (!existingSource.linesUsed.includes(segmentText)) {
+                          existingSource.linesUsed.push(segmentText);
                         }
                       }
                     }
@@ -3260,18 +2899,18 @@ ${parsedNativeCommands.map(c => `- ${c}`).join('\n')}
                 }
               }
             }
-          } catch (groundingErr) {
-            console.error("[COMPANION] Grounding metadata parse failed:", groundingErr);
           }
-
-          if (detectedSources.length > 0) {
-            console.log(`[COMPANION] Parsed ${detectedSources.length} grounded web sources. Inserting SOURCES indexing metadata...`);
-            geminiReply += `\n\n[SOURCES: ${JSON.stringify(detectedSources)}]`;
-          }
-        } catch (geminiError: any) {
-          console.error("[COMPANION] Gemini generation failed:", geminiError);
-          geminiReply = `System error on Gemini routing layer: ${geminiError.message || String(geminiError)}`;
+        } catch (groundingErr) {
+          console.error("[COMPANION] Grounding metadata parse failed:", groundingErr);
         }
+
+        if (detectedSources.length > 0) {
+          console.log(`[COMPANION] Parsed ${detectedSources.length} grounded web sources. Inserting SOURCES indexing metadata...`);
+          geminiReply += `\n\n[SOURCES: ${JSON.stringify(detectedSources)}]`;
+        }
+      } catch (geminiError: any) {
+        console.error("[COMPANION] Gemini generation failed:", geminiError);
+        geminiReply = `System error on Gemini routing layer: ${geminiError.message || String(geminiError)}`;
       }
       
       // 5. Save Gemini response
@@ -3311,388 +2950,6 @@ ${parsedNativeCommands.map(c => `- ${c}`).join('\n')}
       ]
     });
   });
-
-  // Fetch cognitive commands for center-controlled sync across all platforms
-  app.get("/api/companion/commands", (req, res) => {
-    res.json(activeCompanionCommands);
-  });
-
-  // --- MODEL CONTEXT PROTOCOL (MCP) INTERFACE ---
-  const mcpSessions = new Map<string, express.Response>();
-
-  // SSE Transport Entry Point
-  app.get("/api/mcp/sse", (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-
-    const sessionId = `mcp-session-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-    mcpSessions.set(sessionId, res);
-
-    // Write initial endpoint redirect event telling the client where to send POST messages
-    res.write(`event: endpoint\ndata: /api/mcp/message?sessionId=${sessionId}\n\n`);
-
-    const keepAliveInterval = setInterval(() => {
-      res.write(': keepalive\n\n');
-    }, 15000);
-
-    req.on('close', () => {
-      clearInterval(keepAliveInterval);
-      mcpSessions.delete(sessionId);
-    });
-  });
-
-  // JSON-RPC 2.0 Router for MCP Tools
-  app.post("/api/mcp/message", express.json(), async (req, res) => {
-    try {
-      const { jsonrpc, method, params, id } = req.body;
-      const sessionId = req.query.sessionId as string;
-
-      if (jsonrpc !== "2.0") {
-        return res.status(400).json({
-          jsonrpc: "2.0",
-          error: { code: -32600, message: "Invalid Request: Must be JSON-RPC 2.0" },
-          id
-        });
-      }
-
-      // Handle tool listing request
-      if (method === "tools/list") {
-        const toolsList = [
-          {
-            name: "unison_click",
-            description: "Click at coordinates on macOS screen (coordinates are 0-100 percentage values). Executes on the user's computer via the Unison Native Companion app.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                x: { type: "number", description: "X coordinate as percentage (0 to 100)" },
-                y: { type: "number", description: "Y coordinate as percentage (0 to 100)" },
-                label: { type: "string", description: "Optional description of what is being clicked" }
-              },
-              required: ["x", "y"]
-            }
-          },
-          {
-            name: "unison_drag",
-            description: "Perform drag-and-drop on macOS screen between two coordinates (0-100 percentage values).",
-            inputSchema: {
-              type: "object",
-              properties: {
-                x1: { type: "number", description: "Starting X coordinate percentage (0 to 100)" },
-                y1: { type: "number", description: "Starting Y coordinate percentage (0 to 100)" },
-                x2: { type: "number", description: "Ending X coordinate percentage (0 to 100)" },
-                y2: { type: "number", description: "Ending Y coordinate percentage (0 to 100)" }
-              },
-              required: ["x1", "y1", "x2", "y2"]
-            }
-          },
-          {
-            name: "unison_type",
-            description: "Type specific text via macOS System Events keystroke scripting. Activates keyboard entry on active input focused elements.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                text: { type: "string", description: "The literal string to type. Can include return character." }
-              },
-              required: ["text"]
-            }
-          },
-          {
-            name: "unison_open_url",
-            description: "Open any URL in the system browser natively.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                url: { type: "string", description: "The full URL to open (e.g. https://github.com)" }
-              },
-              required: ["url"]
-            }
-          },
-          {
-            name: "unison_launch_app",
-            description: "Activate and focus on a target desktop application.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                appName: { type: "string", description: "The exact name of the application (e.g. Safari, Xcode, Terminal, Finder)" }
-              },
-              required: ["appName"]
-            }
-          },
-          {
-            name: "unison_search",
-            description: "Dispatch a Google browser search natively on the user's screen.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                query: { type: "string", description: "The search query term" }
-              },
-              required: ["query"]
-            }
-          },
-          {
-            name: "unison_read_file",
-            description: "Read a text file from the workspace project workspace folder.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                filePath: { type: "string", description: "Relative path to file (e.g. src/App.tsx)" }
-              },
-              required: ["filePath"]
-            }
-          },
-          {
-            name: "unison_write_file",
-            description: "Write or update a file in the workspace folder.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                filePath: { type: "string", description: "Relative path to file" },
-                content: { type: "string", description: "Complete file contents to write" }
-              },
-              required: ["filePath", "content"]
-            }
-          },
-          {
-            name: "unison_list_dir",
-            description: "List files and folders in a relative directory of the workspace.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                dirPath: { type: "string", description: "Relative directory path (defaults to empty/root)" }
-              }
-            }
-          }
-        ];
-
-        return res.json({
-          jsonrpc: "2.0",
-          result: { tools: toolsList },
-          id
-        });
-      }
-
-      // Handle tool call request
-      if (method === "tools/call") {
-        const { name: toolName, arguments: args } = params;
-        let executionMessage = "";
-        let commandToPush = "";
-        let wsEventToSend: any = null;
-
-        if (toolName === "unison_click") {
-          const { x, y, label = "Target" } = args;
-          commandToPush = `DEVICE_ACTION_CLICK:${x}:${y}:${label}`;
-          executionMessage = `[MCP Tool] Dispatched click action at [x: ${x}%, y: ${y}%] on '${label}'`;
-          wsEventToSend = { type: "DEVICE_CONTROL_COMMAND", command: `click:${x}:${y}:${label}` };
-        } else if (toolName === "unison_drag") {
-          const { x1, y1, x2, y2 } = args;
-          commandToPush = `DEVICE_ACTION_DRAG:${x1}:${y1}:${x2}:${y2}`;
-          executionMessage = `[MCP Tool] Dispatched drag action from [${x1}%, ${y1}%] to [${x2}%, ${y2}%]`;
-          wsEventToSend = { type: "DEVICE_CONTROL_COMMAND", command: `drag:${x1}:${y1}:${x2}:${y2}` };
-        } else if (toolName === "unison_type") {
-          const { text } = args;
-          commandToPush = `DEVICE_ACTION_TYPE:${text}`;
-          executionMessage = `[MCP Tool] Dispatched keyboard typing command: "${text}"`;
-          wsEventToSend = { type: "DEVICE_CONTROL_COMMAND", command: `type:${text}` };
-        } else if (toolName === "unison_open_url") {
-          const { url } = args;
-          commandToPush = `DEVICE_ACTION_OPEN_URL:${url}`;
-          executionMessage = `[MCP Tool] Dispatched open browser URL: "${url}"`;
-          wsEventToSend = { type: "DEVICE_CONTROL_COMMAND", command: `open_url:${url}` };
-        } else if (toolName === "unison_launch_app") {
-          const { appName } = args;
-          commandToPush = `DEVICE_ACTION_LAUNCH_APP:${appName}`;
-          executionMessage = `[MCP Tool] Dispatched app launch request for: "${appName}"`;
-          wsEventToSend = { type: "DEVICE_CONTROL_COMMAND", command: `launch_app:${appName}` };
-        } else if (toolName === "unison_search") {
-          const { query } = args;
-          commandToPush = `DEVICE_ACTION_SEARCH:${query}`;
-          executionMessage = `[MCP Tool] Dispatched web search for: "${query}"`;
-          wsEventToSend = { type: "DEVICE_CONTROL_COMMAND", command: `search:${query}` };
-        } else if (toolName === "unison_read_file") {
-          const { filePath } = args;
-          const fullPath = path.join(process.cwd(), filePath.replace(/^\//, ''));
-          try {
-            const content = fs.readFileSync(fullPath, "utf-8");
-            return res.json({
-              jsonrpc: "2.0",
-              result: {
-                content: [{ type: "text", text: content }]
-              },
-              id
-            });
-          } catch (err: any) {
-            return res.json({
-              jsonrpc: "2.0",
-              error: { code: -32602, message: `File read error: ${err.message}` },
-              id
-            });
-          }
-        } else if (toolName === "unison_write_file") {
-          const { filePath, content } = args;
-          const fullPath = path.join(process.cwd(), filePath.replace(/^\//, ''));
-          try {
-            const dirPath = path.dirname(fullPath);
-            if (!fs.existsSync(dirPath)) {
-              fs.mkdirSync(dirPath, { recursive: true });
-            }
-            fs.writeFileSync(fullPath, content, "utf-8");
-            return res.json({
-              jsonrpc: "2.0",
-              result: {
-                content: [{ type: "text", text: `Successfully wrote file at: ${filePath}` }]
-              },
-              id
-            });
-          } catch (err: any) {
-            return res.json({
-              jsonrpc: "2.0",
-              error: { code: -32602, message: `File write error: ${err.message}` },
-              id
-            });
-          }
-        } else if (toolName === "unison_list_dir") {
-          const { dirPath = "" } = args;
-          const fullPath = path.join(process.cwd(), dirPath.replace(/^\//, ''));
-          try {
-            const entries = fs.readdirSync(fullPath, { withFileTypes: true });
-            const list = entries.map(e => `${e.isDirectory() ? '[DIR]' : '[FILE]'} ${e.name}`).join("\n");
-            return res.json({
-              jsonrpc: "2.0",
-              result: {
-                content: [{ type: "text", text: list || "(empty directory)" }]
-              },
-              id
-            });
-          } catch (err: any) {
-            return res.json({
-              jsonrpc: "2.0",
-              error: { code: -32602, message: `Directory read error: ${err.message}` },
-              id
-            });
-          }
-        } else {
-          return res.status(404).json({
-            jsonrpc: "2.0",
-            error: { code: -32601, message: `Method not found: ${toolName}` },
-            id
-          });
-        }
-
-        // Apply control actions to central pipeline trackers
-        if (commandToPush) {
-          activeCompanionCommands.push({
-            id: `cmd-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-            cmd: commandToPush,
-            timestamp: Date.now() / 1000
-          });
-          if (activeCompanionCommands.length > 50) activeCompanionCommands.shift();
-
-          // Standardize log outputs
-          kernelState.logs.push(`MCP_AUTOMATION: ${executionMessage}`);
-          if (kernelState.logs.length > 50) kernelState.logs.shift();
-          console.log(`[MCP_SERVER] Executed: ${executionMessage}`);
-
-          // Broadcast instantly over raw WebSocket to the native app if it has active frame link
-          if (wsEventToSend) {
-            const wsPayload = JSON.stringify(wsEventToSend);
-            wss.clients.forEach(c => {
-              if (c.readyState === WebSocket.OPEN) {
-                c.send(wsPayload);
-              }
-            });
-          }
-        }
-
-        return res.json({
-          jsonrpc: "2.0",
-          result: {
-            content: [{ type: "text", text: executionMessage }]
-          },
-          id
-        });
-      }
-
-      // Default fallback error
-      return res.status(400).json({
-        jsonrpc: "2.0",
-        error: { code: -32601, message: `Unrecognized MCP method: ${method}` },
-        id
-      });
-
-    } catch (err: any) {
-      console.error("[MCP_SERVER] Internal Route Exception:", err);
-      res.status(500).json({
-        jsonrpc: "2.0",
-        error: { code: -32603, message: err.message || "Internal server error" },
-        id: req.body.id || null
-      });
-    }
-  });
-
-  // Direct REST Execution Gateway (Bypasses JSON-RPC for simple custom scripts)
-  app.post("/api/mcp/execute", express.json(), (req, res) => {
-    try {
-      const { action, params = {} } = req.body;
-      if (!action) return res.status(400).json({ error: "Missing action parameter" });
-
-      let cmdString = "";
-      let desc = "";
-
-      switch (action) {
-        case "click":
-          cmdString = `DEVICE_ACTION_CLICK:${params.x || 50}:${params.y || 50}:${params.label || "Target"}`;
-          desc = `Clicked coordinate [x: ${params.x}%, y: ${params.y}%]`;
-          break;
-        case "drag":
-          cmdString = `DEVICE_ACTION_DRAG:${params.x1}:${params.y1}:${params.x2}:${params.y2}`;
-          desc = `Dragged from [${params.x1}%, ${params.y1}%] to [${params.x2}%, ${params.y2}%]`;
-          break;
-        case "type":
-          cmdString = `DEVICE_ACTION_TYPE:${params.text || ""}`;
-          desc = `Typed keystrokes: "${params.text}"`;
-          break;
-        case "open_url":
-          cmdString = `DEVICE_ACTION_OPEN_URL:${params.url}`;
-          desc = `Opened web URL: ${params.url}`;
-          break;
-        case "launch_app":
-          cmdString = `DEVICE_ACTION_LAUNCH_APP:${params.appName}`;
-          desc = `Launched native app: ${params.appName}`;
-          break;
-        case "search":
-          cmdString = `DEVICE_ACTION_SEARCH:${params.query}`;
-          desc = `Searched Google for: "${params.query}"`;
-          break;
-        default:
-          return res.status(400).json({ error: `Unsupported action: ${action}` });
-      }
-
-      activeCompanionCommands.push({
-        id: `cmd-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        cmd: cmdString,
-        timestamp: Date.now() / 1000
-      });
-      if (activeCompanionCommands.length > 50) activeCompanionCommands.shift();
-
-      kernelState.logs.push(`MCP_DIRECT: ${desc}`);
-      if (kernelState.logs.length > 50) kernelState.logs.shift();
-
-      // Broadcast over WebSocket
-      const wsEvent = { type: "DEVICE_CONTROL_COMMAND", command: cmdString };
-      wss.clients.forEach(c => {
-        if (c.readyState === WebSocket.OPEN) {
-          c.send(JSON.stringify(wsEvent));
-        }
-      });
-
-      res.json({ success: true, description: desc, cmdString });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   // --- END COMPANION INTERCEPT ROUTING ---
 
   // Dedicated proxy route for local/remote Raspberry Pi Daemons
@@ -3756,16 +3013,8 @@ ${parsedNativeCommands.map(c => `- ${c}`).join('\n')}
         fs.mkdirSync(dirPath, { recursive: true });
       }
       
-      let writeData: string | Buffer = content;
-      if (typeof content === 'string' && content.startsWith('data:') && content.includes(';base64,')) {
-        const parts = content.split(';base64,');
-        writeData = Buffer.from(parts[1], 'base64');
-      } else if (typeof content === 'string' && content.startsWith('base64:')) {
-        writeData = Buffer.from(content.substring(7), 'base64');
-      }
-      
-      fs.writeFileSync(fullPath, writeData);
-      console.log(`[Workspace FS Dynamic Sync] Synced file: ${cleanPath} (base64 decoded if binary)`);
+      fs.writeFileSync(fullPath, content);
+      console.log(`[Workspace FS Dynamic Sync] Synced file: ${cleanPath}`);
       res.json({ success: true, path: cleanPath });
     } catch (err: any) {
       console.error("[Workspace FS Dynamic Sync] Error writing file:", err);
@@ -5693,137 +4942,6 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
         finalInstruction = `${finalInstruction}\n${newsOverrideRule}`;
       }
 
-      // Parse potential native commands from the content and queue them immediately
-      let parsedNativeCommands = parseNaturalLanguagePromptToServerCommands(lastUserMsg);
-      if (parsedNativeCommands.length > 0) {
-        // Force a screenshot capture to close the realtime verification loop
-        const hasScreenshot = parsedNativeCommands.some(cmd => cmd.includes("DEVICE_ACTION_SCREENSHOT"));
-        if (!hasScreenshot) {
-          parsedNativeCommands.push("DEVICE_ACTION_SCREENSHOT");
-        }
-
-        // Clear existing screenshot file to make sure we don't read a stale one
-        const screenshotPath = path.join(process.cwd(), "unison_screenshot.png");
-        if (fs.existsSync(screenshotPath)) {
-          try {
-            fs.unlinkSync(screenshotPath);
-            console.log("[GEMINI_PROXY] Stale unison_screenshot.png removed.");
-          } catch (err) {
-            console.error("[GEMINI_PROXY] Error clearing stale screenshot:", err);
-          }
-        }
-
-        console.log(`[GEMINI_PROXY] Enqueuing ${parsedNativeCommands.length} real-time commands:`, parsedNativeCommands);
-        for (const cmdString of parsedNativeCommands) {
-          activeCompanionCommands.push({
-            id: `cmd-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-            cmd: cmdString,
-            timestamp: Date.now() / 1000
-          });
-          
-          // Broadcast over WebSocket to any active browser/web companion views
-          const wsEvent = { type: "DEVICE_CONTROL_COMMAND", command: cmdString };
-          wss.clients.forEach(c => {
-            if (c.readyState === WebSocket.OPEN) {
-              c.send(JSON.stringify(wsEvent));
-            }
-          });
-        }
-        if (activeCompanionCommands.length > 50) {
-          activeCompanionCommands = activeCompanionCommands.slice(-50);
-        }
-
-        // Set streaming headers
-        res.setHeader("Content-Type", "text/event-stream");
-        res.setHeader("Cache-Control", "no-cache");
-        res.setHeader("Connection", "keep-alive");
-
-        const initialStatus = `⚡ **NATIVE HARDWARE PIPELINE ENGAGED**\n\nQueued command sequence:\n${parsedNativeCommands.map(c => `- ${c}`).join('\n')}\n\nWaiting for physical device execution and visual screenshot upload...`;
-        res.write(`data: ${JSON.stringify({ text: initialStatus })}\n\n`);
-
-        // Wait/poll for the screenshot upload
-        let screenshotUploaded = false;
-        const pollInterval = 300;
-        const maxPollTime = 12000; // 12 seconds max
-        let elapsed = 0;
-
-        while (elapsed < maxPollTime) {
-          if (fs.existsSync(screenshotPath)) {
-            const stats = fs.statSync(screenshotPath);
-            if (stats.size > 1000) {
-              screenshotUploaded = true;
-              break;
-            }
-          }
-          await new Promise(resolve => setTimeout(resolve, pollInterval));
-          elapsed += pollInterval;
-        }
-
-        let finalReport = "";
-        if (screenshotUploaded) {
-          res.write(`data: ${JSON.stringify({ text: "\n\n📷 **Screenshot Uploaded!** Analyzing live visual state with Gemini Vision to verify successful execution..." })}\n\n`);
-          try {
-            const imgBuffer = fs.readFileSync(screenshotPath);
-            const base64Img = imgBuffer.toString("base64");
-            
-            const verificationPrompt = `You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment.
-The user requested this real-time native computer use operation:
-"${lastUserMsg}"
-
-We successfully dispatched these precise commands to their physical computer/device cockpit:
-${parsedNativeCommands.join('\n')}
-
-Analyze this live screenshot of their screen to verify if the task succeeded (e.g. terminal is open, terminal console focused, the correct command was entered/run, and shows successful output on the screen).
-
-GUIDELINES:
-1. Examine the visual state of the screen carefully.
-2. If the task succeeded, provide a beautiful, extremely polished, professional confirmation of success, detailing exactly what you see on the screen confirming the success (e.g. active terminal, loaded packages, active browser tab, settings page).
-3. If it failed, is stuck, or has an error, describe exactly what went wrong or what is visible, and outline the required correction.
-4. Speak with absolute composure, confidence, and precision. Only claim success if you are 100% sure based on the visual evidence. Do not mention that you are an AI or simulating.`;
-
-            const result = await generateContentWithFallback({
-              model: "gemini-3.5-flash",
-              contents: [
-                {
-                  role: "user",
-                  parts: [
-                    { text: verificationPrompt },
-                    {
-                      inlineData: {
-                        mimeType: "image/png",
-                        data: base64Img
-                      }
-                    }
-                  ]
-                }
-              ]
-            });
-
-            let textResult = "";
-            if (result && typeof result.text === 'string') {
-              textResult = result.text;
-            } else if (result && result.candidates && result.candidates[0]?.content?.parts?.[0]?.text) {
-              textResult = result.candidates[0].content.parts[0].text;
-            } else if (result && typeof result.text === 'function') {
-              textResult = await result.text();
-            } else {
-              textResult = JSON.stringify(result);
-            }
-            finalReport = textResult;
-          } catch (visionErr: any) {
-            finalReport = `\n\n❌ **Vision verification failed**: ${visionErr.message || String(visionErr)}. Please check your companion setup.`;
-          }
-        } else {
-          finalReport = `\n\n⚠️ **Real-Time Status Alert**: I initiated a live execution confirmation, but your companion app didn't report a screenshot within the timeout window. Please check:
-1. That your Swift UI/macOS app is paired and running.
-2. That Accessibility permissions are granted for Terminal / System Events control on your computer.`;
-        }
-
-        res.write(`data: ${JSON.stringify({ text: "\n\n" + finalReport })}\n\n`);
-        res.end();
-        return;
-      }
-
       let responseStream;
       try {
         responseStream = await generateContentStreamWithFallback({
@@ -7013,6 +6131,104 @@ Return a JSON-like structured response:
     } catch (error: any) {
       console.error("Vision Processing Error:", error);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/mac/agent/reason", express.json({ limit: "50mb" }), async (req, res) => {
+    try {
+      const { image, query } = req.body;
+      if (!image) return res.status(400).json({ error: "Missing image data" });
+
+      let base64Data = image;
+      if (image.includes(",")) {
+        base64Data = image.split(",")[1];
+      }
+
+      const prompt = `You are a professional macOS Computer Use agent. You see a screenshot of the user's active screen.
+The current objective is: "${query || "Analyze and assist the user with their environment."}"
+
+TASK:
+1. Examine the screenshot closely to locate UI elements (such as buttons, menus, input fields, icons).
+2. Determine the most logical next action to fulfill the objective.
+3. Provide the coordinate (x, y) where the action should take place. Coordinates MUST be normalized to the range [0, 1000], where:
+   - x: 0 is the left edge, 1000 is the right edge.
+   - y: 0 is the top edge, 1000 is the bottom edge.
+4. Specify the action type:
+   - 'click' to click an element (e.g. button, icon, tab, input field).
+   - 'hover' to hover over an element.
+   - 'typeText' to type keyboard text. If typing text, you MUST click the text box/input field first in a previous action or make sure it is already focused, and specify the text string in the 'text' property.
+
+Keep actions precise and sequential. If you are finished or have accomplished the task, hover at [500, 500] and explain that you have successfully completed the objective.`;
+
+      const imagePart = {
+        inlineData: {
+          mimeType: "image/png",
+          data: base64Data,
+        },
+      };
+
+      const textPart = {
+        text: prompt,
+      };
+
+      console.log(`[MacAgent] Computer Use reasoning requested. Query: "${query || "default"}"`);
+
+      const result = await generateContentWithFallback({
+        model: "gemini-2.5-flash",
+        contents: { parts: [textPart, imagePart] },
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: {
+              action: {
+                type: "STRING",
+                description: "The action type to perform. Must be one of: 'click', 'hover', 'typeText'."
+              },
+              x: {
+                type: "NUMBER",
+                description: "The normalized X coordinate in the range [0, 1000] from left to right."
+              },
+              y: {
+                type: "NUMBER",
+                description: "The normalized Y coordinate in the range [0, 1000] from top to bottom."
+              },
+              text: {
+                type: "STRING",
+                description: "The text to type. Only required if action is 'typeText'."
+              },
+              explanation: {
+                type: "STRING",
+                description: "A brief, concise, professional reason or explanation for taking this action."
+              }
+            },
+            required: ["action", "x", "y", "explanation"]
+          }
+        }
+      });
+
+      const responseText = result.text?.trim() || "{}";
+      console.log(`[MacAgent] Received response: ${responseText}`);
+
+      try {
+        const parsed = JSON.parse(responseText);
+        res.json(parsed);
+      } catch (parseError) {
+        console.warn("[MacAgent] JSON parsing failed, attempting fallback clean", responseText);
+        const cleanJsonStr = responseText.replace(/```json\s?|```/g, "").trim();
+        try {
+          const parsedFallback = JSON.parse(cleanJsonStr);
+          res.json(parsedFallback);
+        } catch {
+          res.status(500).json({
+            error: "Model did not return valid JSON.",
+            raw: responseText
+          });
+        }
+      }
+    } catch (error: any) {
+      console.error("[MacAgent] Reasoning Endpoint Error:", error);
+      res.status(500).json({ error: error.message || "Failed to process computer use reasoning." });
     }
   });
 
