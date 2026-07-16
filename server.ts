@@ -3003,16 +3003,19 @@ export default function App() {
   let firestoreAdminInstance: any = null;
   async function getServerFirestore() {
     if (!firestoreAdminInstance) {
-      const admin = (await import("firebase-admin")).default;
-      if (admin.apps.length === 0) {
+      const adminModule = await import("firebase-admin");
+      const admin = adminModule.default || adminModule;
+      const apps = admin.apps || (admin as any).getApps?.() || [];
+      if (apps.length === 0) {
         try {
           const configPath = path.join(process.cwd(), "firebase-applet-config.json");
           if (fs.existsSync(configPath)) {
             const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-            admin.initializeApp({
+            const initOptions: any = {
               projectId: config.projectId,
               databaseURL: config.firestoreDatabaseId ? `https://${config.projectId}.firebaseio.com` : undefined
-            });
+            };
+            admin.initializeApp(initOptions);
           } else {
             admin.initializeApp();
           }
@@ -3021,7 +3024,31 @@ export default function App() {
           console.error("[FIREBASE] Error initializing Admin SDK:", err.message);
         }
       }
-      firestoreAdminInstance = admin.firestore();
+
+      const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+      if (fs.existsSync(configPath)) {
+        const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+        if (config.firestoreDatabaseId) {
+          try {
+            // Check if admin.firestore takes a databaseId parameter or options
+            firestoreAdminInstance = admin.firestore();
+            // In modern firebase-admin, you specify databaseId at initializeApp or pass it to firestore() or if not supported, fall back
+            if (typeof (admin.firestore as any).databaseId === "string" || config.firestoreDatabaseId) {
+              try {
+                firestoreAdminInstance = (admin as any).firestore(config.firestoreDatabaseId);
+              } catch (e) {
+                firestoreAdminInstance = admin.firestore();
+              }
+            }
+          } catch (err) {
+            firestoreAdminInstance = admin.firestore();
+          }
+        } else {
+          firestoreAdminInstance = admin.firestore();
+        }
+      } else {
+        firestoreAdminInstance = admin.firestore();
+      }
     }
     return firestoreAdminInstance;
   }
