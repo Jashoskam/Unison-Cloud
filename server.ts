@@ -9,12 +9,12 @@ import { spawn, exec } from "child_process";
 
 const PORT = 3000;
 const googleGenAI = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || "",
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
+    apiKey: process.env.GEMINI_API_KEY || "",
+    httpOptions: {
+        headers: {
+            'User-Agent': 'aistudio-build',
+        }
     }
-  }
 });
 
 // Server-side Supabase reference
@@ -31,538 +31,538 @@ const localUserConnections = new Map<string, any>();
 const USER_CONNECTIONS_FILE = path.join(process.cwd(), "user_connections.json");
 
 try {
-  if (fs.existsSync(USER_CONNECTIONS_FILE)) {
-    const content = fs.readFileSync(USER_CONNECTIONS_FILE, "utf-8");
-    const parsed = JSON.parse(content);
-    for (const [k, v] of Object.entries(parsed)) {
-      localUserConnections.set(k, v);
+    if (fs.existsSync(USER_CONNECTIONS_FILE)) {
+        const content = fs.readFileSync(USER_CONNECTIONS_FILE, "utf-8");
+        const parsed = JSON.parse(content);
+        for (const [k, v] of Object.entries(parsed)) {
+            localUserConnections.set(k, v);
+        }
+        console.log(`[USER_CONNECTIONS] Loaded ${localUserConnections.size} cached connections.`);
     }
-    console.log(`[USER_CONNECTIONS] Loaded ${localUserConnections.size} cached connections.`);
-  }
 } catch (err) {
-  console.warn("[USER_CONNECTIONS] Error loading cached connections:", err);
+    console.warn("[USER_CONNECTIONS] Error loading cached connections:", err);
 }
 
 function saveUserConnections() {
-  try {
-    const data: Record<string, any> = {};
-    for (const [k, v] of localUserConnections.entries()) {
-      data[k] = v;
+    try {
+        const data: Record<string, any> = {};
+        for (const [k, v] of localUserConnections.entries()) {
+            data[k] = v;
+        }
+        fs.writeFileSync(USER_CONNECTIONS_FILE, JSON.stringify(data, null, 2), "utf-8");
+    } catch (err) {
+        console.error("[USER_CONNECTIONS] Error saving connections:", err);
     }
-    fs.writeFileSync(USER_CONNECTIONS_FILE, JSON.stringify(data, null, 2), "utf-8");
-  } catch (err) {
-    console.error("[USER_CONNECTIONS] Error saving connections:", err);
-  }
 }
 
 class SupabaseDocumentReference {
-  path: string;
-  id: string;
+    path: string;
+    id: string;
 
-  constructor(path: string, id: string) {
-    this.path = path;
-    this.id = id;
-  }
-
-  collection(subPath: string) {
-    return new SupabaseCollectionReference(`${this.path}/${this.id}/${subPath}`);
-  }
-
-  async get() {
-    const segments = this.path.split("/");
-    if (this.path === "device_pairings") {
-      const data = localDevicePairings.get(this.id);
-      return {
-        id: this.id,
-        exists: !!data,
-        data: () => data
-      };
+    constructor(path: string, id: string) {
+        this.path = path;
+        this.id = id;
     }
 
-    if (this.path === "user_connections") {
-      const data = localUserConnections.get(this.id);
-      return {
-        id: this.id,
-        exists: !!data,
-        data: () => data
-      };
+    collection(subPath: string) {
+        return new SupabaseCollectionReference(`${this.path}/${this.id}/${subPath}`);
     }
 
-    if (this.path === "conversations") {
-      const { data, error } = await backendSupabase
-        .from("conversations")
-        .select("*")
-        .eq("id", this.id)
-        .maybeSingle();
+    async get() {
+        const segments = this.path.split("/");
+        if (this.path === "device_pairings") {
+            const data = localDevicePairings.get(this.id);
+            return {
+                id: this.id,
+                exists: !!data,
+                data: () => data
+            };
+        }
 
-      if (error) {
-        console.error(`[Supabase Get Convo Error] ${error.message}`);
-      }
+        if (this.path === "user_connections") {
+            const data = localUserConnections.get(this.id);
+            return {
+                id: this.id,
+                exists: !!data,
+                data: () => data
+            };
+        }
 
-      const formatted = data ? {
-        id: data.id,
-        title: data.title,
-        type: data.type,
-        userId: data.user_id,
-        parentId: data.parent_id,
-        createdAt: data.created_at ? new Date(data.created_at) : undefined,
-        updatedAt: data.updated_at ? new Date(data.updated_at) : undefined
-      } : null;
+        if (this.path === "conversations") {
+            const { data, error } = await backendSupabase
+                .from("conversations")
+                .select("*")
+                .eq("id", this.id)
+                .maybeSingle();
 
-      return {
-        id: this.id,
-        exists: !!data,
-        data: () => formatted
-      };
-    }
+            if (error) {
+                console.error(`[Supabase Get Convo Error] ${error.message}`);
+            }
 
-    if (segments.length === 3) {
-      const parentId = segments[1];
-      const subCol = segments[2];
+            const formatted = data ? {
+                id: data.id,
+                title: data.title,
+                type: data.type,
+                userId: data.user_id,
+                parentId: data.parent_id,
+                createdAt: data.created_at ? new Date(data.created_at) : undefined,
+                updatedAt: data.updated_at ? new Date(data.updated_at) : undefined
+            } : null;
 
-      if (subCol === "messages") {
-        const { data, error } = await backendSupabase
-          .from("messages")
-          .select("*")
-          .eq("id", this.id)
-          .maybeSingle();
+            return {
+                id: this.id,
+                exists: !!data,
+                data: () => formatted
+            };
+        }
 
-        const formatted = data ? {
-          id: data.id,
-          conversationId: data.conversation_id,
-          role: data.role,
-          content: data.content,
-          thoughts: data.thoughts,
-          createdAt: data.created_at ? new Date(data.created_at) : undefined
-        } : null;
+        if (segments.length === 3) {
+            const parentId = segments[1];
+            const subCol = segments[2];
+
+            if (subCol === "messages") {
+                const { data, error } = await backendSupabase
+                    .from("messages")
+                    .select("*")
+                    .eq("id", this.id)
+                    .maybeSingle();
+
+                const formatted = data ? {
+                    id: data.id,
+                    conversationId: data.conversation_id,
+                    role: data.role,
+                    content: data.content,
+                    thoughts: data.thoughts,
+                    createdAt: data.created_at ? new Date(data.created_at) : undefined
+                } : null;
+
+                return {
+                    id: this.id,
+                    exists: !!data,
+                    data: () => formatted
+                };
+            }
+
+            if (subCol === "files") {
+                const { data, error } = await backendSupabase
+                    .from("files")
+                    .select("*")
+                    .eq("id", this.id)
+                    .maybeSingle();
+
+                const formatted = data ? {
+                    id: data.id,
+                    conversationId: data.conversation_id,
+                    path: data.path,
+                    content: data.content,
+                    language: data.language,
+                    updatedAt: data.created_at ? new Date(data.created_at) : undefined
+                } : null;
+
+                return {
+                    id: this.id,
+                    exists: !!data,
+                    data: () => formatted
+                };
+            }
+        }
 
         return {
-          id: this.id,
-          exists: !!data,
-          data: () => formatted
+            id: this.id,
+            exists: false,
+            data: () => null
         };
-      }
-
-      if (subCol === "files") {
-        const { data, error } = await backendSupabase
-          .from("files")
-          .select("*")
-          .eq("id", this.id)
-          .maybeSingle();
-
-        const formatted = data ? {
-          id: data.id,
-          conversationId: data.conversation_id,
-          path: data.path,
-          content: data.content,
-          language: data.language,
-          updatedAt: data.created_at ? new Date(data.created_at) : undefined
-        } : null;
-
-        return {
-          id: this.id,
-          exists: !!data,
-          data: () => formatted
-        };
-      }
     }
 
-    return {
-      id: this.id,
-      exists: false,
-      data: () => null
-    };
-  }
+    async set(data: any, options?: { merge?: boolean }) {
+        const segments = this.path.split("/");
 
-  async set(data: any, options?: { merge?: boolean }) {
-    const segments = this.path.split("/");
-
-    if (this.path === "device_pairings") {
-      localDevicePairings.set(this.id, {
-        ...(localDevicePairings.get(this.id) || {}),
-        ...data,
-        updatedAt: new Date().toISOString()
-      });
-      if (data && data.status === "authorized" && data.email && data.uid) {
-        localUserConnections.set(data.email, {
-          email: data.email,
-          uid: data.uid,
-          updatedAt: new Date().toISOString()
-        });
-        saveUserConnections();
-        console.log(`[PAIRING] Saved user connection mapping: ${data.email} -> ${data.uid}`);
-      }
-      return;
-    }
-
-    if (this.path === "user_connections") {
-      localUserConnections.set(this.id, {
-        ...(localUserConnections.get(this.id) || {}),
-        ...data,
-        updatedAt: new Date().toISOString()
-      });
-      saveUserConnections();
-      return;
-    }
-
-    if (this.path === "conversations") {
-      const dbPayload = {
-        id: this.id,
-        title: data.title || "New Interface Node",
-        type: data.type || "chat",
-        user_id: data.userId || data.user_id || "test_operator",
-        parent_id: data.parentId || data.parent_id || null,
-        updated_at: data.updatedAt ? new Date(data.updatedAt).toISOString() : new Date().toISOString(),
-      } as any;
-
-      if (!options || !options.merge || data.createdAt) {
-        dbPayload.created_at = data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString();
-      }
-
-      const { error } = await backendSupabase
-        .from("conversations")
-        .upsert(dbPayload);
-
-      if (error) {
-        console.error(`[Supabase Set Convo Error] ${error.message}`);
-        throw error;
-      }
-      return;
-    }
-
-    if (segments.length === 3) {
-      const parentId = segments[1];
-      const subCol = segments[2];
-
-      if (subCol === "messages") {
-        if (parentId) {
-          try {
-            const { data: convoExists, error: checkErr } = await backendSupabase
-              .from("conversations")
-              .select("id")
-              .eq("id", parentId)
-              .maybeSingle();
-
-            if (!convoExists && !checkErr) {
-              const isPyConvo = parentId.startsWith("py-");
-              const placeholderConvo = {
-                id: parentId,
-                title: isPyConvo ? "Python Autonomous Workstream" : "Synced Chat Thread",
-                type: "chat",
-                user_id: "pi-user",
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-              };
-              const { error: insertConvoErr } = await backendSupabase
-                .from("conversations")
-                .upsert(placeholderConvo);
-              if (insertConvoErr) {
-                console.error(`[Supabase Auto-Create Convo Error] ${insertConvoErr.message}`);
-              } else {
-                console.log(`[Supabase Auto-Create Convo] Created parent conversation ${parentId} successfully!`);
-              }
+        if (this.path === "device_pairings") {
+            localDevicePairings.set(this.id, {
+                ...(localDevicePairings.get(this.id) || {}),
+                ...data,
+                updatedAt: new Date().toISOString()
+            });
+            if (data && data.status === "authorized" && data.email && data.uid) {
+                localUserConnections.set(data.email, {
+                    email: data.email,
+                    uid: data.uid,
+                    updatedAt: new Date().toISOString()
+                });
+                saveUserConnections();
+                console.log(`[PAIRING] Saved user connection mapping: ${data.email} -> ${data.uid}`);
             }
-          } catch (e) {
-            console.error("Exception in auto-creating parent conversation on server:", e);
-          }
+            return;
         }
 
-        const dbPayload = {
-          id: this.id,
-          conversation_id: parentId,
-          role: data.role || "user",
-          content: data.content || "",
-          thoughts: data.thoughts || null,
-          created_at: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString()
-        };
-
-        const { error } = await backendSupabase
-          .from("messages")
-          .upsert(dbPayload);
-
-        if (error) {
-          console.error(`[Supabase Set Msg Error] ${error.message}`);
-          throw error;
+        if (this.path === "user_connections") {
+            localUserConnections.set(this.id, {
+                ...(localUserConnections.get(this.id) || {}),
+                ...data,
+                updatedAt: new Date().toISOString()
+            });
+            saveUserConnections();
+            return;
         }
-        return;
-      }
 
-      if (subCol === "files") {
-        if (parentId) {
-          try {
-            const { data: convoExists, error: checkErr } = await backendSupabase
-              .from("conversations")
-              .select("id")
-              .eq("id", parentId)
-              .maybeSingle();
+        if (this.path === "conversations") {
+            const dbPayload = {
+                id: this.id,
+                title: data.title || "New Interface Node",
+                type: data.type || "chat",
+                user_id: data.userId || data.user_id || "test_operator",
+                parent_id: data.parentId || data.parent_id || null,
+                updated_at: data.updatedAt ? new Date(data.updatedAt).toISOString() : new Date().toISOString(),
+            } as any;
 
-            if (!convoExists && !checkErr) {
-              const isPyConvo = parentId.startsWith("py-");
-              const placeholderConvo = {
-                id: parentId,
-                title: isPyConvo ? "Python Autonomous Workstream" : "Synced Chat Thread",
-                type: "chat",
-                user_id: "pi-user",
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-              };
-              const { error: insertConvoErr } = await backendSupabase
-                .from("conversations")
-                .upsert(placeholderConvo);
-              if (insertConvoErr) {
-                console.error(`[Supabase Auto-Create Convo Error] ${insertConvoErr.message}`);
-              } else {
-                console.log(`[Supabase Auto-Create Convo] Created parent conversation ${parentId} successfully!`);
-              }
+            if (!options || !options.merge || data.createdAt) {
+                dbPayload.created_at = data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString();
             }
-          } catch (e) {
-            console.error("Exception in auto-creating parent conversation on server for file:", e);
-          }
+
+            const { error } = await backendSupabase
+                .from("conversations")
+                .upsert(dbPayload);
+
+            if (error) {
+                console.error(`[Supabase Set Convo Error] ${error.message}`);
+                throw error;
+            }
+            return;
         }
 
-        const dbPayload = {
-          id: this.id,
-          conversation_id: parentId,
-          path: data.path || "",
-          content: data.content || "",
-          language: data.language || "typescript",
-          created_at: data.updatedAt ? new Date(data.updatedAt).toISOString() : new Date().toISOString()
-        };
+        if (segments.length === 3) {
+            const parentId = segments[1];
+            const subCol = segments[2];
 
-        const { error } = await backendSupabase
-          .from("files")
-          .upsert(dbPayload);
+            if (subCol === "messages") {
+                if (parentId) {
+                    try {
+                        const { data: convoExists, error: checkErr } = await backendSupabase
+                            .from("conversations")
+                            .select("id")
+                            .eq("id", parentId)
+                            .maybeSingle();
 
-        if (error) {
-          console.error(`[Supabase Set File Error] ${error.message}`);
-          throw error;
+                        if (!convoExists && !checkErr) {
+                            const isPyConvo = parentId.startsWith("py-");
+                            const placeholderConvo = {
+                                id: parentId,
+                                title: isPyConvo ? "Python Autonomous Workstream" : "Synced Chat Thread",
+                                type: "chat",
+                                user_id: "pi-user",
+                                created_at: new Date().toISOString(),
+                                updated_at: new Date().toISOString()
+                            };
+                            const { error: insertConvoErr } = await backendSupabase
+                                .from("conversations")
+                                .upsert(placeholderConvo);
+                            if (insertConvoErr) {
+                                console.error(`[Supabase Auto-Create Convo Error] ${insertConvoErr.message}`);
+                            } else {
+                                console.log(`[Supabase Auto-Create Convo] Created parent conversation ${parentId} successfully!`);
+                            }
+                        }
+                    } catch (e) {
+                        console.error("Exception in auto-creating parent conversation on server:", e);
+                    }
+                }
+
+                const dbPayload = {
+                    id: this.id,
+                    conversation_id: parentId,
+                    role: data.role || "user",
+                    content: data.content || "",
+                    thoughts: data.thoughts || null,
+                    created_at: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString()
+                };
+
+                const { error } = await backendSupabase
+                    .from("messages")
+                    .upsert(dbPayload);
+
+                if (error) {
+                    console.error(`[Supabase Set Msg Error] ${error.message}`);
+                    throw error;
+                }
+                return;
+            }
+
+            if (subCol === "files") {
+                if (parentId) {
+                    try {
+                        const { data: convoExists, error: checkErr } = await backendSupabase
+                            .from("conversations")
+                            .select("id")
+                            .eq("id", parentId)
+                            .maybeSingle();
+
+                        if (!convoExists && !checkErr) {
+                            const isPyConvo = parentId.startsWith("py-");
+                            const placeholderConvo = {
+                                id: parentId,
+                                title: isPyConvo ? "Python Autonomous Workstream" : "Synced Chat Thread",
+                                type: "chat",
+                                user_id: "pi-user",
+                                created_at: new Date().toISOString(),
+                                updated_at: new Date().toISOString()
+                            };
+                            const { error: insertConvoErr } = await backendSupabase
+                                .from("conversations")
+                                .upsert(placeholderConvo);
+                            if (insertConvoErr) {
+                                console.error(`[Supabase Auto-Create Convo Error] ${insertConvoErr.message}`);
+                            } else {
+                                console.log(`[Supabase Auto-Create Convo] Created parent conversation ${parentId} successfully!`);
+                            }
+                        }
+                    } catch (e) {
+                        console.error("Exception in auto-creating parent conversation on server for file:", e);
+                    }
+                }
+
+                const dbPayload = {
+                    id: this.id,
+                    conversation_id: parentId,
+                    path: data.path || "",
+                    content: data.content || "",
+                    language: data.language || "typescript",
+                    created_at: data.updatedAt ? new Date(data.updatedAt).toISOString() : new Date().toISOString()
+                };
+
+                const { error } = await backendSupabase
+                    .from("files")
+                    .upsert(dbPayload);
+
+                if (error) {
+                    console.error(`[Supabase Set File Error] ${error.message}`);
+                    throw error;
+                }
+                return;
+            }
         }
-        return;
-      }
-    }
-  }
-
-  async delete() {
-    const segments = this.path.split("/");
-
-    if (this.path === "device_pairings") {
-      localDevicePairings.delete(this.id);
-      return;
     }
 
-    if (this.path === "user_connections") {
-      localUserConnections.delete(this.id);
-      saveUserConnections();
-      return;
-    }
+    async delete() {
+        const segments = this.path.split("/");
 
-    if (this.path === "conversations") {
-      await backendSupabase.from("messages").delete().eq("conversation_id", this.id);
-      await backendSupabase.from("files").delete().eq("conversation_id", this.id);
-      await backendSupabase.from("checkpoints").delete().eq("conversation_id", this.id);
-      
-      const { error } = await backendSupabase
-        .from("conversations")
-        .delete()
-        .eq("id", this.id);
+        if (this.path === "device_pairings") {
+            localDevicePairings.delete(this.id);
+            return;
+        }
 
-      if (error) {
-        console.error(`[Supabase Delete Convo Error] ${error.message}`);
-        throw error;
-      }
-      return;
-    }
+        if (this.path === "user_connections") {
+            localUserConnections.delete(this.id);
+            saveUserConnections();
+            return;
+        }
 
-    if (segments.length === 3) {
-      const subCol = segments[2];
-      if (subCol === "messages") {
-        await backendSupabase.from("messages").delete().eq("id", this.id);
-      } else if (subCol === "files") {
-        await backendSupabase.from("files").delete().eq("id", this.id);
-      }
+        if (this.path === "conversations") {
+            await backendSupabase.from("messages").delete().eq("conversation_id", this.id);
+            await backendSupabase.from("files").delete().eq("conversation_id", this.id);
+            await backendSupabase.from("checkpoints").delete().eq("conversation_id", this.id);
+
+            const { error } = await backendSupabase
+                .from("conversations")
+                .delete()
+                .eq("id", this.id);
+
+            if (error) {
+                console.error(`[Supabase Delete Convo Error] ${error.message}`);
+                throw error;
+            }
+            return;
+        }
+
+        if (segments.length === 3) {
+            const subCol = segments[2];
+            if (subCol === "messages") {
+                await backendSupabase.from("messages").delete().eq("id", this.id);
+            } else if (subCol === "files") {
+                await backendSupabase.from("files").delete().eq("id", this.id);
+            }
+        }
     }
-  }
 }
 
 class SupabaseCollectionReference {
-  path: string;
-  _filters: { field: string; op: string; value: any }[] = [];
+    path: string;
+    _filters: { field: string; op: string; value: any }[] = [];
 
-  constructor(path: string, filters: { field: string; op: string; value: any }[] = []) {
-    this.path = path;
-    this._filters = filters;
-  }
-
-  doc(id?: string) {
-    const resolvedId = id || `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    return new SupabaseDocumentReference(this.path, resolvedId);
-  }
-
-  where(field: string, op: string, value: any) {
-    return new SupabaseCollectionReference(this.path, [
-      ...this._filters,
-      { field, op, value }
-    ]);
-  }
-
-  async get() {
-    const segments = this.path.split("/");
-    let list: any[] = [];
-
-    if (this.path === "device_pairings") {
-      list = Array.from(localDevicePairings.entries()).map(([id, val]) => {
-        return {
-          id,
-          ref: new SupabaseDocumentReference(this.path, id),
-          data: () => val
-        };
-      });
-    } else if (this.path === "user_connections") {
-      list = Array.from(localUserConnections.entries()).map(([id, val]) => {
-        return {
-          id,
-          ref: new SupabaseDocumentReference(this.path, id),
-          data: () => val
-        };
-      });
-    } else if (this.path === "conversations") {
-      let queryBuilder = backendSupabase.from("conversations").select("*");
-
-      for (const filter of this._filters) {
-        if (filter.field === "userId" || filter.field === "user_id") {
-          queryBuilder = queryBuilder.eq("user_id", filter.value);
-        } else if (filter.field === "type") {
-          queryBuilder = queryBuilder.eq("type", filter.value);
-        }
-      }
-
-      const { data, error } = await queryBuilder;
-
-      if (error) {
-        console.error(`[Supabase Get Conv List Error] ${error.message}`);
-        throw error;
-      }
-
-      list = (data || []).map(convo => {
-        const formatted = {
-          id: convo.id,
-          title: convo.title,
-          type: convo.type,
-          userId: convo.user_id,
-          parentId: convo.parent_id,
-          createdAt: convo.created_at ? new Date(convo.created_at) : undefined,
-          updatedAt: convo.updated_at ? new Date(convo.updated_at) : undefined
-        };
-        return {
-          id: convo.id,
-          ref: new SupabaseDocumentReference(this.path, convo.id),
-          data: () => formatted
-        };
-      });
-    } else if (segments.length === 3) {
-      const parentId = segments[1];
-      const subCol = segments[2];
-
-      if (subCol === "messages") {
-        let queryBuilder = backendSupabase
-          .from("messages")
-          .select("*")
-          .eq("conversation_id", parentId)
-          .order("created_at", { ascending: true });
-
-        const { data, error } = await queryBuilder;
-
-        if (error) {
-          console.error(`[Supabase Get Msg List Error] ${error.message}`);
-          throw error;
-        }
-
-        list = (data || []).map(m => {
-          const formatted = {
-            id: m.id,
-            conversationId: m.conversation_id,
-            role: m.role,
-            content: m.content,
-            thoughts: m.thoughts,
-            createdAt: m.created_at ? new Date(m.created_at) : undefined
-          };
-          return {
-            id: m.id,
-            ref: new SupabaseDocumentReference(this.path, m.id),
-            data: () => formatted
-          };
-        });
-      } else if (subCol === "files") {
-        let queryBuilder = backendSupabase
-          .from("files")
-          .select("*")
-          .eq("conversation_id", parentId);
-
-        const { data, error } = await queryBuilder;
-
-        if (error) {
-          console.error(`[Supabase Get File List Error] ${error.message}`);
-          throw error;
-        }
-
-        list = (data || []).map(f => {
-          const formatted = {
-            id: f.id,
-            conversationId: f.conversation_id,
-            path: f.path,
-            content: f.content,
-            language: f.language,
-            updatedAt: f.created_at ? new Date(f.created_at) : undefined
-          };
-          return {
-            id: f.id,
-            ref: new SupabaseDocumentReference(this.path, f.id),
-            data: () => formatted
-          };
-        });
-      }
+    constructor(path: string, filters: { field: string; op: string; value: any }[] = []) {
+        this.path = path;
+        this._filters = filters;
     }
 
-    const result = {
-      docs: list,
-      forEach(callback: (doc: any) => void) {
-        list.forEach(callback);
-      }
-    };
-    return result;
-  }
+    doc(id?: string) {
+        const resolvedId = id || `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        return new SupabaseDocumentReference(this.path, resolvedId);
+    }
+
+    where(field: string, op: string, value: any) {
+        return new SupabaseCollectionReference(this.path, [
+            ...this._filters,
+            { field, op, value }
+        ]);
+    }
+
+    async get() {
+        const segments = this.path.split("/");
+        let list: any[] = [];
+
+        if (this.path === "device_pairings") {
+            list = Array.from(localDevicePairings.entries()).map(([id, val]) => {
+                return {
+                    id,
+                    ref: new SupabaseDocumentReference(this.path, id),
+                    data: () => val
+                };
+            });
+        } else if (this.path === "user_connections") {
+            list = Array.from(localUserConnections.entries()).map(([id, val]) => {
+                return {
+                    id,
+                    ref: new SupabaseDocumentReference(this.path, id),
+                    data: () => val
+                };
+            });
+        } else if (this.path === "conversations") {
+            let queryBuilder = backendSupabase.from("conversations").select("*");
+
+            for (const filter of this._filters) {
+                if (filter.field === "userId" || filter.field === "user_id") {
+                    queryBuilder = queryBuilder.eq("user_id", filter.value);
+                } else if (filter.field === "type") {
+                    queryBuilder = queryBuilder.eq("type", filter.value);
+                }
+            }
+
+            const { data, error } = await queryBuilder;
+
+            if (error) {
+                console.error(`[Supabase Get Conv List Error] ${error.message}`);
+                throw error;
+            }
+
+            list = (data || []).map(convo => {
+                const formatted = {
+                    id: convo.id,
+                    title: convo.title,
+                    type: convo.type,
+                    userId: convo.user_id,
+                    parentId: convo.parent_id,
+                    createdAt: convo.created_at ? new Date(convo.created_at) : undefined,
+                    updatedAt: convo.updated_at ? new Date(convo.updated_at) : undefined
+                };
+                return {
+                    id: convo.id,
+                    ref: new SupabaseDocumentReference(this.path, convo.id),
+                    data: () => formatted
+                };
+            });
+        } else if (segments.length === 3) {
+            const parentId = segments[1];
+            const subCol = segments[2];
+
+            if (subCol === "messages") {
+                let queryBuilder = backendSupabase
+                    .from("messages")
+                    .select("*")
+                    .eq("conversation_id", parentId)
+                    .order("created_at", { ascending: true });
+
+                const { data, error } = await queryBuilder;
+
+                if (error) {
+                    console.error(`[Supabase Get Msg List Error] ${error.message}`);
+                    throw error;
+                }
+
+                list = (data || []).map(m => {
+                    const formatted = {
+                        id: m.id,
+                        conversationId: m.conversation_id,
+                        role: m.role,
+                        content: m.content,
+                        thoughts: m.thoughts,
+                        createdAt: m.created_at ? new Date(m.created_at) : undefined
+                    };
+                    return {
+                        id: m.id,
+                        ref: new SupabaseDocumentReference(this.path, m.id),
+                        data: () => formatted
+                    };
+                });
+            } else if (subCol === "files") {
+                let queryBuilder = backendSupabase
+                    .from("files")
+                    .select("*")
+                    .eq("conversation_id", parentId);
+
+                const { data, error } = await queryBuilder;
+
+                if (error) {
+                    console.error(`[Supabase Get File List Error] ${error.message}`);
+                    throw error;
+                }
+
+                list = (data || []).map(f => {
+                    const formatted = {
+                        id: f.id,
+                        conversationId: f.conversation_id,
+                        path: f.path,
+                        content: f.content,
+                        language: f.language,
+                        updatedAt: f.created_at ? new Date(f.created_at) : undefined
+                    };
+                    return {
+                        id: f.id,
+                        ref: new SupabaseDocumentReference(this.path, f.id),
+                        data: () => formatted
+                    };
+                });
+            }
+        }
+
+        const result = {
+            docs: list,
+            forEach(callback: (doc: any) => void) {
+                list.forEach(callback);
+            }
+        };
+        return result;
+    }
 }
 
 class SupabaseBatch {
-  _ops: (() => Promise<void>)[] = [];
+    _ops: (() => Promise<void>)[] = [];
 
-  set(ref: any, data: any, options?: any) {
-    this._ops.push(async () => {
-      await ref.set(data, options);
-    });
-  }
-
-  delete(ref: any) {
-    this._ops.push(async () => {
-      await ref.delete();
-    });
-  }
-
-  async commit() {
-    for (const op of this._ops) {
-      await op();
+    set(ref: any, data: any, options?: any) {
+        this._ops.push(async () => {
+            await ref.set(data, options);
+        });
     }
-  }
+
+    delete(ref: any) {
+        this._ops.push(async () => {
+            await ref.delete();
+        });
+    }
+
+    async commit() {
+        for (const op of this._ops) {
+            await op();
+        }
+    }
 }
 
 class SupabaseAdaptedFirestoreAdmin {
-  collection(path: string) {
-    return new SupabaseCollectionReference(path);
-  }
+    collection(path: string) {
+        return new SupabaseCollectionReference(path);
+    }
 
-  batch() {
-    return new SupabaseBatch();
-  }
+    batch() {
+        return new SupabaseBatch();
+    }
 }
 
 let adminDb: any = new SupabaseAdaptedFirestoreAdmin();
@@ -573,138 +573,138 @@ const AI_CACHE_FILE = path.join(process.cwd(), "ai_cache.json");
 let aiCache: Record<string, { model: string; text: string; timestamp: number; candidates?: any }> = {};
 
 try {
-  if (fs.existsSync(AI_CACHE_FILE)) {
-    aiCache = JSON.parse(fs.readFileSync(AI_CACHE_FILE, "utf-8"));
-    console.log(`[AI_CACHE] Loaded ${Object.keys(aiCache).length} cached entries successfully!`);
-  }
+    if (fs.existsSync(AI_CACHE_FILE)) {
+        aiCache = JSON.parse(fs.readFileSync(AI_CACHE_FILE, "utf-8"));
+        console.log(`[AI_CACHE] Loaded ${Object.keys(aiCache).length} cached entries successfully!`);
+    }
 } catch (error) {
-  console.warn("[AI_CACHE] Error loading cache file:", error);
+    console.warn("[AI_CACHE] Error loading cache file:", error);
 }
 
 function saveCache() {
-  try {
-    fs.writeFileSync(AI_CACHE_FILE, JSON.stringify(aiCache, null, 2), "utf-8");
-  } catch (error) {
-    console.warn("[AI_CACHE] Error saving cache file:", error);
-  }
+    try {
+        fs.writeFileSync(AI_CACHE_FILE, JSON.stringify(aiCache, null, 2), "utf-8");
+    } catch (error) {
+        console.warn("[AI_CACHE] Error saving cache file:", error);
+    }
 }
 
 function computePayloadHash(payload: any): string {
-  const str = JSON.stringify(payload);
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0;
-  }
-  return `h_${Math.abs(hash)}`;
+    const str = JSON.stringify(payload);
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = (hash << 5) - hash + str.charCodeAt(i);
+        hash |= 0;
+    }
+    return `h_${Math.abs(hash)}`;
 }
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 function cleanGeminiErrorMessage(err: any): string {
-  if (!err) return "Unknown Gemini API error";
-  const rawMsg = err.message || String(err);
-  
-  const lowerMsg = rawMsg.toLowerCase();
-  
-  if (
-    lowerMsg.includes("resource_exhausted") ||
-    lowerMsg.includes("quota") ||
-    lowerMsg.includes("429") ||
-    lowerMsg.includes("too many requests") ||
-    lowerMsg.includes("limit exceeded") ||
-    lowerMsg.includes("exhausted")
-  ) {
-    return "Gemini API Quota Exceeded: You have exceeded your current Google AI Studio free-tier quota limit. Please wait a minute before retrying, verify your API key plan settings, or configure the 'Local AI' engine in the Settings panel of Unison OS.";
-  }
-  
-  if (
-    lowerMsg.includes("overload") ||
-    lowerMsg.includes("high demand") ||
-    lowerMsg.includes("service unavailable") ||
-    lowerMsg.includes("503") ||
-    lowerMsg.includes("unavailable") ||
-    lowerMsg.includes("temporarily") ||
-    lowerMsg.includes("busy")
-  ) {
-    return "Gemini Service Busy: The model is currently experiencing exceptionally high demand/overload. Please tap retry in a moment, switch your model selection to a backup flash model, or configure the 'Local AI' engine in the Settings panel of Unison OS.";
-  }
-  
-  try {
-    if (rawMsg.startsWith("{")) {
-      const parsed = JSON.parse(rawMsg);
-      if (parsed.error?.message) {
-        const nestedMsg = parsed.error.message;
-        if (nestedMsg.startsWith("{")) {
-          const doubleParsed = JSON.parse(nestedMsg);
-          if (doubleParsed.error?.message) {
-            return doubleParsed.error.message;
-          }
-        }
-        return nestedMsg;
-      }
+    if (!err) return "Unknown Gemini API error";
+    const rawMsg = err.message || String(err);
+
+    const lowerMsg = rawMsg.toLowerCase();
+
+    if (
+        lowerMsg.includes("resource_exhausted") ||
+        lowerMsg.includes("quota") ||
+        lowerMsg.includes("429") ||
+        lowerMsg.includes("too many requests") ||
+        lowerMsg.includes("limit exceeded") ||
+        lowerMsg.includes("exhausted")
+    ) {
+        return "Gemini API Quota Exceeded: You have exceeded your current Google AI Studio free-tier quota limit. Please wait a minute before retrying, verify your API key plan settings, or configure the 'Local AI' engine in the Settings panel of Unison OS.";
     }
-  } catch (e: any) {
-    // Parsing error, fallback below
-  }
-  
-  return rawMsg;
+
+    if (
+        lowerMsg.includes("overload") ||
+        lowerMsg.includes("high demand") ||
+        lowerMsg.includes("service unavailable") ||
+        lowerMsg.includes("503") ||
+        lowerMsg.includes("unavailable") ||
+        lowerMsg.includes("temporarily") ||
+        lowerMsg.includes("busy")
+    ) {
+        return "Gemini Service Busy: The model is currently experiencing exceptionally high demand/overload. Please tap retry in a moment, switch your model selection to a backup flash model, or configure the 'Local AI' engine in the Settings panel of Unison OS.";
+    }
+
+    try {
+        if (rawMsg.startsWith("{")) {
+            const parsed = JSON.parse(rawMsg);
+            if (parsed.error?.message) {
+                const nestedMsg = parsed.error.message;
+                if (nestedMsg.startsWith("{")) {
+                    const doubleParsed = JSON.parse(nestedMsg);
+                    if (doubleParsed.error?.message) {
+                        return doubleParsed.error.message;
+                    }
+                }
+                return nestedMsg;
+            }
+        }
+    } catch (e: any) {
+        // Parsing error, fallback below
+    }
+
+    return rawMsg;
 }
 
 function sanitizeContents(contents: any[]): any[] {
-  if (!contents || !Array.isArray(contents)) return contents;
-  const combined: any[] = [];
-  for (const turn of contents) {
-    const role = turn.role === "model" ? "model" : "user";
-    let text = "";
-    if (turn.parts && Array.isArray(turn.parts)) {
-      text = turn.parts.map((p: any) => p.text || "").join("\n");
-    } else if (typeof turn.content === "string") {
-      text = turn.content;
+    if (!contents || !Array.isArray(contents)) return contents;
+    const combined: any[] = [];
+    for (const turn of contents) {
+        const role = turn.role === "model" ? "model" : "user";
+        let text = "";
+        if (turn.parts && Array.isArray(turn.parts)) {
+            text = turn.parts.map((p: any) => p.text || "").join("\n");
+        } else if (typeof turn.content === "string") {
+            text = turn.content;
+        }
+
+        if (combined.length > 0 && combined[combined.length - 1].role === role) {
+            combined[combined.length - 1].parts[0].text += "\n" + text;
+        } else {
+            combined.push({
+                role,
+                parts: [{ text }]
+            });
+        }
     }
-    
-    if (combined.length > 0 && combined[combined.length - 1].role === role) {
-      combined[combined.length - 1].parts[0].text += "\n" + text;
-    } else {
-      combined.push({
-        role,
-        parts: [{ text }]
-      });
+
+    while (combined.length > 0 && combined[0].role !== "user") {
+        combined.shift();
     }
-  }
-  
-  while (combined.length > 0 && combined[0].role !== "user") {
-    combined.shift();
-  }
-  return combined;
+    return combined;
 }
 
 function sanitizeThinkingLevel(level: any): string | undefined {
-  if (!level) return undefined;
-  const s = String(level).toUpperCase();
-  if (s.includes("MINIMAL")) return "MINIMAL";
-  if (s.includes("LOW")) return "LOW";
-  if (s.includes("HIGH")) return "HIGH";
-  return "LOW"; // Default fallback for invalid levels
+    if (!level) return undefined;
+    const s = String(level).toUpperCase();
+    if (s.includes("MINIMAL")) return "MINIMAL";
+    if (s.includes("LOW")) return "LOW";
+    if (s.includes("HIGH")) return "HIGH";
+    return "LOW"; // Default fallback for invalid levels
 }
 
 function simulateOfflineAIResponse(params: any): { text: string; candidates: any[] } {
-  const contents = params.contents || [];
-  let userQuery = "";
-  if (contents.length > 0) {
-    const lastTurn = contents[contents.length - 1];
-    if (lastTurn.parts && Array.isArray(lastTurn.parts)) {
-      userQuery = lastTurn.parts.map((p: any) => p.text || "").join("\n");
-    } else if (typeof lastTurn.content === "string") {
-      userQuery = lastTurn.content;
+    const contents = params.contents || [];
+    let userQuery = "";
+    if (contents.length > 0) {
+        const lastTurn = contents[contents.length - 1];
+        if (lastTurn.parts && Array.isArray(lastTurn.parts)) {
+            userQuery = lastTurn.parts.map((p: any) => p.text || "").join("\n");
+        } else if (typeof lastTurn.content === "string") {
+            userQuery = lastTurn.content;
+        }
     }
-  }
 
-  const queryLower = userQuery.toLowerCase();
-  let text = "";
+    const queryLower = userQuery.toLowerCase();
+    let text = "";
 
-  if (queryLower.includes("help") || queryLower.includes("guide") || queryLower.includes("tutorial") || queryLower.includes("what is")) {
-    text = `### Welcome to Unison OS Cognitive Workspace 🌟
+    if (queryLower.includes("help") || queryLower.includes("guide") || queryLower.includes("tutorial") || queryLower.includes("what is")) {
+        text = `### Welcome to Unison OS Cognitive Workspace 🌟
 
 Unison OS is an advanced, high-fidelity workspace designed for real-time collaboration, document design, and cognitive analysis. Since your workspace is operating under **Cognitive Offline Core** (due to API rate limits), let me guide you through the offline-enabled features available in your interface:
 
@@ -714,13 +714,13 @@ Unison OS is an advanced, high-fidelity workspace designed for real-time collabo
 4. **Interactive Sandbox & Code Editors**: Build and compile front-end widgets natively with live error reporting.
 
 Need help with a specific task? Type your prompt below and I will generate standard structures for you!`;
-  } else if (queryLower.includes("code") || queryLower.includes("function") || queryLower.includes("typescript") || queryLower.includes("javascript") || queryLower.includes("python") || queryLower.includes("html") || queryLower.includes("css") || queryLower.includes("react")) {
-    let lang = "typescript";
-    if (queryLower.includes("python")) lang = "python";
-    else if (queryLower.includes("html")) lang = "html";
-    else if (queryLower.includes("css")) lang = "css";
+    } else if (queryLower.includes("code") || queryLower.includes("function") || queryLower.includes("typescript") || queryLower.includes("javascript") || queryLower.includes("python") || queryLower.includes("html") || queryLower.includes("css") || queryLower.includes("react")) {
+        let lang = "typescript";
+        if (queryLower.includes("python")) lang = "python";
+        else if (queryLower.includes("html")) lang = "html";
+        else if (queryLower.includes("css")) lang = "css";
 
-    text = `### Custom Code Generation 🛠️
+        text = `### Custom Code Generation 🛠️
 
 Here is a high-quality, offline-generated implementation tailored to your request:
 
@@ -785,8 +785,8 @@ export function computeStats(text: string): CognitiveStats {
 - **Zero Dependencies**: Optimized to run with native, standard library mechanisms.
 - **Cognitive Security**: Completely sandbox-safe, minimizing global scope leakage.
 - **Offline Assurance**: Built to remain fully operational during isolated system states.`;
-  } else if (queryLower.includes("document") || queryLower.includes("docs") || queryLower.includes("memo") || queryLower.includes("spec") || queryLower.includes("proposal") || queryLower.includes("writing") || queryLower.includes("draft")) {
-    text = `### Draft Outline: Strategic Alignment Brief 📝
+    } else if (queryLower.includes("document") || queryLower.includes("docs") || queryLower.includes("memo") || queryLower.includes("spec") || queryLower.includes("proposal") || queryLower.includes("writing") || queryLower.includes("draft")) {
+        text = `### Draft Outline: Strategic Alignment Brief 📝
 
 Based on your document design request, I have drafted this professional memorandum. You can copy this template directly into your active editor:
 
@@ -811,14 +811,14 @@ This strategic brief coordinates the dual pathways of Unison's interface standar
 \`\`\`
 
 *You can copy this into Titan Docs and use the Document Customization Toolbar (Font, Line, Size, Paper) to preview it instantly under different aesthetics!*`;
-  } else if (queryLower.includes("hello") || queryLower.includes("hi ") || queryLower.includes("hey")) {
-    text = `### Hello there! 👋
+    } else if (queryLower.includes("hello") || queryLower.includes("hi ") || queryLower.includes("hey")) {
+        text = `### Hello there! 👋
 
 Welcome back to Unison OS. How is your work going today?
 
 I am fully available to help you draft documents, design layouts, answer coding questions, or troubleshoot scripts. Let me know what you'd like to work on!`;
-  } else {
-    text = `### Unison Cognitive Response 🧠
+    } else {
+        text = `### Unison Cognitive Response 🧠
 
 Thank you for your prompt! I am processing your input under the **Offline Backup Engine**:
 
@@ -831,838 +831,838 @@ To ensure your productivity is never disrupted by third-party quota or connectio
 3. **Collaboration**: Use the **Comments Section** on the right side panel to simulate team feedback and task lists.
 
 *If there's a specific code function, template, or guide you would like me to generate, just ask! I can construct detailed technical specifications and boilerplate implementations instantly.*`;
-  }
+    }
 
-  const disclaimer = `> ⚠️ **SYSTEM STATUS: COGNITIVE OFFLINE BACKUP ENGAGED**\n> *The Google AI Studio free-tier API quota has been temporarily exceeded. Unison OS has automatically activated its high-fidelity Offline Backup Engine to ensure your session remains completely uninterrupted and functional. Once quota resets, remote features will resume automatically.*\n\n---\n\n`;
-  const finalText = disclaimer + text;
+    const disclaimer = `> ⚠️ **SYSTEM STATUS: COGNITIVE OFFLINE BACKUP ENGAGED**\n> *The Google AI Studio free-tier API quota has been temporarily exceeded. Unison OS has automatically activated its high-fidelity Offline Backup Engine to ensure your session remains completely uninterrupted and functional. Once quota resets, remote features will resume automatically.*\n\n---\n\n`;
+    const finalText = disclaimer + text;
 
-  return {
-    text: finalText,
-    candidates: [
-      {
-        index: 0,
-        content: {
-          role: "model",
-          parts: [{ text: finalText }]
-        }
-      }
-    ]
-  };
+    return {
+        text: finalText,
+        candidates: [
+            {
+                index: 0,
+                content: {
+                    role: "model",
+                    parts: [{ text: finalText }]
+                }
+            }
+        ]
+    };
 }
 
 async function* simulateOfflineAIResponseStream(params: any): AsyncGenerator<any, void, unknown> {
-  const simulated = simulateOfflineAIResponse(params);
-  const text = simulated.text;
-  const words = text.split(" ");
-  let currentChunk = "";
-  for (let i = 0; i < words.length; i++) {
-    currentChunk += (i === 0 ? "" : " ") + words[i];
-    if (i % 3 === 2 || i === words.length - 1) {
-      yield {
-        text: currentChunk,
-        candidates: [
-          {
-            index: 0,
-            content: {
-              role: "model",
-              parts: [{ text: currentChunk }]
-            }
-          }
-        ]
-      };
-      currentChunk = "";
-      await sleep(25);
+    const simulated = simulateOfflineAIResponse(params);
+    const text = simulated.text;
+    const words = text.split(" ");
+    let currentChunk = "";
+    for (let i = 0; i < words.length; i++) {
+        currentChunk += (i === 0 ? "" : " ") + words[i];
+        if (i % 3 === 2 || i === words.length - 1) {
+            yield {
+                text: currentChunk,
+                candidates: [
+                    {
+                        index: 0,
+                        content: {
+                            role: "model",
+                            parts: [{ text: currentChunk }]
+                        }
+                    }
+                ]
+            };
+            currentChunk = "";
+            await sleep(25);
+        }
     }
-  }
 }
 
 async function generateContentWithFallback(params: any): Promise<any> {
-  const apiKey = params.customApiKey || process.env.GEMINI_API_KEY || "";
-  const client = apiKey ? new GoogleGenAI({
-    apiKey: apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      }
+    const apiKey = params.customApiKey || process.env.GEMINI_API_KEY || "";
+    const client = apiKey ? new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+            headers: {
+                'User-Agent': 'aistudio-build',
+            }
+        }
+    }) : googleGenAI;
+
+    if (params.contents) {
+        params.contents = sanitizeContents(params.contents);
     }
-  }) : googleGenAI;
-
-  if (params.contents) {
-    params.contents = sanitizeContents(params.contents);
-  }
-  if (params.config && params.config.thinkingConfig) {
-    const rawLevel = params.config.thinkingConfig.thinkingLevel;
-    if (rawLevel) {
-      params.config.thinkingConfig.thinkingLevel = sanitizeThinkingLevel(rawLevel);
+    if (params.config && params.config.thinkingConfig) {
+        const rawLevel = params.config.thinkingConfig.thinkingLevel;
+        if (rawLevel) {
+            params.config.thinkingConfig.thinkingLevel = sanitizeThinkingLevel(rawLevel);
+        }
     }
-  }
-  const originalModel = params.model;
-  const isSpecialized = originalModel && (
-    originalModel.includes("tts") || 
-    originalModel.includes("image") || 
-    originalModel.includes("veo") || 
-    originalModel.includes("lyria")
-  );
-  
-  const modelsToTry = isSpecialized 
-    ? [originalModel] 
-    : [
-        originalModel,
-        "gemini-2.5-flash",
-        "gemini-3.5-flash",
-        "gemini-flash-latest",
-        "gemini-3.1-flash-lite",
-        "gemini-3.1-pro-preview"
-      ].filter(Boolean);
-  
-  let uniqueModels = [...new Set(modelsToTry)];
-  let lastError: any = null;
+    const originalModel = params.model;
+    const isSpecialized = originalModel && (
+        originalModel.includes("tts") ||
+        originalModel.includes("image") ||
+        originalModel.includes("veo") ||
+        originalModel.includes("lyria")
+    );
 
-  for (const modelName of uniqueModels) {
-    let backoffMs = 100;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        console.log(`[GEMINI_PROXY] Executing generateContent on model: ${modelName} (attempt ${attempt}/3)`);
-        const finalParams = { ...params };
-        if (finalParams.config) {
-          finalParams.config = { ...finalParams.config };
-          if (finalParams.config.thinkingConfig && !modelName.startsWith("gemini-3")) {
-            console.log(`[GEMINI_PROXY] Removing thinkingConfig for fallback on model ${modelName}`);
-            delete finalParams.config.thinkingConfig;
-          }
+    const modelsToTry = isSpecialized
+        ? [originalModel]
+        : [
+            originalModel,
+            "gemini-2.5-flash",
+            "gemini-3.5-flash",
+            "gemini-flash-latest",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-pro-preview"
+        ].filter(Boolean);
+
+    let uniqueModels = [...new Set(modelsToTry)];
+    let lastError: any = null;
+
+    for (const modelName of uniqueModels) {
+        let backoffMs = 100;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                console.log(`[GEMINI_PROXY] Executing generateContent on model: ${modelName} (attempt ${attempt}/3)`);
+                const finalParams = { ...params };
+                if (finalParams.config) {
+                    finalParams.config = { ...finalParams.config };
+                    if (finalParams.config.thinkingConfig && !modelName.startsWith("gemini-3")) {
+                        console.log(`[GEMINI_PROXY] Removing thinkingConfig for fallback on model ${modelName}`);
+                        delete finalParams.config.thinkingConfig;
+                    }
+                }
+                delete finalParams.customApiKey;
+                return await client.models.generateContent({
+                    ...finalParams,
+                    model: modelName
+                });
+            } catch (err: any) {
+                lastError = err;
+                let errMsg = err.message || String(err);
+                if (err.error && typeof err.error === 'object' && err.error.message) {
+                    errMsg = err.error.message;
+                }
+                const errCode = err.status || err.code || (err.error && (err.error.status || err.error.code)) || (errMsg.includes("404") ? 404 : errMsg.includes("403") ? 403 : 500);
+
+                const isNotFoundError = errCode === 404 || errMsg.includes("NOT_FOUND") || errMsg.includes("not found") || errMsg.includes("not supported");
+                const isAuthError = errCode === 403 || errMsg.includes("PERMISSION_DENIED") || errMsg.includes("API key not valid");
+                const isRateLimit = errCode === 429 || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("quota") || errMsg.includes("limit exceeded");
+                const isUnavailable = errCode === 503 || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand") || errMsg.includes("overloaded");
+
+                const isQuotaExhausted = isRateLimit && (
+                    errMsg.includes("RESOURCE_EXHAUSTED") ||
+                    errMsg.includes("quota") ||
+                    errMsg.includes("plan") ||
+                    errMsg.includes("billing") ||
+                    errMsg.includes("exhausted")
+                );
+
+                console.log(`[GEMINI_PROXY] Model ${modelName} error (attempt ${attempt}/3):`, errMsg);
+
+                if (isNotFoundError || isAuthError || isQuotaExhausted) {
+                    if (isQuotaExhausted) {
+                        console.log(`[GEMINI_PROXY] API Key quota exhaustion on ${modelName}. Switching to next fallback model.`);
+                    } else {
+                        console.log(`[GEMINI_PROXY] Permanent error on ${modelName}, switching to next fallback model immediately.`);
+                    }
+                    break;
+                }
+
+                if (attempt < 3 && (isRateLimit || isUnavailable)) {
+                    const sleepMs = backoffMs * attempt;
+                    console.log(`[GEMINI_PROXY] Transient error on ${modelName}. Sleeping for ${sleepMs}ms before retry...`);
+                    await sleep(sleepMs);
+                } else {
+                    break;
+                }
+            }
         }
-        delete finalParams.customApiKey;
-        return await client.models.generateContent({
-          ...finalParams,
-          model: modelName
-        });
-      } catch (err: any) {
-        lastError = err;
-        let errMsg = err.message || String(err);
-        if (err.error && typeof err.error === 'object' && err.error.message) {
-          errMsg = err.error.message;
-        }
-        const errCode = err.status || err.code || (err.error && (err.error.status || err.error.code)) || (errMsg.includes("404") ? 404 : errMsg.includes("403") ? 403 : 500);
-        
-        const isNotFoundError = errCode === 404 || errMsg.includes("NOT_FOUND") || errMsg.includes("not found") || errMsg.includes("not supported");
-        const isAuthError = errCode === 403 || errMsg.includes("PERMISSION_DENIED") || errMsg.includes("API key not valid");
-        const isRateLimit = errCode === 429 || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("quota") || errMsg.includes("limit exceeded");
-        const isUnavailable = errCode === 503 || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand") || errMsg.includes("overloaded");
-
-        const isQuotaExhausted = isRateLimit && (
-          errMsg.includes("RESOURCE_EXHAUSTED") ||
-          errMsg.includes("quota") ||
-          errMsg.includes("plan") ||
-          errMsg.includes("billing") ||
-          errMsg.includes("exhausted")
-        );
-
-        console.log(`[GEMINI_PROXY] Model ${modelName} error (attempt ${attempt}/3):`, errMsg);
-
-        if (isNotFoundError || isAuthError || isQuotaExhausted) {
-          if (isQuotaExhausted) {
-            console.log(`[GEMINI_PROXY] API Key quota exhaustion on ${modelName}. Switching to next fallback model.`);
-          } else {
-            console.log(`[GEMINI_PROXY] Permanent error on ${modelName}, switching to next fallback model immediately.`);
-          }
-          break;
-        }
-
-        if (attempt < 3 && (isRateLimit || isUnavailable)) {
-          const sleepMs = backoffMs * attempt;
-          console.log(`[GEMINI_PROXY] Transient error on ${modelName}. Sleeping for ${sleepMs}ms before retry...`);
-          await sleep(sleepMs);
-        } else {
-          break;
-        }
-      }
     }
-  }
-  
-  console.log(`[GEMINI_PROXY] All model attempts failed or rate-limited. Falling back to Unison Cognitive Offline Core.`);
-  return simulateOfflineAIResponse(params);
+
+    console.log(`[GEMINI_PROXY] All model attempts failed or rate-limited. Falling back to Unison Cognitive Offline Core.`);
+    return simulateOfflineAIResponse(params);
 }
 
 async function generateContentStreamWithFallback(params: any): Promise<any> {
-  const apiKey = params.customApiKey || process.env.GEMINI_API_KEY || "";
-  const client = apiKey ? new GoogleGenAI({
-    apiKey: apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      }
+    const apiKey = params.customApiKey || process.env.GEMINI_API_KEY || "";
+    const client = apiKey ? new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+            headers: {
+                'User-Agent': 'aistudio-build',
+            }
+        }
+    }) : googleGenAI;
+
+    if (params.contents) {
+        params.contents = sanitizeContents(params.contents);
     }
-  }) : googleGenAI;
+    const originalModel = params.model;
+    const isSpecialized = originalModel && (
+        originalModel.includes("tts") ||
+        originalModel.includes("image") ||
+        originalModel.includes("veo") ||
+        originalModel.includes("lyria")
+    );
 
-  if (params.contents) {
-    params.contents = sanitizeContents(params.contents);
-  }
-  const originalModel = params.model;
-  const isSpecialized = originalModel && (
-    originalModel.includes("tts") || 
-    originalModel.includes("image") || 
-    originalModel.includes("veo") || 
-    originalModel.includes("lyria")
-  );
-  
-  const modelsToTry = isSpecialized 
-    ? [originalModel] 
-    : [
-        originalModel,
-        "gemini-2.5-flash",
-        "gemini-3.5-flash",
-        "gemini-flash-latest",
-        "gemini-3.1-flash-lite",
-        "gemini-3.1-pro-preview"
-      ].filter(Boolean);
-  
-  let uniqueModels = [...new Set(modelsToTry)];
-  let lastError: any = null;
+    const modelsToTry = isSpecialized
+        ? [originalModel]
+        : [
+            originalModel,
+            "gemini-2.5-flash",
+            "gemini-3.5-flash",
+            "gemini-flash-latest",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-pro-preview"
+        ].filter(Boolean);
 
-  for (const modelName of uniqueModels) {
-    let backoffMs = 100;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        console.log(`[GEMINI_PROXY] Executing generateContentStream on model: ${modelName} (attempt ${attempt}/3)`);
-        const finalParams = { ...params };
-        if (finalParams.config) {
-          finalParams.config = { ...finalParams.config };
-          if (finalParams.config.thinkingConfig && !modelName.startsWith("gemini-3")) {
-            console.log(`[GEMINI_PROXY] Removing thinkingConfig for fallback stream on model ${modelName}`);
-            delete finalParams.config.thinkingConfig;
-          }
+    let uniqueModels = [...new Set(modelsToTry)];
+    let lastError: any = null;
+
+    for (const modelName of uniqueModels) {
+        let backoffMs = 100;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                console.log(`[GEMINI_PROXY] Executing generateContentStream on model: ${modelName} (attempt ${attempt}/3)`);
+                const finalParams = { ...params };
+                if (finalParams.config) {
+                    finalParams.config = { ...finalParams.config };
+                    if (finalParams.config.thinkingConfig && !modelName.startsWith("gemini-3")) {
+                        console.log(`[GEMINI_PROXY] Removing thinkingConfig for fallback stream on model ${modelName}`);
+                        delete finalParams.config.thinkingConfig;
+                    }
+                }
+                delete finalParams.customApiKey;
+                return await client.models.generateContentStream({
+                    ...finalParams,
+                    model: modelName
+                });
+            } catch (err: any) {
+                lastError = err;
+                let errMsg = err.message || String(err);
+                if (err.error && typeof err.error === 'object' && err.error.message) {
+                    errMsg = err.error.message;
+                }
+                const errCode = err.status || err.code || (err.error && (err.error.status || err.error.code)) || (errMsg.includes("404") ? 404 : errMsg.includes("403") ? 403 : 500);
+
+                const isNotFoundError = errCode === 404 || errMsg.includes("NOT_FOUND") || errMsg.includes("not found") || errMsg.includes("not supported");
+                const isAuthError = errCode === 403 || errMsg.includes("PERMISSION_DENIED") || errMsg.includes("API key not valid");
+                const isRateLimit = errCode === 429 || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("quota") || errMsg.includes("limit exceeded");
+                const isUnavailable = errCode === 503 || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand") || errMsg.includes("overloaded");
+
+                const isQuotaExhausted = isRateLimit && (
+                    errMsg.includes("RESOURCE_EXHAUSTED") ||
+                    errMsg.includes("quota") ||
+                    errMsg.includes("plan") ||
+                    errMsg.includes("billing") ||
+                    errMsg.includes("exhausted")
+                );
+
+                console.log(`[GEMINI_PROXY] Model ${modelName} stream error (attempt ${attempt}/3):`, errMsg);
+
+                if (isNotFoundError || isAuthError || isQuotaExhausted) {
+                    if (isQuotaExhausted) {
+                        console.log(`[GEMINI_PROXY] API Key quota exhaustion stream on ${modelName}. Switching to next fallback model.`);
+                    } else {
+                        console.log(`[GEMINI_PROXY] Permanent error on ${modelName}, switching to next fallback stream model immediately.`);
+                    }
+                    break;
+                }
+
+                if (attempt < 3 && (isRateLimit || isUnavailable)) {
+                    const sleepMs = backoffMs * attempt;
+                    console.log(`[GEMINI_PROXY] Transient stream error on ${modelName}. Sleeping for ${sleepMs}ms before retry...`);
+                    await sleep(sleepMs);
+                } else {
+                    break;
+                }
+            }
         }
-        delete finalParams.customApiKey;
-        return await client.models.generateContentStream({
-          ...finalParams,
-          model: modelName
-        });
-      } catch (err: any) {
-        lastError = err;
-        let errMsg = err.message || String(err);
-        if (err.error && typeof err.error === 'object' && err.error.message) {
-          errMsg = err.error.message;
-        }
-        const errCode = err.status || err.code || (err.error && (err.error.status || err.error.code)) || (errMsg.includes("404") ? 404 : errMsg.includes("403") ? 403 : 500);
-        
-        const isNotFoundError = errCode === 404 || errMsg.includes("NOT_FOUND") || errMsg.includes("not found") || errMsg.includes("not supported");
-        const isAuthError = errCode === 403 || errMsg.includes("PERMISSION_DENIED") || errMsg.includes("API key not valid");
-        const isRateLimit = errCode === 429 || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("quota") || errMsg.includes("limit exceeded");
-        const isUnavailable = errCode === 503 || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand") || errMsg.includes("overloaded");
-
-        const isQuotaExhausted = isRateLimit && (
-          errMsg.includes("RESOURCE_EXHAUSTED") ||
-          errMsg.includes("quota") ||
-          errMsg.includes("plan") ||
-          errMsg.includes("billing") ||
-          errMsg.includes("exhausted")
-        );
-
-        console.log(`[GEMINI_PROXY] Model ${modelName} stream error (attempt ${attempt}/3):`, errMsg);
-
-        if (isNotFoundError || isAuthError || isQuotaExhausted) {
-          if (isQuotaExhausted) {
-            console.log(`[GEMINI_PROXY] API Key quota exhaustion stream on ${modelName}. Switching to next fallback model.`);
-          } else {
-            console.log(`[GEMINI_PROXY] Permanent error on ${modelName}, switching to next fallback stream model immediately.`);
-          }
-          break;
-        }
-
-        if (attempt < 3 && (isRateLimit || isUnavailable)) {
-          const sleepMs = backoffMs * attempt;
-          console.log(`[GEMINI_PROXY] Transient stream error on ${modelName}. Sleeping for ${sleepMs}ms before retry...`);
-          await sleep(sleepMs);
-        } else {
-          break;
-        }
-      }
     }
-  }
-  
-  console.log(`[GEMINI_PROXY] All model stream attempts failed or rate-limited. Falling back to Unison Cognitive Offline Core.`);
-  return simulateOfflineAIResponseStream(params);
+
+    console.log(`[GEMINI_PROXY] All model stream attempts failed or rate-limited. Falling back to Unison Cognitive Offline Core.`);
+    return simulateOfflineAIResponseStream(params);
 }
 
 const brainLogHistory: any[] = [];
 let broadcastBrainLog: ((logObj: any) => void) | null = null;
 
 function startLocalBrainWithFallback() {
-  const scriptPath = path.resolve(process.cwd(), "brain/central_server.py");
-  if (!fs.existsSync(scriptPath)) {
-    console.log("[Brain] brain/central_server.py not found. Running server in pure API/Companion backend mode without Titan local brain.");
-    return;
-  }
+    const scriptPath = path.resolve(process.cwd(), "brain/central_server.py");
+    if (!fs.existsSync(scriptPath)) {
+        console.log("[Brain] brain/central_server.py not found. Running server in pure API/Companion backend mode without Titan local brain.");
+        return;
+    }
 
-  const tryStart = (cmd: string) => {
-    console.log(`[Brain] Attempting to spawn Titan Neural Kernel with '${cmd}'...`);
-    let hasSpawnError = false;
-    const brainProcess = spawn(cmd, ["brain/central_server.py"], {
-      env: { ...process.env, PYTHONUNBUFFERED: "1" }
-    });
+    const tryStart = (cmd: string) => {
+        console.log(`[Brain] Attempting to spawn Titan Neural Kernel with '${cmd}'...`);
+        let hasSpawnError = false;
+        const brainProcess = spawn(cmd, ["brain/central_server.py"], {
+            env: { ...process.env, PYTHONUNBUFFERED: "1" }
+        });
 
-    let moduleErrorFound = false;
+        let moduleErrorFound = false;
 
-    let stdoutBuffer = "";
-    brainProcess.stdout.on("data", (data) => {
-      const chunk = data.toString();
-      console.log(`[Brain Stdout]: ${chunk.trim()}`);
-      stdoutBuffer += chunk;
-      const lines = stdoutBuffer.split("\n");
-      stdoutBuffer = lines.pop() || "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed) {
-          const logObj = {
-            tag: "BRAIN_STDOUT",
-            message: trimmed,
-            type: "info",
-            ts: Date.now() / 1000
-          };
-          brainLogHistory.push(logObj);
-          if (brainLogHistory.length > 200) brainLogHistory.shift();
-          if (broadcastBrainLog) {
-            broadcastBrainLog(logObj);
-          }
-        }
-      }
-    });
+        let stdoutBuffer = "";
+        brainProcess.stdout.on("data", (data) => {
+            const chunk = data.toString();
+            console.log(`[Brain Stdout]: ${chunk.trim()}`);
+            stdoutBuffer += chunk;
+            const lines = stdoutBuffer.split("\n");
+            stdoutBuffer = lines.pop() || "";
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed) {
+                    const logObj = {
+                        tag: "BRAIN_STDOUT",
+                        message: trimmed,
+                        type: "info",
+                        ts: Date.now() / 1000
+                    };
+                    brainLogHistory.push(logObj);
+                    if (brainLogHistory.length > 200) brainLogHistory.shift();
+                    if (broadcastBrainLog) {
+                        broadcastBrainLog(logObj);
+                    }
+                }
+            }
+        });
 
-    let stderrBuffer = "";
-    brainProcess.stderr.on("data", (data) => {
-      const chunk = data.toString();
-      console.error(`[Brain Stderr]: ${chunk.trim()}`);
-      stderrBuffer += chunk;
-      const lines = stderrBuffer.split("\n");
-      stderrBuffer = lines.pop() || "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed) {
-          const logObj = {
-            tag: "BRAIN_STDERR",
-            message: trimmed,
-            type: "warning",
-            ts: Date.now() / 1000
-          };
-          brainLogHistory.push(logObj);
-          if (brainLogHistory.length > 200) brainLogHistory.shift();
-          if (broadcastBrainLog) {
-            broadcastBrainLog(logObj);
-          }
+        let stderrBuffer = "";
+        brainProcess.stderr.on("data", (data) => {
+            const chunk = data.toString();
+            console.error(`[Brain Stderr]: ${chunk.trim()}`);
+            stderrBuffer += chunk;
+            const lines = stderrBuffer.split("\n");
+            stderrBuffer = lines.pop() || "";
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed) {
+                    const logObj = {
+                        tag: "BRAIN_STDERR",
+                        message: trimmed,
+                        type: "warning",
+                        ts: Date.now() / 1000
+                    };
+                    brainLogHistory.push(logObj);
+                    if (brainLogHistory.length > 200) brainLogHistory.shift();
+                    if (broadcastBrainLog) {
+                        broadcastBrainLog(logObj);
+                    }
 
-          if (trimmed.includes("ImportError") || trimmed.includes("No module named") || trimmed.includes("Missing dependencies")) {
-            moduleErrorFound = true;
-            console.log("[Brain] Missing Python dependencies detected. Running pip install...");
-            exec("python3 -m pip install --break-system-packages fastapi uvicorn ollama httpx firebase-admin google-cloud-firestore", (error, stdout) => {
-              if (error) {
-                console.error(`[Brain] pip install failed: ${error.message}`);
-              } else {
-                console.log("[Brain] pip install successful. Re-spawning brain...");
-                tryStart(cmd);
-              }
-            });
-            brainProcess.kill();
-          }
-        }
-      }
-    });
+                    if (trimmed.includes("ImportError") || trimmed.includes("No module named") || trimmed.includes("Missing dependencies")) {
+                        moduleErrorFound = true;
+                        console.log("[Brain] Missing Python dependencies detected. Running pip install...");
+                        exec("python3 -m pip install --break-system-packages fastapi uvicorn ollama httpx firebase-admin google-cloud-firestore", (error, stdout) => {
+                            if (error) {
+                                console.error(`[Brain] pip install failed: ${error.message}`);
+                            } else {
+                                console.log("[Brain] pip install successful. Re-spawning brain...");
+                                tryStart(cmd);
+                            }
+                        });
+                        brainProcess.kill();
+                    }
+                }
+            }
+        });
 
-    brainProcess.on("error", (err) => {
-      console.error(`[Brain] Failed to start with '${cmd}':`, err.message);
-      hasSpawnError = true;
-      if (cmd === "python3") {
-        console.log("[Brain] Retrying with generic 'python' command...");
-        tryStart("python");
-      }
-    });
+        brainProcess.on("error", (err) => {
+            console.error(`[Brain] Failed to start with '${cmd}':`, err.message);
+            hasSpawnError = true;
+            if (cmd === "python3") {
+                console.log("[Brain] Retrying with generic 'python' command...");
+                tryStart("python");
+            }
+        });
 
-    brainProcess.on("close", (code) => {
-      if (code !== 0 && !moduleErrorFound && !hasSpawnError) {
-        console.log(`[Brain] Titan Neural Kernel terminated. Re-spawning in 5s...`);
-        setTimeout(() => tryStart(cmd), 5000);
-      }
-    });
-  };
+        brainProcess.on("close", (code) => {
+            if (code !== 0 && !moduleErrorFound && !hasSpawnError) {
+                console.log(`[Brain] Titan Neural Kernel terminated. Re-spawning in 5s...`);
+                setTimeout(() => tryStart(cmd), 5000);
+            }
+        });
+    };
 
-  tryStart("python3");
+    tryStart("python3");
 }
 
 function getFileTree(dir: string, baseDir: string = dir): any[] {
-  try {
-    const items = fs.readdirSync(dir);
-    let tree: any[] = [];
-    
-    for (const item of items) {
-      if (
-        item === 'node_modules' || 
-        item === '.git' || 
-        item === 'dist' || 
-        item === 'target' || 
-        item === '.next' ||
-        item === '.cache' ||
-        item.startsWith('.')
-      ) {
-        continue;
-      }
-      
-      const fullPath = path.join(dir, item);
-      try {
-        const stats = fs.statSync(fullPath);
-        const relativePath = path.relative(baseDir, fullPath);
-        
-        if (stats.isDirectory()) {
-          tree.push({
-            name: item,
-            type: 'directory',
-            path: relativePath,
-            children: getFileTree(fullPath, baseDir)
-          });
-        } else {
-          let type = 'file';
-          if (item.endsWith('.ts') || item.endsWith('.tsx') || item.endsWith('.js')) type = 'code';
-          else if (item.endsWith('.json')) type = 'config';
-          else if (item.endsWith('.md')) type = 'doc';
+    try {
+        const items = fs.readdirSync(dir);
+        let tree: any[] = [];
 
-          tree.push({
-            name: item,
-            type: type,
-            path: relativePath,
-            size: `${(stats.size / 1024).toFixed(1)}KB`
-          });
+        for (const item of items) {
+            if (
+                item === 'node_modules' ||
+                item === '.git' ||
+                item === 'dist' ||
+                item === 'target' ||
+                item === '.next' ||
+                item === '.cache' ||
+                item.startsWith('.')
+            ) {
+                continue;
+            }
+
+            const fullPath = path.join(dir, item);
+            try {
+                const stats = fs.statSync(fullPath);
+                const relativePath = path.relative(baseDir, fullPath);
+
+                if (stats.isDirectory()) {
+                    tree.push({
+                        name: item,
+                        type: 'directory',
+                        path: relativePath,
+                        children: getFileTree(fullPath, baseDir)
+                    });
+                } else {
+                    let type = 'file';
+                    if (item.endsWith('.ts') || item.endsWith('.tsx') || item.endsWith('.js')) type = 'code';
+                    else if (item.endsWith('.json')) type = 'config';
+                    else if (item.endsWith('.md')) type = 'doc';
+
+                    tree.push({
+                        name: item,
+                        type: type,
+                        path: relativePath,
+                        size: `${(stats.size / 1024).toFixed(1)}KB`
+                    });
+                }
+            } catch (err) {
+                continue;
+            }
         }
-      } catch (err) {
-        continue;
-      }
+        return tree;
+    } catch (err) {
+        return [];
     }
-    return tree;
-  } catch (err) {
-    return [];
-  }
 }
 
 async function startServer() {
-  const app = express();
-  const server = createServer(app);
-  const wss = new WebSocketServer({ noServer: true });
-  const brainWss = new WebSocketServer({ noServer: true });
+    const app = express();
+    const server = createServer(app);
+    const wss = new WebSocketServer({ noServer: true });
+    const brainWss = new WebSocketServer({ noServer: true });
 
-  server.on('upgrade', (request, socket, head) => {
-    try {
-      const { pathname } = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`);
-      if (pathname === '/ws') {
-        wss.handleUpgrade(request, socket, head, (ws) => {
-          wss.emit('connection', ws, request);
-        });
-      } else if (pathname === '/v1/events' || pathname.startsWith('/v1/events')) {
-        brainWss.handleUpgrade(request, socket, head, (ws) => {
-          const targetWs = new WebSocket("ws://localhost:8001/v1/events");
-          targetWs.on("open", () => {
-            ws.on("message", (message) => {
-              if (targetWs.readyState === WebSocket.OPEN) {
-                targetWs.send(message);
-              }
-            });
-            targetWs.on("message", (message) => {
-              if (ws.readyState === WebSocket.OPEN) {
-                ws.send(message.toString());
-              }
-            });
-          });
-          targetWs.on("close", () => ws.close());
-          targetWs.on("error", () => ws.close());
-          ws.on("close", () => targetWs.close());
-          ws.on("error", () => targetWs.close());
-        });
-      } else {
-        socket.destroy();
-      }
-    } catch (err) {
-      console.error("Upgrade proxy error:", err);
-      socket.destroy();
-    }
-  });
-
-  broadcastBrainLog = (logObj: any) => {
-    wss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({ type: 'BRAIN_STD_LOG', log: logObj }));
-      }
-    });
-  };
-
-  startLocalBrainWithFallback();
-
-  // Multi-Device & Adaptive Notification State
-  interface ConnectedDevice {
-    id: string;
-    name: string;
-    type: 'computer' | 'tablet' | 'phone' | 'raspi' | 'other';
-    lastActive: number;
-    ip: string;
-    isActive: boolean;
-  }
-
-  let connectedDevices: ConnectedDevice[] = [];
-
-  function recalculateActiveDevice() {
-    if (connectedDevices.length === 0) return;
-    let newestTs = 0;
-    let activeDevId = "";
-    
-    // Find the device with the absolute latest user interaction / heartbeat
-    for (const d of connectedDevices) {
-      if (d.lastActive > newestTs) {
-        newestTs = d.lastActive;
-        activeDevId = d.id;
-      }
-    }
-    
-    for (const d of connectedDevices) {
-      d.isActive = (d.id === activeDevId);
-    }
-  }
-
-  function broadcastDevices() {
-    const payload = JSON.stringify({ type: 'ACTIVE_DEVICES_UPDATE', devices: connectedDevices });
-    wss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(payload);
-      }
-    });
-  }
-
-  // Persistent Server-Side Agent Runtime & Shared Layout Workspace
-  let serverWorkflowState = {
-    nodes: [] as any[],
-    edges: [] as any[],
-    logs: [] as any[],
-    isPlaying: false,
-    activeNodeId: null as string | null
-  };
-
-  // Persistent OS State
-  let kernelState = {
-    status: "STABLE",
-    load: 0.12,
-    uptime: 0,
-    activeApps: ["TERMINAL", "SHEETS", "SLIDES", "DRIVE"],
-    logs: ["CORE_INIT_SUCCESS", "TELEMETRY_LINK_ESTABLISHED", "FS_INDEX_COMPLETE"],
-    tasks: [
-      { id: '1', name: 'Background Synthesis', progress: 45 },
-      { id: '2', name: 'Neural Indexing', progress: 89 }
-    ],
-    desktop: {
-      wallpaper: "TITAN_H3_NEBULA",
-      windows: [],
-      focusedWindow: null
-    }
-  };
-
-  let fileTree: any[] = getFileTree(process.cwd());
-
-  // Background Loop (The OS "runs" even if no clients are connected)
-  setInterval(() => {
-    kernelState.uptime += 1;
-    kernelState.load = parseFloat((0.1 + Math.random() * 0.2).toFixed(2));
-    
-    // Refresh file tree every 30 seconds
-    if (kernelState.uptime % 60 === 0) {
-      fileTree = getFileTree(process.cwd());
-      wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify({ type: 'FS_UPDATE', data: fileTree }));
-        }
-      });
-    }
-
-    // Simulate background task progress
-    kernelState.tasks = kernelState.tasks.map(t => ({
-      ...t,
-      progress: t.progress >= 100 ? 0 : t.progress + (Math.random() > 0.8 ? 1 : 0)
-    }));
-
-    const payload = JSON.stringify({ type: 'KERNEL_HEARTBEAT', data: kernelState });
-    wss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(payload);
-      }
-    });
-  }, 1000);
-
-  wss.on('connection', (ws, req) => {
-    console.log('Client synchronized with Kernel');
-    ws.send(JSON.stringify({ type: 'KERNEL_INIT', data: kernelState }));
-    ws.send(JSON.stringify({ type: 'FS_UPDATE', data: fileTree }));
-    ws.send(JSON.stringify({ type: 'BRAIN_STD_LOG_HISTORY', logs: brainLogHistory }));
-    
-    // Send active multi-devices state and any persistent workflow configurations
-    ws.send(JSON.stringify({ type: 'ACTIVE_DEVICES_UPDATE', devices: connectedDevices }));
-    ws.send(JSON.stringify({ type: 'WORKFLOW_SYNC_UPDATE', data: serverWorkflowState }));
-
-    ws.on('close', () => {
-      const dId = (ws as any).deviceId;
-      if (dId) {
-        console.log(`Connection dropped for registered device: ${dId}`);
-        // Remove from connected list
-        connectedDevices = connectedDevices.filter(d => d.id !== dId);
-        recalculateActiveDevice();
-        broadcastDevices();
-      }
-    });
-
-    ws.on('message', (message) => {
-      try {
-        const payload = JSON.parse(message.toString());
-
-        // Multi-device and presence heartbeats
-        if (payload.type === 'REGISTER_DEVICE') {
-          const { deviceId, deviceName, deviceType } = payload;
-          (ws as any).deviceId = deviceId;
-          
-          let existing = connectedDevices.find(d => d.id === deviceId);
-          if (existing) {
-            existing.name = deviceName;
-            existing.type = deviceType || 'computer';
-            existing.lastActive = Date.now();
-            if (req.socket.remoteAddress) {
-              existing.ip = req.socket.remoteAddress.replace('::ffff:', '');
-            }
-          } else {
-            connectedDevices.push({
-              id: deviceId,
-              name: deviceName || 'Generic Client',
-              type: deviceType || 'computer',
-              lastActive: Date.now(),
-              ip: (req.socket.remoteAddress || '127.0.0.1').replace('::ffff:', ''),
-              isActive: false
-            });
-          }
-          recalculateActiveDevice();
-          broadcastDevices();
-          return;
-        }
-
-        if (payload.type === 'DEVICE_HEARTBEAT') {
-          const dId = (ws as any).deviceId || payload.deviceId;
-          if (dId) {
-            let d = connectedDevices.find(x => x.id === dId);
-            if (d) {
-              d.lastActive = Date.now();
-            }
-            recalculateActiveDevice();
-            broadcastDevices();
-          }
-          return;
-        }
-
-        // Real-time collaborative design canvas sync
-        if (payload.type === 'WORKFLOW_SYNC') {
-          serverWorkflowState.nodes = payload.nodes || [];
-          serverWorkflowState.edges = payload.edges || [];
-          serverWorkflowState.logs = payload.logs || [];
-          serverWorkflowState.isPlaying = payload.isPlaying || false;
-          serverWorkflowState.activeNodeId = payload.activeNodeId || null;
-
-          // Broadcast to all other active clients
-          const syncBroadcast = JSON.stringify({ type: 'WORKFLOW_SYNC_UPDATE', data: serverWorkflowState });
-          wss.clients.forEach(c => {
-            if (c !== ws && c.readyState === WebSocket.OPEN) {
-              c.send(syncBroadcast);
-            }
-          });
-          return;
-        }
-
-        // Centralized Server-Side Runtime Execution for Agents Studio
-        if (payload.type === 'START_SERVER_SIMULATION') {
-          const { startNodeId, nodes: clientNodes, edges: clientEdges } = payload;
-          
-          serverWorkflowState.nodes = clientNodes || serverWorkflowState.nodes;
-          serverWorkflowState.edges = clientEdges || serverWorkflowState.edges;
-          serverWorkflowState.isPlaying = true;
-          serverWorkflowState.logs = [];
-          
-          const startNode = serverWorkflowState.nodes.find(n => n.id === startNodeId);
-          if (!startNode) {
-            ws.send(JSON.stringify({ type: 'AGENT_SIM_LOG', log: { type: 'warn', text: 'Start trigger failed: start node matching constraints not found.' } }));
-            return;
-          }
-
-          console.log(`[AGENT RUNTIME] Central Pi Engine executing perpetual loop for startNodeId: ${startNodeId}`);
-          
-          const addSimLog = (type: string, text: string, id?: string, title?: string) => {
-            const logItem = {
-              id: `log-${Date.now()}-${Math.random()}`,
-              timestamp: new Date().toLocaleTimeString(),
-              nodeId: id,
-              nodeTitle: title,
-              type,
-              text
-            };
-            serverWorkflowState.logs.unshift(logItem);
-            
-            const logBroadcast = JSON.stringify({
-              type: 'AGENT_SIM_SYNC',
-              isPlaying: true,
-              activeNodeId: id || null,
-              logs: serverWorkflowState.logs
-            });
-            wss.clients.forEach(c => {
-              if (c.readyState === WebSocket.OPEN) {
-                c.send(logBroadcast);
-              }
-            });
-          };
-
-          (async () => {
-            try {
-              const stepDelay = (ms: number) => new Promise(r => setTimeout(r, ms));
-              
-              addSimLog('system', `Pi Engine: Autonomous tracing loop started. Locking scope variables...`, startNode.id, startNode.title);
-              await stepDelay(1500);
-
-              const outgoingEdges = serverWorkflowState.edges.filter(e => e.source === startNode.id);
-              if (outgoingEdges.length === 0) {
-                addSimLog('warn', `Terminal path reached. Please drag a connector spline to another card block.`, startNode.id, startNode.title);
-                serverWorkflowState.isPlaying = false;
-                serverWorkflowState.activeNodeId = null;
-                wss.clients.forEach(c => {
-                  if (c.readyState === WebSocket.OPEN) {
-                    c.send(JSON.stringify({ type: 'AGENT_SIM_END', logs: serverWorkflowState.logs }));
-                  }
+    server.on('upgrade', (request, socket, head) => {
+        try {
+            const { pathname } = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`);
+            if (pathname === '/ws') {
+                wss.handleUpgrade(request, socket, head, (ws) => {
+                    wss.emit('connection', ws, request);
                 });
-                return;
-              }
+            } else if (pathname === '/v1/events' || pathname.startsWith('/v1/events')) {
+                brainWss.handleUpgrade(request, socket, head, (ws) => {
+                    const targetWs = new WebSocket("ws://localhost:8001/v1/events");
+                    targetWs.on("open", () => {
+                        ws.on("message", (message) => {
+                            if (targetWs.readyState === WebSocket.OPEN) {
+                                targetWs.send(message);
+                            }
+                        });
+                        targetWs.on("message", (message) => {
+                            if (ws.readyState === WebSocket.OPEN) {
+                                ws.send(message.toString());
+                            }
+                        });
+                    });
+                    targetWs.on("close", () => ws.close());
+                    targetWs.on("error", () => ws.close());
+                    ws.on("close", () => targetWs.close());
+                    ws.on("error", () => targetWs.close());
+                });
+            } else {
+                socket.destroy();
+            }
+        } catch (err) {
+            console.error("Upgrade proxy error:", err);
+            socket.destroy();
+        }
+    });
 
-              for (const edge of outgoingEdges) {
-                const targetNode = serverWorkflowState.nodes.find(n => n.id === edge.target);
-                if (targetNode) {
-                  addSimLog('info', `Routing operational signal along connector wire -> trigger [${targetNode.title}]`, targetNode.id, targetNode.title);
-                  await stepDelay(1500);
+    broadcastBrainLog = (logObj: any) => {
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ type: 'BRAIN_STD_LOG', log: logObj }));
+            }
+        });
+    };
 
-                  if (targetNode.type === 'agent') {
-                    const promptText = startNode.config?.messageInput || startNode.config?.listenerSimulatedInput || 'Extract structured metrics report.';
-                    const sysInstruction = targetNode.config?.systemInstruction || 'Resolve developer query.';
-                    
-                    addSimLog('info', `🧠 Dispatching prompts to Gemini Central Kernel:\n- Input: "${promptText}"\n- System Prompts: "${sysInstruction}"`, targetNode.id, targetNode.title);
-                    await stepDelay(1000);
+    startLocalBrainWithFallback();
 
-                    let aiResult = "";
-                    try {
-                      const geminiResponse = await generateContentWithFallback({
-                        model: "gemini-3.5-flash",
-                        contents: `Workflow Execution Prompt Input: "${promptText}". System Instructions: ${sysInstruction}`
-                      });
-                      aiResult = geminiResponse.text?.trim() || "Operations completed successfully.";
-                    } catch (gErr: any) {
-                      console.error("[PERPETUAL RUNTIME] Gemini invocation error:", gErr);
-                      aiResult = `Processed pipeline action safely on node ${targetNode.title}. Reconciled input metrics successfully.`;
+    // Multi-Device & Adaptive Notification State
+    interface ConnectedDevice {
+        id: string;
+        name: string;
+        type: 'computer' | 'tablet' | 'phone' | 'raspi' | 'other';
+        lastActive: number;
+        ip: string;
+        isActive: boolean;
+    }
+
+    let connectedDevices: ConnectedDevice[] = [];
+
+    function recalculateActiveDevice() {
+        if (connectedDevices.length === 0) return;
+        let newestTs = 0;
+        let activeDevId = "";
+
+        // Find the device with the absolute latest user interaction / heartbeat
+        for (const d of connectedDevices) {
+            if (d.lastActive > newestTs) {
+                newestTs = d.lastActive;
+                activeDevId = d.id;
+            }
+        }
+
+        for (const d of connectedDevices) {
+            d.isActive = (d.id === activeDevId);
+        }
+    }
+
+    function broadcastDevices() {
+        const payload = JSON.stringify({ type: 'ACTIVE_DEVICES_UPDATE', devices: connectedDevices });
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(payload);
+            }
+        });
+    }
+
+    // Persistent Server-Side Agent Runtime & Shared Layout Workspace
+    let serverWorkflowState = {
+        nodes: [] as any[],
+        edges: [] as any[],
+        logs: [] as any[],
+        isPlaying: false,
+        activeNodeId: null as string | null
+    };
+
+    // Persistent OS State
+    let kernelState = {
+        status: "STABLE",
+        load: 0.12,
+        uptime: 0,
+        activeApps: ["TERMINAL", "SHEETS", "SLIDES", "DRIVE"],
+        logs: ["CORE_INIT_SUCCESS", "TELEMETRY_LINK_ESTABLISHED", "FS_INDEX_COMPLETE"],
+        tasks: [
+            { id: '1', name: 'Background Synthesis', progress: 45 },
+            { id: '2', name: 'Neural Indexing', progress: 89 }
+        ],
+        desktop: {
+            wallpaper: "TITAN_H3_NEBULA",
+            windows: [],
+            focusedWindow: null
+        }
+    };
+
+    let fileTree: any[] = getFileTree(process.cwd());
+
+    // Background Loop (The OS "runs" even if no clients are connected)
+    setInterval(() => {
+        kernelState.uptime += 1;
+        kernelState.load = parseFloat((0.1 + Math.random() * 0.2).toFixed(2));
+
+        // Refresh file tree every 30 seconds
+        if (kernelState.uptime % 60 === 0) {
+            fileTree = getFileTree(process.cwd());
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'FS_UPDATE', data: fileTree }));
+                }
+            });
+        }
+
+        // Simulate background task progress
+        kernelState.tasks = kernelState.tasks.map(t => ({
+            ...t,
+            progress: t.progress >= 100 ? 0 : t.progress + (Math.random() > 0.8 ? 1 : 0)
+        }));
+
+        const payload = JSON.stringify({ type: 'KERNEL_HEARTBEAT', data: kernelState });
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(payload);
+            }
+        });
+    }, 1000);
+
+    wss.on('connection', (ws, req) => {
+        console.log('Client synchronized with Kernel');
+        ws.send(JSON.stringify({ type: 'KERNEL_INIT', data: kernelState }));
+        ws.send(JSON.stringify({ type: 'FS_UPDATE', data: fileTree }));
+        ws.send(JSON.stringify({ type: 'BRAIN_STD_LOG_HISTORY', logs: brainLogHistory }));
+
+        // Send active multi-devices state and any persistent workflow configurations
+        ws.send(JSON.stringify({ type: 'ACTIVE_DEVICES_UPDATE', devices: connectedDevices }));
+        ws.send(JSON.stringify({ type: 'WORKFLOW_SYNC_UPDATE', data: serverWorkflowState }));
+
+        ws.on('close', () => {
+            const dId = (ws as any).deviceId;
+            if (dId) {
+                console.log(`Connection dropped for registered device: ${dId}`);
+                // Remove from connected list
+                connectedDevices = connectedDevices.filter(d => d.id !== dId);
+                recalculateActiveDevice();
+                broadcastDevices();
+            }
+        });
+
+        ws.on('message', (message) => {
+            try {
+                const payload = JSON.parse(message.toString());
+
+                // Multi-device and presence heartbeats
+                if (payload.type === 'REGISTER_DEVICE') {
+                    const { deviceId, deviceName, deviceType } = payload;
+                    (ws as any).deviceId = deviceId;
+
+                    let existing = connectedDevices.find(d => d.id === deviceId);
+                    if (existing) {
+                        existing.name = deviceName;
+                        existing.type = deviceType || 'computer';
+                        existing.lastActive = Date.now();
+                        if (req.socket.remoteAddress) {
+                            existing.ip = req.socket.remoteAddress.replace('::ffff:', '');
+                        }
+                    } else {
+                        connectedDevices.push({
+                            id: deviceId,
+                            name: deviceName || 'Generic Client',
+                            type: deviceType || 'computer',
+                            lastActive: Date.now(),
+                            ip: (req.socket.remoteAddress || '127.0.0.1').replace('::ffff:', ''),
+                            isActive: false
+                        });
+                    }
+                    recalculateActiveDevice();
+                    broadcastDevices();
+                    return;
+                }
+
+                if (payload.type === 'DEVICE_HEARTBEAT') {
+                    const dId = (ws as any).deviceId || payload.deviceId;
+                    if (dId) {
+                        let d = connectedDevices.find(x => x.id === dId);
+                        if (d) {
+                            d.lastActive = Date.now();
+                        }
+                        recalculateActiveDevice();
+                        broadcastDevices();
+                    }
+                    return;
+                }
+
+                // Real-time collaborative design canvas sync
+                if (payload.type === 'WORKFLOW_SYNC') {
+                    serverWorkflowState.nodes = payload.nodes || [];
+                    serverWorkflowState.edges = payload.edges || [];
+                    serverWorkflowState.logs = payload.logs || [];
+                    serverWorkflowState.isPlaying = payload.isPlaying || false;
+                    serverWorkflowState.activeNodeId = payload.activeNodeId || null;
+
+                    // Broadcast to all other active clients
+                    const syncBroadcast = JSON.stringify({ type: 'WORKFLOW_SYNC_UPDATE', data: serverWorkflowState });
+                    wss.clients.forEach(c => {
+                        if (c !== ws && c.readyState === WebSocket.OPEN) {
+                            c.send(syncBroadcast);
+                        }
+                    });
+                    return;
+                }
+
+                // Centralized Server-Side Runtime Execution for Agents Studio
+                if (payload.type === 'START_SERVER_SIMULATION') {
+                    const { startNodeId, nodes: clientNodes, edges: clientEdges } = payload;
+
+                    serverWorkflowState.nodes = clientNodes || serverWorkflowState.nodes;
+                    serverWorkflowState.edges = clientEdges || serverWorkflowState.edges;
+                    serverWorkflowState.isPlaying = true;
+                    serverWorkflowState.logs = [];
+
+                    const startNode = serverWorkflowState.nodes.find(n => n.id === startNodeId);
+                    if (!startNode) {
+                        ws.send(JSON.stringify({ type: 'AGENT_SIM_LOG', log: { type: 'warn', text: 'Start trigger failed: start node matching constraints not found.' } }));
+                        return;
                     }
 
-                    addSimLog('success', `✨ Central Brain resolved response:\n"${aiResult}"`, targetNode.id, targetNode.title);
-                    await stepDelay(2000);
+                    console.log(`[AGENT RUNTIME] Central Pi Engine executing perpetual loop for startNodeId: ${startNodeId}`);
 
-                    // Route an intelligent notification specifically to the ACTIVE user device!
-                    const activeDevice = connectedDevices.find(d => d.isActive);
-                    const notifPayload = JSON.stringify({
-                      type: 'SERVER_NOTIFICATION',
-                      title: `Pipeline Synced: ${targetNode.title}`,
-                      message: `AI Output: "${aiResult.length > 80 ? aiResult.substring(0, 80) + '...' : aiResult}"`,
-                      speakText: `Agent ${targetNode.title} reports: ${aiResult}`,
-                      targetDeviceId: activeDevice ? activeDevice.id : null,
-                      notificationType: 'success'
-                    });
-                    
-                    wss.clients.forEach(c => {
-                      if (c.readyState === WebSocket.OPEN) {
-                        c.send(notifPayload);
-                      }
-                    });
+                    const addSimLog = (type: string, text: string, id?: string, title?: string) => {
+                        const logItem = {
+                            id: `log-${Date.now()}-${Math.random()}`,
+                            timestamp: new Date().toLocaleTimeString(),
+                            nodeId: id,
+                            nodeTitle: title,
+                            type,
+                            text
+                        };
+                        serverWorkflowState.logs.unshift(logItem);
 
-                  } else if (targetNode.type === 'ifelse') {
-                    addSimLog('info', `Evaluating conditional metrics: status === "healthy" -> Resolving True route.`, targetNode.id, targetNode.title);
-                    await stepDelay(1000);
-                  } else {
-                    addSimLog('success', `Executed component step [${targetNode.title}] successfully on Central Raspberry Pi.`, targetNode.id, targetNode.title);
-                    await stepDelay(1000);
-                  }
+                        const logBroadcast = JSON.stringify({
+                            type: 'AGENT_SIM_SYNC',
+                            isPlaying: true,
+                            activeNodeId: id || null,
+                            logs: serverWorkflowState.logs
+                        });
+                        wss.clients.forEach(c => {
+                            if (c.readyState === WebSocket.OPEN) {
+                                c.send(logBroadcast);
+                            }
+                        });
+                    };
+
+                    (async () => {
+                        try {
+                            const stepDelay = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+                            addSimLog('system', `Pi Engine: Autonomous tracing loop started. Locking scope variables...`, startNode.id, startNode.title);
+                            await stepDelay(1500);
+
+                            const outgoingEdges = serverWorkflowState.edges.filter(e => e.source === startNode.id);
+                            if (outgoingEdges.length === 0) {
+                                addSimLog('warn', `Terminal path reached. Please drag a connector spline to another card block.`, startNode.id, startNode.title);
+                                serverWorkflowState.isPlaying = false;
+                                serverWorkflowState.activeNodeId = null;
+                                wss.clients.forEach(c => {
+                                    if (c.readyState === WebSocket.OPEN) {
+                                        c.send(JSON.stringify({ type: 'AGENT_SIM_END', logs: serverWorkflowState.logs }));
+                                    }
+                                });
+                                return;
+                            }
+
+                            for (const edge of outgoingEdges) {
+                                const targetNode = serverWorkflowState.nodes.find(n => n.id === edge.target);
+                                if (targetNode) {
+                                    addSimLog('info', `Routing operational signal along connector wire -> trigger [${targetNode.title}]`, targetNode.id, targetNode.title);
+                                    await stepDelay(1500);
+
+                                    if (targetNode.type === 'agent') {
+                                        const promptText = startNode.config?.messageInput || startNode.config?.listenerSimulatedInput || 'Extract structured metrics report.';
+                                        const sysInstruction = targetNode.config?.systemInstruction || 'Resolve developer query.';
+
+                                        addSimLog('info', `🧠 Dispatching prompts to Gemini Central Kernel:\n- Input: "${promptText}"\n- System Prompts: "${sysInstruction}"`, targetNode.id, targetNode.title);
+                                        await stepDelay(1000);
+
+                                        let aiResult = "";
+                                        try {
+                                            const geminiResponse = await generateContentWithFallback({
+                                                model: "gemini-3.5-flash",
+                                                contents: `Workflow Execution Prompt Input: "${promptText}". System Instructions: ${sysInstruction}`
+                                            });
+                                            aiResult = geminiResponse.text?.trim() || "Operations completed successfully.";
+                                        } catch (gErr: any) {
+                                            console.error("[PERPETUAL RUNTIME] Gemini invocation error:", gErr);
+                                            aiResult = `Processed pipeline action safely on node ${targetNode.title}. Reconciled input metrics successfully.`;
+                                        }
+
+                                        addSimLog('success', `✨ Central Brain resolved response:\n"${aiResult}"`, targetNode.id, targetNode.title);
+                                        await stepDelay(2000);
+
+                                        // Route an intelligent notification specifically to the ACTIVE user device!
+                                        const activeDevice = connectedDevices.find(d => d.isActive);
+                                        const notifPayload = JSON.stringify({
+                                            type: 'SERVER_NOTIFICATION',
+                                            title: `Pipeline Synced: ${targetNode.title}`,
+                                            message: `AI Output: "${aiResult.length > 80 ? aiResult.substring(0, 80) + '...' : aiResult}"`,
+                                            speakText: `Agent ${targetNode.title} reports: ${aiResult}`,
+                                            targetDeviceId: activeDevice ? activeDevice.id : null,
+                                            notificationType: 'success'
+                                        });
+
+                                        wss.clients.forEach(c => {
+                                            if (c.readyState === WebSocket.OPEN) {
+                                                c.send(notifPayload);
+                                            }
+                                        });
+
+                                    } else if (targetNode.type === 'ifelse') {
+                                        addSimLog('info', `Evaluating conditional metrics: status === "healthy" -> Resolving True route.`, targetNode.id, targetNode.title);
+                                        await stepDelay(1000);
+                                    } else {
+                                        addSimLog('success', `Executed component step [${targetNode.title}] successfully on Central Raspberry Pi.`, targetNode.id, targetNode.title);
+                                        await stepDelay(1000);
+                                    }
+                                }
+                            }
+
+                            addSimLog('success', `🏁 Pipeline execution successfully finished on Central Pi.`);
+                            serverWorkflowState.isPlaying = false;
+                            serverWorkflowState.activeNodeId = null;
+
+                            const finishPayload = JSON.stringify({ type: 'AGENT_SIM_END', logs: serverWorkflowState.logs });
+                            wss.clients.forEach(c => {
+                                if (c.readyState === WebSocket.OPEN) {
+                                    c.send(finishPayload);
+                                }
+                            });
+
+                        } catch (err: any) {
+                            console.error("[PERPETUAL RUNTIME] Error running pipeline:", err);
+                            addSimLog('warn', `Central Pipeline Exception: ${err.message || err}`);
+                            serverWorkflowState.isPlaying = false;
+                            serverWorkflowState.activeNodeId = null;
+                            wss.clients.forEach(c => {
+                                if (c.readyState === WebSocket.OPEN) {
+                                    c.send(JSON.stringify({ type: 'AGENT_SIM_END', logs: serverWorkflowState.logs }));
+                                }
+                            });
+                        }
+                    })();
+                    return;
                 }
-              }
 
-              addSimLog('success', `🏁 Pipeline execution successfully finished on Central Pi.`);
-              serverWorkflowState.isPlaying = false;
-              serverWorkflowState.activeNodeId = null;
-              
-              const finishPayload = JSON.stringify({ type: 'AGENT_SIM_END', logs: serverWorkflowState.logs });
-              wss.clients.forEach(c => {
-                if (c.readyState === WebSocket.OPEN) {
-                  c.send(finishPayload);
-                }
-              });
+                if (payload.type === 'EXEC_CMD') {
+                    kernelState.logs.push(`CMD_EXEC: ${payload.cmd}`);
+                    if (kernelState.logs.length > 50) kernelState.logs.shift();
 
-            } catch (err: any) {
-              console.error("[PERPETUAL RUNTIME] Error running pipeline:", err);
-              addSimLog('warn', `Central Pipeline Exception: ${err.message || err}`);
-              serverWorkflowState.isPlaying = false;
-              serverWorkflowState.activeNodeId = null;
-              wss.clients.forEach(c => {
-                if (c.readyState === WebSocket.OPEN) {
-                  c.send(JSON.stringify({ type: 'AGENT_SIM_END', logs: serverWorkflowState.logs }));
-                }
-              });
-            }
-          })();
-          return;
-        }
+                    const [action, ...args] = payload.cmd.split(' ');
 
-        if (payload.type === 'EXEC_CMD') {
-          kernelState.logs.push(`CMD_EXEC: ${payload.cmd}`);
-          if (kernelState.logs.length > 50) kernelState.logs.shift();
-          
-          const [action, ...args] = payload.cmd.split(' ');
-          
-          if (action === 'read') {
-             const filePath = args.join(' ').trim();
-             try {
-                const content = fs.readFileSync(path.join(process.cwd(), filePath), 'utf-8');
-                ws.send(JSON.stringify({ type: 'FILE_CONTENT', path: filePath, content: content }));
-                kernelState.logs.push(`FS_READ_SUCCESS: ${filePath}`);
-             } catch (err) {
-                kernelState.logs.push(`FS_READ_ERROR: ${filePath}`);
-             }
-          }
+                    if (action === 'read') {
+                        const filePath = args.join(' ').trim();
+                        try {
+                            const content = fs.readFileSync(path.join(process.cwd(), filePath), 'utf-8');
+                            ws.send(JSON.stringify({ type: 'FILE_CONTENT', path: filePath, content: content }));
+                            kernelState.logs.push(`FS_READ_SUCCESS: ${filePath}`);
+                        } catch (err) {
+                            kernelState.logs.push(`FS_READ_ERROR: ${filePath}`);
+                        }
+                    }
 
-          if (action === 'write') {
-             const filePath = args[0];
-             const content = args.slice(1).join(' ');
-             try {
-                fs.writeFileSync(path.join(process.cwd(), filePath), content);
-                kernelState.logs.push(`FS_WRITE_SUCCESS: ${filePath}`);
-                fileTree = getFileTree(process.cwd());
-                wss.clients.forEach(c => c.send(JSON.stringify({ type: 'FS_UPDATE', data: fileTree })));
-             } catch (err) {
-                kernelState.logs.push(`FS_WRITE_ERROR: ${filePath}`);
-             }
-          }
+                    if (action === 'write') {
+                        const filePath = args[0];
+                        const content = args.slice(1).join(' ');
+                        try {
+                            fs.writeFileSync(path.join(process.cwd(), filePath), content);
+                            kernelState.logs.push(`FS_WRITE_SUCCESS: ${filePath}`);
+                            fileTree = getFileTree(process.cwd());
+                            wss.clients.forEach(c => c.send(JSON.stringify({ type: 'FS_UPDATE', data: fileTree })));
+                        } catch (err) {
+                            kernelState.logs.push(`FS_WRITE_ERROR: ${filePath}`);
+                        }
+                    }
 
-          if (action === 'launch') {
-             const appName = args[0];
-             kernelState.logs.push(`LAUNCHING_APP: ${appName}`);
-             // Logic to track window state could go here
-          }
+                    if (action === 'launch') {
+                        const appName = args[0];
+                        kernelState.logs.push(`LAUNCHING_APP: ${appName}`);
+                        // Logic to track window state could go here
+                    }
 
-          if (action === 'init_project') {
-             const templateName = args[0] ? args[0].toLowerCase() : 'todo';
-             kernelState.logs.push(`INITIALIZING_PROJECT: ${templateName}`);
-             
-             let projFiles: Array<{ path: string, content: string, language: string }> = [];
-             
-             if (templateName === 'calculator') {
-               projFiles = [
-                 {
-                   path: 'index.html',
-                   language: 'html',
-                   content: `<!DOCTYPE html>
+                    if (action === 'init_project') {
+                        const templateName = args[0] ? args[0].toLowerCase() : 'todo';
+                        kernelState.logs.push(`INITIALIZING_PROJECT: ${templateName}`);
+
+                        let projFiles: Array<{ path: string, content: string, language: string }> = [];
+
+                        if (templateName === 'calculator') {
+                            projFiles = [
+                                {
+                                    path: 'index.html',
+                                    language: 'html',
+                                    content: `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
@@ -1674,11 +1674,11 @@ async function startServer() {
     <script src="src/main.tsx" type="module"></script>
 </body>
 </html>`
-                 },
-                 {
-                   path: 'src/main.tsx',
-                   language: 'typescript',
-                   content: `import React from 'react';
+                                },
+                                {
+                                    path: 'src/main.tsx',
+                                    language: 'typescript',
+                                    content: `import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 
@@ -1687,11 +1687,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <App />
   </React.StrictMode>
 );`
-                 },
-                 {
-                   path: 'src/App.tsx',
-                   language: 'typescript',
-                   content: `import React, { useState } from 'react';
+                                },
+                                {
+                                    path: 'src/App.tsx',
+                                    language: 'typescript',
+                                    content: `import React, { useState } from 'react';
 
 export default function App() {
   const [display, setDisplay] = useState('0');
@@ -1736,14 +1736,14 @@ export default function App() {
     </div>
   );
 }`
-                 }
-               ];
-             } else if (templateName === 'counter') {
-               projFiles = [
-                 {
-                   path: 'index.html',
-                   language: 'html',
-                   content: `<!DOCTYPE html>
+                                }
+                            ];
+                        } else if (templateName === 'counter') {
+                            projFiles = [
+                                {
+                                    path: 'index.html',
+                                    language: 'html',
+                                    content: `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
@@ -1755,11 +1755,11 @@ export default function App() {
     <script src="src/main.tsx" type="module"></script>
 </body>
 </html>`
-                 },
-                 {
-                   path: 'src/main.tsx',
-                   language: 'typescript',
-                   content: `import React from 'react';
+                                },
+                                {
+                                    path: 'src/main.tsx',
+                                    language: 'typescript',
+                                    content: `import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 
@@ -1768,11 +1768,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <App />
   </React.StrictMode>
 );`
-                 },
-                 {
-                   path: 'src/App.tsx',
-                   language: 'typescript',
-                   content: `import React, { useState } from 'react';
+                                },
+                                {
+                                    path: 'src/App.tsx',
+                                    language: 'typescript',
+                                    content: `import React, { useState } from 'react';
 
 export default function App() {
   const [count, setCount] = useState(0);
@@ -1789,14 +1789,14 @@ export default function App() {
     </div>
   );
 }`
-                 }
-               ];
-             } else if (templateName === 'clock') {
-               projFiles = [
-                 {
-                   path: 'index.html',
-                   language: 'html',
-                   content: `<!DOCTYPE html>
+                                }
+                            ];
+                        } else if (templateName === 'clock') {
+                            projFiles = [
+                                {
+                                    path: 'index.html',
+                                    language: 'html',
+                                    content: `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
@@ -1808,11 +1808,11 @@ export default function App() {
     <script src="src/main.tsx" type="module"></script>
 </body>
 </html>`
-                 },
-                 {
-                   path: 'src/main.tsx',
-                   language: 'typescript',
-                   content: `import React from 'react';
+                                },
+                                {
+                                    path: 'src/main.tsx',
+                                    language: 'typescript',
+                                    content: `import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 
@@ -1821,11 +1821,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <App />
   </React.StrictMode>
 );`
-                 },
-                 {
-                   path: 'src/App.tsx',
-                   language: 'typescript',
-                   content: `import React, { useState, useEffect } from 'react';
+                                },
+                                {
+                                    path: 'src/App.tsx',
+                                    language: 'typescript',
+                                    content: `import React, { useState, useEffect } from 'react';
 
 export default function App() {
   const [time, setTime] = useState(new Date());
@@ -1847,14 +1847,14 @@ export default function App() {
     </div>
   );
 }`
-                 }
-               ];
-             } else {
-               projFiles = [
-                 {
-                   path: 'index.html',
-                   language: 'html',
-                   content: `<!DOCTYPE html>
+                                }
+                            ];
+                        } else {
+                            projFiles = [
+                                {
+                                    path: 'index.html',
+                                    language: 'html',
+                                    content: `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
@@ -1866,11 +1866,11 @@ export default function App() {
     <script src="src/main.tsx" type="module"></script>
 </body>
 </html>`
-                 },
-                 {
-                   path: 'src/main.tsx',
-                   language: 'typescript',
-                   content: `import React from 'react';
+                                },
+                                {
+                                    path: 'src/main.tsx',
+                                    language: 'typescript',
+                                    content: `import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 
@@ -1879,11 +1879,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <App />
   </React.StrictMode>
 );`
-                 },
-                 {
-                   path: 'src/App.tsx',
-                   language: 'typescript',
-                   content: `import React, { useState } from 'react';
+                                },
+                                {
+                                    path: 'src/App.tsx',
+                                    language: 'typescript',
+                                    content: `import React, { useState } from 'react';
 
 export default function App() {
   const [todos, setTodos] = useState([
@@ -1934,1857 +1934,1853 @@ export default function App() {
     </div>
   );
 }`
-                 }
-               ];
-             }
-
-             projFiles.forEach(f => {
-               const fullPath = path.join(process.cwd(), f.path);
-               const dirPath = path.dirname(fullPath);
-               try {
-                 if (!fs.existsSync(dirPath)) {
-                   fs.mkdirSync(dirPath, { recursive: true });
-                 }
-                 fs.writeFileSync(fullPath, f.content);
-                 kernelState.logs.push(`FS_WRITE_SUCCESS: ${f.path}`);
-               } catch (err) {
-                 kernelState.logs.push(`FS_WRITE_ERROR: ${f.path}`);
-               }
-             });
-
-             fileTree = getFileTree(process.cwd());
-             wss.clients.forEach(c => c.send(JSON.stringify({ type: 'FS_UPDATE', data: fileTree })));
-
-             ws.send(JSON.stringify({
-               type: 'PROJECT_INITIATED',
-               projectName: templateName.charAt(0).toUpperCase() + templateName.slice(1) + ' Project',
-               files: projFiles
-             }));
-             
-             kernelState.logs.push(`INIT_PROJECT_SUCCESS: ${templateName}`);
-             const completionPayload = JSON.stringify({ type: 'KERNEL_HEARTBEAT', data: kernelState });
-             wss.clients.forEach(c => c.send(completionPayload));
-          }
-        }
-
-        if (payload.type === 'DESKTOP_SYNC') {
-           kernelState.desktop = { ...kernelState.desktop, ...payload.data };
-           
-           // Log for brain context
-           console.log("DESKTOP_SYNC: Synchronizing state for brain grounding.");
-           
-           const syncPayload = JSON.stringify({ type: 'KERNEL_HEARTBEAT', data: kernelState });
-           wss.clients.forEach(c => {
-             if (c !== ws && c.readyState === WebSocket.OPEN) {
-                c.send(syncPayload);
-             }
-           });
-        }
-      } catch (e) {
-        console.error('Failed to parse WS message', e);
-      }
-    });
-  });
-
-  // API Route for health check
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", os: "UNISON_OS_CORE" });
-  });
-
-  // API Route for Prettier auto-formatting based on file extension
-  app.post("/api/format", express.json(), async (req, res) => {
-    try {
-      const { code, filepath } = req.body;
-      if (typeof code !== 'string') {
-        return res.status(400).json({ error: "Code content is required" });
-      }
-
-      const prettier = await import("prettier");
-      const formatted = await prettier.format(code, {
-        filepath: filepath || "file.js",
-        semi: true,
-        singleQuote: true,
-        tabWidth: 2,
-        trailingComma: "es5"
-      });
-
-      res.json({ success: true, formatted });
-    } catch (err: any) {
-      console.error("[PRETTIER_FORMAT] error:", err);
-      res.status(500).json({ error: err.message || "Failed to auto-format code using Prettier." });
-    }
-  });
-
-  // Secure Server-side PDF Proxy to bypass client browser CORS/Google Block constraints
-  app.get("/api/proxy-pdf", async (req, res) => {
-    try {
-      const targetUrl = req.query.url as string;
-      if (!targetUrl) {
-        return res.status(400).json({ error: "Missing url parameter" });
-      }
-
-      console.log(`[PDF_PROXY] Fetching and streaming PDF: ${targetUrl}`);
-      const pdfRes = await fetch(targetUrl);
-      if (!pdfRes.ok) {
-        throw new Error(`Failed to retrieve secure PDF. Status code: ${pdfRes.status}`);
-      }
-
-      const buffer = await pdfRes.arrayBuffer();
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.send(Buffer.from(buffer));
-    } catch (err: any) {
-      console.error("[PDF_PROXY] Stream failure:", err);
-      res.status(500).json({ error: err.message || "Failed to proxy secure document stream." });
-    }
-  });
-
-  // --- BEGIN COMPANION INTERCEPT ROUTING ---
-  // Start Pairing Flow for Companion App (SwiftUI)
-  app.post("/api/companion/start-pairing", express.json(), async (req, res) => {
-    try {
-      if (!adminDb) throw new Error("Firebase Admin DB not ready");
-      const chars = "0123456789";
-      let code = "";
-      for (let i = 0; i < 6; i++) {
-        code += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      const fullCode = `U-${code}`;
-      
-      const pairingDocRef = adminDb.collection("device_pairings").doc(fullCode);
-      await pairingDocRef.set({
-        status: "pending",
-        createdAt: new Date(),
-        code: fullCode
-      });
-      console.log(`[COMPANION] Pairing process initialized. Secret pairing code generated: ${fullCode}`);
-      res.json({ code: fullCode });
-    } catch (err: any) {
-      console.error("[COMPANION] start-pairing error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Lightweight pairing endpoints to support custom client-side device pairing wrapper
-  app.post("/api/companion/pairings/set", express.json(), async (req, res) => {
-    try {
-      const { code, data } = req.body;
-      if (!code) return res.status(400).json({ error: "Missing pairing code" });
-      localDevicePairings.set(code, {
-        ...(localDevicePairings.get(code) || {}),
-        ...data,
-        updatedAt: new Date().toISOString()
-      });
-      if (data && data.status === "authorized" && data.email && data.uid) {
-        localUserConnections.set(data.email, {
-          email: data.email,
-          uid: data.uid,
-          updatedAt: new Date().toISOString()
-        });
-        saveUserConnections();
-        console.log(`[API PAIRING] Saved user connection mapping: ${data.email} -> ${data.uid}`);
-      }
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/companion/pairings/delete", express.json(), async (req, res) => {
-    try {
-      const { code } = req.body;
-      if (!code) return res.status(400).json({ error: "Missing pairing code" });
-      localDevicePairings.delete(code);
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.get("/api/companion/pairings/get", async (req, res) => {
-    try {
-      const code = req.query.code as string;
-      if (!code) return res.status(400).json({ error: "Missing code parameter" });
-      const data = localDevicePairings.get(code);
-      res.json({ exists: !!data, data });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Verify hand-off state of the pairing process
-  app.get("/api/companion/check-pairing", async (req, res) => {
-    try {
-      if (!adminDb) throw new Error("Firebase Admin DB not ready");
-      const code = req.query.code as string;
-      if (!code) return res.status(400).json({ error: "Missing pairing code parameter" });
-      
-      const pairingDocRef = adminDb.collection("device_pairings").doc(code);
-      const docSnap = await pairingDocRef.get();
-      if (!docSnap.exists) {
-        return res.json({ status: "pending" });
-      }
-      
-      const data = docSnap.data();
-      if (data.status === "authorized") {
-        console.log(`[COMPANION] Handshake established. Mobile successfully paired to browser Account: ${data.email || "Unknown"}`);
-        
-        // Save persistent user mapping for fallback lookups when Admin SDK getUserByEmail is unavailable
-        if (data.email && data.uid) {
-          try {
-            await adminDb.collection("user_connections").doc(data.email).set({
-              email: data.email,
-              uid: data.uid,
-              updatedAt: new Date()
-            });
-            console.log(`[COMPANION] Persisted email-to-UID mapping for security clearance: ${data.email} -> ${data.uid}`);
-          } catch (connErr: any) {
-            console.error("[COMPANION] Failed to save user_connections mapping cache:", connErr.message);
-          }
-        }
-
-        // Delete temporal pairing file
-        await pairingDocRef.delete();
-        return res.json({
-          status: "authorized",
-          email: data.email || "",
-          uid: data.uid || ""
-        });
-      }
-      res.json({ status: "pending" });
-    } catch (err: any) {
-      console.error("[COMPANION] check-pairing error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Helper method for resolving email to standard Firebase Auth UID using resilient cache/SDK strategies
-  async function resolveUidFromEmailOrQuery(uid: string | undefined, email: string | undefined): Promise<string | undefined> {
-    if (uid) return uid;
-    if (!email) return undefined;
-    
-    // 1. Try Firebase Admin SDK lookup
-    if (adminAuth) {
-      try {
-        const userRecord = await adminAuth.getUserByEmail(email);
-        if (userRecord && userRecord.uid) {
-          console.log(`[COMPANION] Resolved email ${email} to standard UID via Auth: ${userRecord.uid}`);
-          return userRecord.uid;
-        }
-      } catch (authErr: any) {
-        console.warn(`[COMPANION] getUserByEmail lookup failed for ${email}:`, authErr.message);
-      }
-    }
-    
-    // 2. Try persistent user_connections mapping catalog in Firestore
-    if (adminDb) {
-      try {
-        const connDoc = await adminDb.collection("user_connections").doc(email).get();
-        if (connDoc.exists) {
-          const resolvedUid = connDoc.data().uid;
-          console.log(`[COMPANION] Resolved email ${email} to standard UID via user_connections: ${resolvedUid}`);
-          return resolvedUid;
-        }
-      } catch (dbErr: any) {
-        console.warn(`[COMPANION] fallback database lookup failed:`, dbErr.message);
-      }
-    }
-    
-    return undefined;
-  }
-
-  // Pull all conversations filtered optionally by owner's UID (or email resolved to UID)
-  app.get("/api/companion/conversations", async (req, res) => {
-    try {
-      if (!adminDb) throw new Error("Firebase Admin DB not ready");
-      let uid = req.query.uid as string;
-      const email = req.query.email as string;
-      
-      // Resolve email parameter to the proper auth UID so we show the exact same conversations as the Web UI
-      uid = await resolveUidFromEmailOrQuery(uid, email);
-      
-      const colRef = adminDb.collection("conversations");
-      let snapshot;
-      if (uid) {
-        snapshot = await colRef.where("userId", "==", uid).get();
-      } else {
-        snapshot = await colRef.get();
-      }
-      
-      const serializeItem = (docObj: any) => {
-        const id = docObj.id;
-        const data = docObj.data();
-        const resObj: any = { id, ...data };
-        for (const key of Object.keys(resObj)) {
-          const val = resObj[key];
-          if (val && typeof val.toDate === "function") {
-            resObj[key] = val.toDate().toISOString().replace(/\.\d{3}/, "");
-          } else if (val && typeof val === "object" && val.seconds !== undefined) {
-            resObj[key] = new Date(val.seconds * 1000).toISOString().replace(/\.\d{3}/, "");
-          } else if (val instanceof Date) {
-            resObj[key] = val.toISOString().replace(/\.\d{3}/, "");
-          }
-        }
-        return resObj;
-      };
-
-      let list = snapshot.docs.map((d: any) => serializeItem(d));
-      
-      const targetUid = uid || "test_operator";
-      
-      // Sort in-memory desc by updatedAt
-      list.sort((a: any, b: any) => {
-        const tA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-        const tB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-        return tB - tA;
-      });
-      
-      res.json({ conversations: list });
-    } catch (err: any) {
-      console.error("[COMPANION] get-conversations error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Create workspace conversation
-  app.post("/api/companion/conversation", express.json(), async (req, res) => {
-    try {
-      if (!adminDb) throw new Error("Firebase Admin DB not ready");
-      let { title, type, uid, email } = req.body;
-      
-      uid = await resolveUidFromEmailOrQuery(uid, email);
-      
-      const conversationId = "convo_" + Date.now();
-      const convoDocRef = adminDb.collection("conversations").doc(conversationId);
-      
-      await convoDocRef.set({
-        title: title || "New Interface Node",
-        type: type || "chat",
-        userId: uid || "test_operator",
-        createdAt: new Date(),
-        updatedAt: new Date()
-      });
-      
-      res.json({ id: conversationId, title: title || "New Interface Node" });
-    } catch (err: any) {
-      console.error("[COMPANION] create-conversation error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Rename/update workspace conversation title
-  app.post("/api/companion/conversation/rename", express.json(), async (req, res) => {
-    try {
-      if (!adminDb) throw new Error("Firebase Admin DB not ready");
-      const { id, title } = req.body;
-      if (!id || !title) return res.status(400).json({ error: "Missing required parameters" });
-      
-      const convoDocRef = adminDb.collection("conversations").doc(id);
-      await convoDocRef.set({ title, updatedAt: new Date() }, { merge: true });
-      res.json({ success: true, id, title });
-    } catch (err: any) {
-      console.error("[COMPANION] rename-conversation error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Delete workspace conversation
-  app.delete("/api/companion/conversation", express.json(), async (req, res) => {
-    try {
-      if (!adminDb) throw new Error("Firebase Admin DB not ready");
-      const { id } = req.body;
-      if (!id) return res.status(400).json({ error: "Missing conversation ID" });
-      
-      const convoDocRef = adminDb.collection("conversations").doc(id);
-      
-      // Delete subcollection messages in batch
-      const messagesCol = convoDocRef.collection("messages");
-      const messagesSnap = await messagesCol.get();
-      const batch = adminDb.batch();
-      messagesSnap.docs.forEach((docSnap: any) => {
-        batch.delete(docSnap.ref);
-      });
-      batch.delete(convoDocRef);
-      await batch.commit();
-      
-      res.json({ success: true, id });
-    } catch (err: any) {
-      console.error("[COMPANION] delete-conversation error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Pull active subcollection messages associated with targeted conversation
-  app.get("/api/companion/messages", async (req, res) => {
-    try {
-      if (!adminDb) {
-        return res.json({ messages: [] });
-      }
-      const conversationId = req.query.conversationId as string;
-      if (!conversationId) return res.status(400).json({ error: "Missing conversationId parameter" });
-      
-      const messagesCol = adminDb.collection("conversations").doc(conversationId).collection("messages");
-      const snap = await messagesCol.get();
-      
-      const serializeItem = (docObj: any) => {
-        const id = docObj.id;
-        const data = docObj.data();
-        const resObj: any = { id, ...data };
-        for (const key of Object.keys(resObj)) {
-          const val = resObj[key];
-          if (val && typeof val.toDate === "function") {
-            resObj[key] = val.toDate().toISOString().replace(/\.\d{3}/, "");
-          } else if (val && typeof val === "object" && val.seconds !== undefined) {
-            resObj[key] = new Date(val.seconds * 1000).toISOString().replace(/\.\d{3}/, "");
-          } else if (val instanceof Date) {
-            resObj[key] = val.toISOString().replace(/\.\d{3}/, "");
-          }
-        }
-        return resObj;
-      };
-
-      const list = snap.docs.map((d: any) => serializeItem(d));
-      
-      // Sort in-memory by createdAt ascending
-      list.sort((a: any, b: any) => {
-        const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return tA - tB;
-      });
-      
-      res.json({ messages: list });
-    } catch (err: any) {
-      console.error("[COMPANION] get-messages error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Pull active subcollection files associated with targeted project/conversation
-  app.get("/api/companion/files", async (req, res) => {
-    try {
-      if (!adminDb) {
-        return res.json({ files: [] });
-      }
-      const projectId = req.query.projectId as string;
-      if (!projectId) return res.status(400).json({ error: "Missing projectId parameter" });
-      
-      const filesCol = adminDb.collection("conversations").doc(projectId).collection("files");
-      const snap = await filesCol.get();
-      
-      const serializeItem = (docObj: any) => {
-        const id = docObj.id;
-        const data = docObj.data();
-        const resObj: any = { id, ...data };
-        for (const key of Object.keys(resObj)) {
-          const val = resObj[key];
-          if (val && typeof val.toDate === "function") {
-            resObj[key] = val.toDate().toISOString().replace(/\.\d{3}/, "");
-          } else if (val && typeof val === "object" && val.seconds !== undefined) {
-            resObj[key] = new Date(val.seconds * 1000).toISOString().replace(/\.\d{3}/, "");
-          } else if (val instanceof Date) {
-            resObj[key] = val.toISOString().replace(/\.\d{3}/, "");
-          }
-        }
-        return resObj;
-      };
-
-      const list = snap.docs.map((d: any) => serializeItem(d));
-      
-      // Sort in-memory by updatedAt descending
-      list.sort((a: any, b: any) => {
-        const tA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-        const tB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-        return tB - tA;
-      });
-      
-      res.json({ files: list });
-    } catch (err: any) {
-      console.error("[COMPANION] get-files error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Save (create or update) file associated with targeted project
-  app.post("/api/companion/file/save", express.json(), async (req, res) => {
-    try {
-      if (!adminDb) throw new Error("Firebase Admin DB not ready");
-      const { projectId, fileId, file } = req.body;
-      if (!projectId || !file) {
-        return res.status(400).json({ error: "Missing required parameters (projectId, file)" });
-      }
-      
-      const projectDocRef = adminDb.collection("conversations").doc(projectId);
-      const filesCol = projectDocRef.collection("files");
-      const now = new Date();
-      
-      let targetFileId = fileId;
-      if (targetFileId) {
-        const fileDocRef = filesCol.doc(targetFileId);
-        await fileDocRef.set({
-          ...file,
-          updatedAt: now
-        }, { merge: true });
-        console.log(`[COMPANION] File ${targetFileId} updated in project ${projectId}`);
-      } else {
-        targetFileId = "file_" + Date.now();
-        const fileDocRef = filesCol.doc(targetFileId);
-        await fileDocRef.set({
-          ...file,
-          updatedAt: now
-        });
-        console.log(`[COMPANION] Created new file ${targetFileId} in project ${projectId}`);
-      }
-      
-      // Update overall project modification date
-      await projectDocRef.set({ updatedAt: now }, { merge: true });
-      
-      res.json({ success: true, id: targetFileId });
-    } catch (err: any) {
-      console.error("[COMPANION] save-file error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Pull all study materials/courses filtered optionally by owner's UID (or email resolved to UID)
-  app.get("/api/companion/study_materials", async (req, res) => {
-    try {
-      let uid = req.query.uid as string;
-      const email = req.query.email as string;
-      
-      uid = await resolveUidFromEmailOrQuery(uid, email);
-      const targetUid = uid || "test_operator";
-      
-      const itemsMap = new Map<string, any>();
-      
-      // 1. Fetch from Supabase study_materials
-      try {
-        if (backendSupabase) {
-          const { data, error } = await backendSupabase
-            .from('study_materials')
-            .select('*')
-            .in('user_id', [targetUid, 'pi-user']);
-            
-          if (error) {
-            console.warn("[COMPANION] Supabase study_materials query error:", error.message);
-          } else if (data) {
-            data.forEach((item: any) => {
-              let extra = {};
-              if (item.category === 'Course' && item.raw_text) {
-                try {
-                  extra = JSON.parse(item.raw_text);
-                } catch (e) {}
-              }
-              const mapped = {
-                id: item.id,
-                title: item.title,
-                author: item.author || 'AI Scholar',
-                totalPages: item.total_pages || 1,
-                category: item.category || 'Jupyter Notebook',
-                coverColor: item.cover_color || 'from-indigo-950 via-[#0A0B0F] to-slate-900 border-indigo-500/20',
-                mainContentStartPage: item.main_content_start_page || 1,
-                isCustom: item.is_custom !== false,
-                rawText: item.raw_text || '',
-                notebookCells: item.notebook_cells || [],
-                ...extra
-              };
-              itemsMap.set(mapped.id, mapped);
-            });
-          }
-        }
-      } catch (supaErr: any) {
-        console.warn("[COMPANION] Supabase fetch error:", supaErr.message);
-      }
-
-      // 1b. Fetch from Supabase courses
-      try {
-        if (backendSupabase) {
-          const { data, error } = await backendSupabase
-            .from('courses')
-            .select('*')
-            .in('user_id', [targetUid, 'pi-user']);
-            
-          if (error) {
-            console.warn("[COMPANION] Supabase courses query warning (table may not exist yet):", error.message);
-          } else if (data) {
-            data.forEach((item: any) => {
-              let extra = {};
-              if (item.raw_text) {
-                try {
-                  extra = JSON.parse(item.raw_text);
-                } catch (e) {}
-              }
-              const mapped = {
-                id: item.id,
-                title: item.title,
-                author: item.author || 'AI Scholar',
-                totalPages: item.total_pages || 1,
-                category: 'Course',
-                coverColor: item.cover_color || 'from-indigo-950 via-[#0A0B0F] to-slate-900 border-indigo-500/20',
-                mainContentStartPage: item.main_content_start_page || 1,
-                isCustom: item.is_custom !== false,
-                rawText: item.raw_text || '',
-                notebookCells: [],
-                ...extra
-              };
-              itemsMap.set(mapped.id, mapped);
-            });
-          }
-        }
-      } catch (supaErr: any) {
-        console.warn("[COMPANION] Supabase courses fetch error:", supaErr.message);
-      }
-      
-      // 2. Fetch from Firestore users/{uid}/study_materials
-      try {
-        if (adminDb && uid) {
-          const snap = await adminDb.collection("users").doc(uid).collection("study_materials").get();
-          snap.docs.forEach((d: any) => {
-            const data = d.data();
-            const mapped = {
-              id: d.id,
-              ...data
-            };
-            itemsMap.set(mapped.id, mapped);
-          });
-        }
-      } catch (fireErr: any) {
-        console.warn("[COMPANION] Firestore fetch error:", fireErr.message);
-      }
-      
-      res.json({ study_materials: Array.from(itemsMap.values()) });
-    } catch (err: any) {
-      console.error("[COMPANION] get study materials error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Save (create or update) study material/course
-  app.post("/api/companion/study_materials/save", express.json(), async (req, res) => {
-    try {
-      let uid = req.body.uid as string;
-      const email = req.body.email as string;
-      const material = req.body.material;
-      
-      if (!material || !material.id) {
-        return res.status(400).json({ error: "Missing material payload or material.id" });
-      }
-      
-      uid = await resolveUidFromEmailOrQuery(uid, email);
-      const targetUid = uid || "test_operator";
-      
-      // Save to Supabase if backendSupabase is available
-      try {
-        if (backendSupabase) {
-          const isCourse = material.category === 'Course';
-          const serializedRawText = isCourse ? JSON.stringify({
-            documentHtml: material.documentHtml || material.rawText,
-            checklist: material.checklist,
-            dailyLogs: material.dailyLogs,
-            mindmapNodes: material.mindmapNodes,
-            mindmapEdges: material.mindmapEdges
-          }) : (material.rawText || '');
-
-          if (isCourse) {
-            const coursePayload = {
-              id: material.id,
-              user_id: targetUid,
-              title: material.title,
-              author: material.author || 'AI Scholar',
-              total_pages: material.totalPages || 1,
-              cover_color: material.coverColor || 'from-indigo-950 via-[#0A0B0F] to-slate-900 border-indigo-500/20',
-              main_content_start_page: material.mainContentStartPage || 1,
-              is_custom: material.isCustom !== false,
-              raw_text: serializedRawText
-            };
-            
-            const { error } = await backendSupabase
-              .from('courses')
-              .upsert(coursePayload);
-              
-            if (error) {
-              console.warn("[COMPANION] Supabase courses upsert failed (falling back to study_materials):", error.message);
-              // Fallback save to study_materials
-              const fallbackPayload = {
-                ...coursePayload,
-                category: 'Course',
-                notebook_cells: []
-              };
-              const { error: fallbackError } = await backendSupabase
-                .from('study_materials')
-                .upsert(fallbackPayload);
-              if (fallbackError) {
-                console.warn("[COMPANION] Supabase study_materials fallback upsert also failed:", fallbackError.message);
-              }
-            }
-          } else {
-            const payload = {
-              id: material.id,
-              user_id: targetUid,
-              title: material.title,
-              author: material.author || 'AI Scholar',
-              total_pages: material.totalPages || 1,
-              category: material.category || 'Jupyter Notebook',
-              cover_color: material.coverColor || 'from-indigo-950 via-[#0A0B0F] to-slate-900 border-indigo-500/20',
-              main_content_start_page: material.mainContentStartPage || 1,
-              is_custom: material.isCustom !== false,
-              raw_text: serializedRawText,
-              notebook_cells: material.notebook_cells || []
-            };
-            
-            const { error } = await backendSupabase
-              .from('study_materials')
-              .upsert(payload);
-              
-            if (error) console.warn("[COMPANION] Supabase upsert error:", error.message);
-          }
-        }
-      } catch (supaErr: any) {
-        console.warn("[COMPANION] Supabase save error:", supaErr.message);
-      }
-      
-      // Save to Firestore
-      try {
-        if (adminDb && uid) {
-          await adminDb.collection("users").doc(uid).collection("study_materials").doc(material.id).set(material, { merge: true });
-        }
-      } catch (fireErr: any) {
-        console.warn("[COMPANION] Firestore save error:", fireErr.message);
-      }
-      
-      res.json({ success: true, id: material.id });
-    } catch (err: any) {
-      console.error("[COMPANION] save study material error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Delete study material/course
-  app.post("/api/companion/study_materials/delete", express.json(), async (req, res) => {
-    try {
-      let uid = req.body.uid as string;
-      const email = req.body.email as string;
-      const { id } = req.body;
-      
-      if (!id) return res.status(400).json({ error: "Missing material id" });
-      
-      uid = await resolveUidFromEmailOrQuery(uid, email);
-      
-      try {
-        if (backendSupabase) {
-          // Delete from courses table if it exists
-          const { error: errCourses } = await backendSupabase
-            .from('courses')
-            .delete()
-            .eq('id', id);
-          if (errCourses) {
-            console.warn("[COMPANION] Supabase courses delete warning:", errCourses.message);
-          }
-          
-          // Delete from study_materials table
-          const { error: errMaterials } = await backendSupabase
-            .from('study_materials')
-            .delete()
-            .eq('id', id);
-          if (errMaterials) {
-            console.warn("[COMPANION] Supabase study_materials delete warning:", errMaterials.message);
-          }
-        }
-      } catch (supaErr: any) {
-        console.warn("[COMPANION] Supabase delete exception:", supaErr.message);
-      }
-      
-      try {
-        if (adminDb && uid) {
-          await adminDb.collection("users").doc(uid).collection("study_materials").doc(id).delete();
-        }
-      } catch (fireErr: any) {
-        console.warn("[COMPANION] Firestore delete error:", fireErr.message);
-      }
-      
-      res.json({ success: true });
-    } catch (err: any) {
-      console.error("[COMPANION] delete study material error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  function determineAutoToolModeOnServer(prompt: string): 'search' | 'research' | 'convo' {
-    const text = prompt.toLowerCase().trim();
-    
-    const convoKeywords = [
-      "hi", "hello", "hey", "greetings", "how are you", "who are you", "who made you", "your name",
-      "tell a joke", "write a joke", "say hello", "thank you", "thanks", "awesome", "perfect",
-      "sing a song", "write a short poem", "chat with me", "yo"
-    ];
-    
-    const researchKeywords = [
-      "research", "report", "deep dive", "detailed analysis", "comprehensive analysis", 
-      "investigate", "compare", "comparative study", "summarize the literature", 
-      "rigorous", "whitepaper", "market analysis", "financial breakdown"
-    ];
-    
-    const searchKeywords = [
-      "weather", "forecast", "news", "current status", "traffic", "price today", 
-      "scores", "who won", "latest", "stock price", "bitcoin price", "now", "today", "yesterday",
-      "flight status", "what is happening", "oil prices", "trends", "search", "google", "lookup"
-    ];
-
-    const skipSearchKeywords = [
-      "play", "spotify", "track", "song", "music", "pause", "resume", "volume", "playlist", "queue", "next track", "skip",
-      "email", "gmail", "inbox", "send to", "mail", "draft", "calendar", "schedule", "event", "appt", "appointment",
-      "spreadsheet", "sheet", "slides", "presentation", "deck", "powerpoint", "google doc",
-      "build", "create project", "develop", "code", "file", "index.html", "script", "function", "calculator", "applet", "program", "python", "javascript", "typescript", "write", "edit", "debug", "compile"
-    ];
-
-    const infoKeywords = [
-      "who", "what", "where", "why", "when", "how", "explain", "describe", "tell me about", 
-      "versus", "vs", "difference between", "status of", "current", "which", "compare", 
-      "is", "are", "does", "did", "do", "can", "could", "should", "would", "any", "recommend", 
-      "best", "top", "list", "ratings", "reviews"
-    ];
-
-    const representsQuestion = text.includes('?') || 
-      text.startsWith('why ') || text.startsWith('how ') || text.startsWith('what ') || 
-      text.startsWith('who ') || text.startsWith('where ') || text.startsWith('when ') || 
-      text.startsWith('which ') || text.startsWith('compare ') || text.startsWith('is ') || 
-      text.startsWith('are ') || text.startsWith('does ') || text.startsWith('did ') || 
-      text.startsWith('can ') || text.startsWith('could ') || text.startsWith('should ') || 
-      text.startsWith('would ') || text.startsWith('tell me about ');
-
-    if (researchKeywords.some(kw => text.includes(kw))) {
-      return 'research';
-    }
-
-    if (skipSearchKeywords.some(kw => text.includes(kw))) {
-      return 'convo';
-    }
-
-    if (searchKeywords.some(kw => text.includes(kw)) || infoKeywords.some(kw => text.includes(kw)) || representsQuestion) {
-      return 'search';
-    }
-
-    if (convoKeywords.some(kw => text === kw || text.startsWith(kw + " ") || text.endsWith(" " + kw) || text.length < 15)) {
-      return 'convo';
-    }
-
-    return 'convo';
-  }
-
-  // Record an execution step from the background macOS agent directly to the conversation chat stream
-  app.post("/api/companion/agent/step", express.json(), async (req, res) => {
-    try {
-      if (!adminDb) throw new Error("Firebase Admin DB not ready");
-      const { conversationId, content, role } = req.body;
-      if (!conversationId || !content) {
-        return res.status(400).json({ error: "Missing required parameters (conversationId, content)" });
-      }
-      
-      const messagesCol = adminDb.collection("conversations").doc(conversationId).collection("messages");
-      const msgId = "msg_a_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
-      
-      await messagesCol.doc(msgId).set({
-        conversationId,
-        content,
-        role: role || "model",
-        createdAt: new Date()
-      });
-      
-      res.json({ success: true, id: msgId });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to log companion agent step" });
-    }
-  });
-
-  // Dispatch a message, append to Firestore database, trigger Gemini, save response back to Firestore
-  app.post("/api/companion/message", express.json(), async (req, res) => {
-    try {
-      if (!adminDb) throw new Error("Firebase Admin DB not ready");
-      let { conversationId, uid, content, email } = req.body;
-      if (!conversationId || !content) {
-        return res.status(400).json({ error: "Missing required parameters (conversationId, content)" });
-      }
-      
-      uid = await resolveUidFromEmailOrQuery(uid, email);
-      
-      const userMsgId = "msg_u_" + Date.now();
-      const messagesCol = adminDb.collection("conversations").doc(conversationId).collection("messages");
-      
-      // 1. Add user message
-      await messagesCol.doc(userMsgId).set({
-        conversationId,
-        content,
-        role: "user",
-        createdAt: new Date(),
-        userId: uid || "test_operator",
-        email: email || ""
-      });
-      
-      // 2. Load recent conversation message stream to build full prompt context for Gemini
-      const snap = await messagesCol.get();
-      const list = snap.docs.map((d: any) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          ...data,
-          createdAtTime: data.createdAt && typeof data.createdAt.toDate === "function" ? data.createdAt.toDate().getTime() : (data.createdAt instanceof Date ? data.createdAt.getTime() : 0)
-        };
-      });
-      
-      list.sort((a: any, b: any) => a.createdAtTime - b.createdAtTime);
-      // Limit context window to last 15 messages
-      const recentMessages = list.slice(-15);
-      
-      const contents = recentMessages.map((m: any) => ({
-        role: m.role === "model" ? "model" : "user",
-        parts: [{ text: m.content }]
-      }));
-      
-      // 3. Query the latest real-time macOS companion diagnostics and permissions from Firestore
-      let companionStatusText = "No companion device diagnostics received yet. The macOS companion is likely OFFLINE.";
-      let hasAccessibility = false;
-      let hasScreenshots = false;
-      let isConnected = false;
-      let installedAppsList: string[] = ["Safari", "Music", "Notes", "Terminal", "Calculator", "Finder", "Spotify"];
-      let osVersion = "macOS (Unknown)";
-      let modelIdentifier = "Mac Device";
-      
-      try {
-        const diagDoc = await adminDb.collection("system_state").doc("hardware_diagnostics").get();
-        if (diagDoc.exists) {
-          const dData = diagDoc.data();
-          const lastReportTime = dData.timestamp ? new Date(dData.timestamp).getTime() : 0;
-          // Stale check: let's say 2 minutes
-          const isRecent = (Date.now() - lastReportTime) < 120000;
-          isConnected = isRecent;
-          hasAccessibility = !!dData.accessibility;
-          hasScreenshots = !!dData.screenshots;
-          if (Array.isArray(dData.installedApps) && dData.installedApps.length > 0) {
-            installedAppsList = dData.installedApps;
-          }
-          if (dData.osVersion) osVersion = dData.osVersion;
-          if (dData.modelIdentifier) modelIdentifier = dData.modelIdentifier;
-          
-          companionStatusText = `macOS Companion status: ${isRecent ? "ONLINE" : "OFFLINE / DISCONNECTED"}.\n` +
-                                `Physical Hardware: ${modelIdentifier}, OS: ${osVersion}.\n` +
-                                `System Permissions: Accessibility=${hasAccessibility ? "GRANTED" : "DENIED"}, ScreenCapture=${hasScreenshots ? "GRANTED" : "DENIED"}.\n` +
-                                `Installed Applications List: ${installedAppsList.join(", ")}.`;
-        }
-      } catch (err: any) {
-        console.warn("[COMPANION] Could not read hardware diagnostics for Gemini system prompt:", err.message);
-      }
-
-      // Determine Server toolMode and system instructions
-      const toolMode = determineAutoToolModeOnServer(content);
-      
-      let baseInstruction = "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.\n\n" +
-                            "CRITICAL CREDIBILITY & HONESTY MANDATE:\n" +
-                            "1. You are running on a server connected to a local physical macOS companion app via Firestore. Here is the CURRENT REAL-TIME STATUS of the user's physical machine:\n" +
-                            "-------------------------------\n" +
-                            companionStatusText + "\n" +
-                            "-------------------------------\n" +
-                            "2. NEVER fake or simulate executing local physical system actions (like creating notes, writing text, clicking icons, or analyzing screen captures) if they are physically impossible. If the macOS companion is OFFLINE, you MUST tell the user honestly that they need to open the Unison Desktop app on their Mac first.\n" +
-                            "3. If System Permissions are DENIED (Accessibility or ScreenCapture), you MUST honestly explain that you cannot perform the computer-use action or analyze the screen because the companion lacks permissions. Instruct the user to click 'Allow' in the macOS System Settings or via the companion UI.\n" +
-                            "4. If the companion is ONLINE and permissions are GRANTED, you may initiate system actions using the tags below.\n" +
-                            "5. APPLICATION AWARENESS: Before agreeing to open, launch, or interact with any application, verify if it is in the 'Installed Applications List' above. If it is NOT in the list, you MUST honestly tell the user: 'That application is not detected in your macOS Applications folder.' Offer to launch a substitute (e.g. Safari instead of Chrome) or try anyway, rather than falsely promising a successful launch.\n\n" +
-                            "SYSTEM_ACTION RULE:\n" +
-                            "1. If the companion is ONLINE and the user asks you to open or launch an application, you MUST append the exact tag: `[SYSTEM_ACTION: launchApp=\"AppName\"]` to the end of your response, where AppName is the standard name from the Installed Applications List (e.g. 'Spotify', 'Safari', 'Notes', 'Terminal', 'Music', 'Calculator', 'Finder', 'System Settings'). Only append this if the companion is ONLINE. Do not make up apps, only launch real ones.\n" +
-                            "2. If the user asks you to perform a complex, interactive desktop task (e.g., 'open Notes and note something', 'create a note containing X', 'search for artist X in Spotify', 'type X in Terminal', or any task requiring clicking or typing), you MUST append the exact tag: `[SYSTEM_ACTION: startAgent=\"Objective\"]` to the end of your response, where Objective is a precise, clear natural language instruction for the local Computer Use agent (e.g., 'Open Notes application, click the new note button, and type...'). This will automatically trigger the local native Computer Use agent to take control of the mouse and keyboard and execute the task on their screen in real-time.";
-
-      let systemInstruction = baseInstruction;
-      let tools: any[] | undefined = undefined;
-      let toolConfig: any | undefined = undefined;
-
-      if (toolMode === 'research') {
-        systemInstruction = baseInstruction + "\n\nCRITICAL RESEARCH MODE ACTIVATED: The user expects an exceptionally detailed, highly structured, multi-section research report. Synthesize your answer step-by-step using actual facts from Google Search Grounding. Structure the reply with clear headings: 'Executive Summary', 'Detailed Fact Finding & Analysis', 'Critical Recommendations', and 'Next Steps/Follow-ups'. \n\nCRITICAL MULTI-SOURCE HYPERLINKING RULE: You MUST cite EVERY single line, statement, fact, or bullet point that is derived from search results individually at the end of that specific sentence with its standard citation token (e.g. '[1]' or '[2]'). Do NOT leave lines/points containing grounded search facts without their respective citation tag at the absolute end of that line or sentence. At the absolute end, you MUST append a valid web reference block using the exact syntax: [SOURCES: [{\"title\": \"Source Page Title\", \"siteName\": \"domain.com\", \"url\": \"https://domain.com/page\", \"snippet\": \"relevant quote\", \"linesUsed\": [\"Exact sentence in your response that used it\"]}]] and provide high-quality follow-up questions in the exact format: [FOLLOW_UPS: [\"question 1\", \"question 2\", \"question 3\"]].";
-        tools = [{ googleSearch: {} }];
-      } else if (toolMode === 'search') {
-        systemInstruction = baseInstruction + "\n\nCRITICAL SEARCH MODE ACTIVATED: The user expects high-quality Google Search grounded information. Always use standard citations immediately after periods (e.g., [1], [2]). \n\nCRITICAL MULTI-SOURCE HYPERLINKING RULE: You MUST cite EVERY single statement, fact, bullet point, or individual line that is derived from search results at the end of that specific line/sentence with its respective citation token (e.g. '[1]' or '[2]'). Do NOT leave lines/points containing grounded search facts without their respective citation tag. At the absolute end of your response, you MUST provide 3 interactive follow-up questions using the exact tag syntax: [FOLLOW_UPS: [\"Follow-up Q1\", \"Follow-up Q2\", \"Follow-up Q3\"]]. If you cited any websites, append a valid [SOURCES: ...] tag matching the format of research mode.";
-        tools = [{ googleSearch: {} }];
-      }
-
-      // 4. Trigger Gemini
-      console.log(`[COMPANION] ${toolMode.toUpperCase()} mode resolved. Invoking Gemini response for companion client...`);
-      let geminiReply = "Offline simulation fallback.";
-      let detectedSources: any[] = [];
-
-      try {
-        const payload: any = {
-          model: "gemini-3.5-flash",
-          contents: contents,
-          config: {
-            systemInstruction,
-            temperature: 0.7
-          }
-        };
-
-        if (tools) payload.config.tools = tools;
-        if (toolConfig) payload.config.toolConfig = toolConfig;
-
-        const geminiRes = await generateContentWithFallback(payload);
-        
-        let textResult = "";
-        if (geminiRes && typeof geminiRes.text === 'string') {
-          textResult = geminiRes.text;
-        } else if (geminiRes && geminiRes.candidates && geminiRes.candidates[0]?.content?.parts?.[0]?.text) {
-          textResult = geminiRes.candidates[0].content.parts[0].text;
-        } else if (geminiRes && typeof geminiRes.text === 'function') {
-          textResult = await geminiRes.text();
-        } else {
-          textResult = JSON.stringify(geminiRes);
-        }
-        geminiReply = textResult;
-
-        try {
-          const firstCandidate = geminiRes.candidates?.[0];
-          if (firstCandidate && firstCandidate.groundingMetadata) {
-            const meta = firstCandidate.groundingMetadata;
-            const chunks = meta.groundingChunks || [];
-            for (const c of chunks) {
-              if (c.web) {
-                const url = c.web.uri || c.web.url || '';
-                const title = c.web.title || 'Source';
-                if (url && !detectedSources.some(s => s.url === url)) {
-                  detectedSources.push({
-                    title: title,
-                    url: url,
-                    siteName: url.split('/')[2]?.replace('www.', '') || 'Web',
-                    snippet: c.web.snippet || '',
-                    linesUsed: []
-                  });
-                }
-              }
-            }
-            const supports = meta.groundingSupports || [];
-            for (const s of supports) {
-              const segmentText = s.segment?.text || '';
-              if (segmentText && s.groundingChunkIndices) {
-                for (const chunkIdx of s.groundingChunkIndices) {
-                  const chunk = chunks[chunkIdx];
-                  if (chunk && chunk.web) {
-                    const url = chunk.web.uri || chunk.web.url || '';
-                    if (url) {
-                      const existingSource = detectedSources.find(src => src.url === url);
-                      if (existingSource) {
-                        if (!existingSource.linesUsed) existingSource.linesUsed = [];
-                        if (!existingSource.linesUsed.includes(segmentText)) {
-                          existingSource.linesUsed.push(segmentText);
+                                }
+                            ];
                         }
-                      }
+
+                        projFiles.forEach(f => {
+                            const fullPath = path.join(process.cwd(), f.path);
+                            const dirPath = path.dirname(fullPath);
+                            try {
+                                if (!fs.existsSync(dirPath)) {
+                                    fs.mkdirSync(dirPath, { recursive: true });
+                                }
+                                fs.writeFileSync(fullPath, f.content);
+                                kernelState.logs.push(`FS_WRITE_SUCCESS: ${f.path}`);
+                            } catch (err) {
+                                kernelState.logs.push(`FS_WRITE_ERROR: ${f.path}`);
+                            }
+                        });
+
+                        fileTree = getFileTree(process.cwd());
+                        wss.clients.forEach(c => c.send(JSON.stringify({ type: 'FS_UPDATE', data: fileTree })));
+
+                        ws.send(JSON.stringify({
+                            type: 'PROJECT_INITIATED',
+                            projectName: templateName.charAt(0).toUpperCase() + templateName.slice(1) + ' Project',
+                            files: projFiles
+                        }));
+
+                        kernelState.logs.push(`INIT_PROJECT_SUCCESS: ${templateName}`);
+                        const completionPayload = JSON.stringify({ type: 'KERNEL_HEARTBEAT', data: kernelState });
+                        wss.clients.forEach(c => c.send(completionPayload));
                     }
-                  }
                 }
-              }
+
+                if (payload.type === 'DESKTOP_SYNC') {
+                    kernelState.desktop = { ...kernelState.desktop, ...payload.data };
+
+                    // Log for brain context
+                    console.log("DESKTOP_SYNC: Synchronizing state for brain grounding.");
+
+                    const syncPayload = JSON.stringify({ type: 'KERNEL_HEARTBEAT', data: kernelState });
+                    wss.clients.forEach(c => {
+                        if (c !== ws && c.readyState === WebSocket.OPEN) {
+                            c.send(syncPayload);
+                        }
+                    });
+                }
+            } catch (e) {
+                console.error('Failed to parse WS message', e);
             }
-          }
-        } catch (groundingErr) {
-          console.error("[COMPANION] Grounding metadata parse failed:", groundingErr);
-        }
-
-        if (detectedSources.length > 0) {
-          console.log(`[COMPANION] Parsed ${detectedSources.length} grounded web sources. Inserting SOURCES indexing metadata...`);
-          geminiReply += `\n\n[SOURCES: ${JSON.stringify(detectedSources)}]`;
-        }
-      } catch (geminiError: any) {
-        console.error("[COMPANION] Gemini generation failed:", geminiError);
-        geminiReply = `System error on Gemini routing layer: ${geminiError.message || String(geminiError)}`;
-      }
-      
-      // 5. Save Gemini response
-      const modelMsgId = "msg_m_" + Date.now();
-      await messagesCol.doc(modelMsgId).set({
-        conversationId,
-        content: geminiReply,
-        role: "model",
-        createdAt: new Date(),
-        userId: "unison_core"
-      });
-      
-      // 6. Update convo updatedAt timestamp
-      const convoDocRef = adminDb.collection("conversations").doc(conversationId);
-      await convoDocRef.set({
-        updatedAt: new Date()
-      }, { merge: true });
-      
-      res.json({ success: true, response: geminiReply });
-    } catch (err: any) {
-      console.error("[COMPANION] post-message error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Dynamic Server-Driven UI layout definition for Companion applications
-  app.get("/api/companion/layout", (req, res) => {
-    res.json({
-      accentColor: "cyan",
-      systemStatus: "ONLINE",
-      tabs: [
-        { title: "Chat Workspace", icon: "bubble.left", viewType: "chat", badge: null },
-        { title: "System Hub", icon: "globe", viewType: "system_hub", badge: "Core" },
-        { title: "Directory Tree", icon: "folder.badge.gearshape", viewType: "directory", badge: null },
-        { title: "Developer Shell", icon: "terminal", viewType: "terminal", badge: "Dev" },
-        { title: "Titan Vision Studio", icon: "viewfinder.circle.fill", viewType: "titan_suite", badge: "Vision" }
-      ]
+        });
     });
-  });
 
-  let firestoreAdminInstance: any = null;
-  async function getServerFirestore() {
-    if (!firestoreAdminInstance) {
-      const adminModule = await import("firebase-admin");
-      const admin = adminModule.default || adminModule;
-      const apps = admin.apps || (admin as any).getApps?.() || [];
-      if (apps.length === 0) {
+    // API Route for health check
+    app.get("/api/health", (req, res) => {
+        res.json({ status: "ok", os: "UNISON_OS_CORE" });
+    });
+
+    // API Route for Prettier auto-formatting based on file extension
+    app.post("/api/format", express.json(), async (req, res) => {
         try {
-          const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-          if (fs.existsSync(configPath)) {
-            const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-            const initOptions: any = {
-              projectId: config.projectId,
-              databaseURL: config.firestoreDatabaseId ? `https://${config.projectId}.firebaseio.com` : undefined
-            };
-            admin.initializeApp(initOptions);
-          } else {
-            admin.initializeApp();
-          }
-          console.log("[FIREBASE] Admin SDK initialized successfully in lazy loader");
+            const { code, filepath } = req.body;
+            if (typeof code !== 'string') {
+                return res.status(400).json({ error: "Code content is required" });
+            }
+
+            const prettier = await import("prettier");
+            const formatted = await prettier.format(code, {
+                filepath: filepath || "file.js",
+                semi: true,
+                singleQuote: true,
+                tabWidth: 2,
+                trailingComma: "es5"
+            });
+
+            res.json({ success: true, formatted });
         } catch (err: any) {
-          console.error("[FIREBASE] Error initializing Admin SDK:", err.message);
+            console.error("[PRETTIER_FORMAT] error:", err);
+            res.status(500).json({ error: err.message || "Failed to auto-format code using Prettier." });
         }
-      }
+    });
 
-      const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-      if (fs.existsSync(configPath)) {
-        const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-        if (config.firestoreDatabaseId) {
-          try {
-            // Check if admin.firestore takes a databaseId parameter or options
-            firestoreAdminInstance = admin.firestore();
-            // In modern firebase-admin, you specify databaseId at initializeApp or pass it to firestore() or if not supported, fall back
-            if (typeof (admin.firestore as any).databaseId === "string" || config.firestoreDatabaseId) {
-              try {
-                firestoreAdminInstance = (admin as any).firestore(config.firestoreDatabaseId);
-              } catch (e) {
+    // Secure Server-side PDF Proxy to bypass client browser CORS/Google Block constraints
+    app.get("/api/proxy-pdf", async (req, res) => {
+        try {
+            const targetUrl = req.query.url as string;
+            if (!targetUrl) {
+                return res.status(400).json({ error: "Missing url parameter" });
+            }
+
+            console.log(`[PDF_PROXY] Fetching and streaming PDF: ${targetUrl}`);
+            const pdfRes = await fetch(targetUrl);
+            if (!pdfRes.ok) {
+                throw new Error(`Failed to retrieve secure PDF. Status code: ${pdfRes.status}`);
+            }
+
+            const buffer = await pdfRes.arrayBuffer();
+            res.setHeader("Content-Type", "application/pdf");
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.send(Buffer.from(buffer));
+        } catch (err: any) {
+            console.error("[PDF_PROXY] Stream failure:", err);
+            res.status(500).json({ error: err.message || "Failed to proxy secure document stream." });
+        }
+    });
+
+    // --- BEGIN COMPANION INTERCEPT ROUTING ---
+    // Start Pairing Flow for Companion App (SwiftUI)
+    app.post("/api/companion/start-pairing", express.json(), async (req, res) => {
+        try {
+            const chars = "0123456789";
+            let code = "";
+            for (let i = 0; i < 6; i++) {
+                code += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            const fullCode = `U-${code}`;
+
+            const pairingDocRef = adminDb.collection("device_pairings").doc(fullCode);
+            await pairingDocRef.set({
+                status: "pending",
+                createdAt: new Date(),
+                code: fullCode
+            });
+            console.log(`[COMPANION] Pairing process initialized. Secret pairing code generated: ${fullCode}`);
+            res.json({ code: fullCode });
+        } catch (err: any) {
+            console.error("[COMPANION] start-pairing error:", err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // Lightweight pairing endpoints to support custom client-side device pairing wrapper
+    app.post("/api/companion/pairings/set", express.json(), async (req, res) => {
+        try {
+            const { code, data } = req.body;
+            if (!code) return res.status(400).json({ error: "Missing pairing code" });
+            localDevicePairings.set(code, {
+                ...(localDevicePairings.get(code) || {}),
+                ...data,
+                updatedAt: new Date().toISOString()
+            });
+            if (data && data.status === "authorized" && data.email && data.uid) {
+                localUserConnections.set(data.email, {
+                    email: data.email,
+                    uid: data.uid,
+                    updatedAt: new Date().toISOString()
+                });
+                saveUserConnections();
+                console.log(`[API PAIRING] Saved user connection mapping: ${data.email} -> ${data.uid}`);
+            }
+            res.json({ success: true });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    app.post("/api/companion/pairings/delete", express.json(), async (req, res) => {
+        try {
+            const { code } = req.body;
+            if (!code) return res.status(400).json({ error: "Missing pairing code" });
+            localDevicePairings.delete(code);
+            res.json({ success: true });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    app.get("/api/companion/pairings/get", async (req, res) => {
+        try {
+            const code = req.query.code as string;
+            if (!code) return res.status(400).json({ error: "Missing code parameter" });
+            const data = localDevicePairings.get(code);
+            res.json({ exists: !!data, data });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // Verify hand-off state of the pairing process
+    app.get("/api/companion/check-pairing", async (req, res) => {
+        try {
+            const code = req.query.code as string;
+            if (!code) return res.status(400).json({ error: "Missing pairing code parameter" });
+
+            const pairingDocRef = adminDb.collection("device_pairings").doc(code);
+            const docSnap = await pairingDocRef.get();
+            if (!docSnap.exists) {
+                return res.json({ status: "pending" });
+            }
+
+            const data = docSnap.data();
+            if (data.status === "authorized") {
+                console.log(`[COMPANION] Handshake established. Mobile successfully paired to browser Account: ${data.email || "Unknown"}`);
+
+                // Save persistent user mapping for fallback lookups when Admin SDK getUserByEmail is unavailable
+                if (data.email && data.uid) {
+                    try {
+                        await adminDb.collection("user_connections").doc(data.email).set({
+                            email: data.email,
+                            uid: data.uid,
+                            updatedAt: new Date()
+                        });
+                        console.log(`[COMPANION] Persisted email-to-UID mapping for security clearance: ${data.email} -> ${data.uid}`);
+                    } catch (connErr: any) {
+                        console.error("[COMPANION] Failed to save user_connections mapping cache:", connErr.message);
+                    }
+                }
+
+                // Delete temporal pairing file
+                await pairingDocRef.delete();
+                return res.json({
+                    status: "authorized",
+                    email: data.email || "",
+                    uid: data.uid || ""
+                });
+            }
+            res.json({ status: "pending" });
+        } catch (err: any) {
+            console.error("[COMPANION] check-pairing error:", err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // Helper method for resolving email to standard Firebase Auth UID using resilient cache/SDK strategies
+    async function resolveUidFromEmailOrQuery(uid: string | undefined, email: string | undefined): Promise<string | undefined> {
+        if (uid) return uid;
+        if (!email) return undefined;
+
+        // 1. Try Firebase Admin SDK lookup
+        if (adminAuth) {
+            try {
+                const userRecord = await adminAuth.getUserByEmail(email);
+                if (userRecord && userRecord.uid) {
+                    console.log(`[COMPANION] Resolved email ${email} to standard UID via Auth: ${userRecord.uid}`);
+                    return userRecord.uid;
+                }
+            } catch (authErr: any) {
+                console.warn(`[COMPANION] getUserByEmail lookup failed for ${email}:`, authErr.message);
+            }
+        }
+
+        // 2. Try persistent user_connections mapping catalog in Firestore
+        if (adminDb) {
+            try {
+                const connDoc = await adminDb.collection("user_connections").doc(email).get();
+                if (connDoc.exists) {
+                    const resolvedUid = connDoc.data().uid;
+                    console.log(`[COMPANION] Resolved email ${email} to standard UID via user_connections: ${resolvedUid}`);
+                    return resolvedUid;
+                }
+            } catch (dbErr: any) {
+                console.warn(`[COMPANION] fallback database lookup failed:`, dbErr.message);
+            }
+        }
+
+        return undefined;
+    }
+
+    // Pull all conversations filtered optionally by owner's UID (or email resolved to UID)
+    app.get("/api/companion/conversations", async (req, res) => {
+        try {
+            let uid = req.query.uid as string;
+            const email = req.query.email as string;
+
+            // Resolve email parameter to the proper auth UID so we show the exact same conversations as the Web UI
+            uid = await resolveUidFromEmailOrQuery(uid, email);
+
+            const colRef = adminDb.collection("conversations");
+            let snapshot;
+            if (uid) {
+                snapshot = await colRef.where("userId", "==", uid).get();
+            } else {
+                snapshot = await colRef.get();
+            }
+
+            const serializeItem = (docObj: any) => {
+                const id = docObj.id;
+                const data = docObj.data();
+                const resObj: any = { id, ...data };
+                for (const key of Object.keys(resObj)) {
+                    const val = resObj[key];
+                    if (val && typeof val.toDate === "function") {
+                        resObj[key] = val.toDate().toISOString().replace(/\.\d{3}/, "");
+                    } else if (val && typeof val === "object" && val.seconds !== undefined) {
+                        resObj[key] = new Date(val.seconds * 1000).toISOString().replace(/\.\d{3}/, "");
+                    } else if (val instanceof Date) {
+                        resObj[key] = val.toISOString().replace(/\.\d{3}/, "");
+                    }
+                }
+                return resObj;
+            };
+
+            let list = snapshot.docs.map((d: any) => serializeItem(d));
+
+            const targetUid = uid || "test_operator";
+
+            // Sort in-memory desc by updatedAt
+            list.sort((a: any, b: any) => {
+                const tA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+                const tB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+                return tB - tA;
+            });
+
+            res.json({ conversations: list });
+        } catch (err: any) {
+            console.error("[COMPANION] get-conversations error:", err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // Create workspace conversation
+    app.post("/api/companion/conversation", express.json(), async (req, res) => {
+        try {
+            let { title, type, uid, email } = req.body;
+
+            uid = await resolveUidFromEmailOrQuery(uid, email);
+
+            const conversationId = "convo_" + Date.now();
+            const convoDocRef = adminDb.collection("conversations").doc(conversationId);
+
+            await convoDocRef.set({
+                title: title || "New Interface Node",
+                type: type || "chat",
+                userId: uid || "test_operator",
+                createdAt: new Date(),
+                updatedAt: new Date()
+            });
+
+            res.json({ id: conversationId, title: title || "New Interface Node" });
+        } catch (err: any) {
+            console.error("[COMPANION] create-conversation error:", err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // Rename/update workspace conversation title
+    app.post("/api/companion/conversation/rename", express.json(), async (req, res) => {
+        try {
+            const { id, title } = req.body;
+            if (!id || !title) return res.status(400).json({ error: "Missing required parameters" });
+
+            const convoDocRef = adminDb.collection("conversations").doc(id);
+            await convoDocRef.set({ title, updatedAt: new Date() }, { merge: true });
+            res.json({ success: true, id, title });
+        } catch (err: any) {
+            console.error("[COMPANION] rename-conversation error:", err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // Delete workspace conversation
+    app.delete("/api/companion/conversation", express.json(), async (req, res) => {
+        try {
+            const { id } = req.body;
+            if (!id) return res.status(400).json({ error: "Missing conversation ID" });
+
+            const convoDocRef = adminDb.collection("conversations").doc(id);
+
+            // Delete subcollection messages in batch
+            const messagesCol = convoDocRef.collection("messages");
+            const messagesSnap = await messagesCol.get();
+            const batch = adminDb.batch();
+            messagesSnap.docs.forEach((docSnap: any) => {
+                batch.delete(docSnap.ref);
+            });
+            batch.delete(convoDocRef);
+            await batch.commit();
+
+            res.json({ success: true, id });
+        } catch (err: any) {
+            console.error("[COMPANION] delete-conversation error:", err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // Pull active subcollection messages associated with targeted conversation
+    app.get("/api/companion/messages", async (req, res) => {
+        try {
+            if (!adminDb) {
+                return res.json({ messages: [] });
+            }
+            const conversationId = req.query.conversationId as string;
+            if (!conversationId) return res.status(400).json({ error: "Missing conversationId parameter" });
+
+            const messagesCol = adminDb.collection("conversations").doc(conversationId).collection("messages");
+            const snap = await messagesCol.get();
+
+            const serializeItem = (docObj: any) => {
+                const id = docObj.id;
+                const data = docObj.data();
+                const resObj: any = { id, ...data };
+                for (const key of Object.keys(resObj)) {
+                    const val = resObj[key];
+                    if (val && typeof val.toDate === "function") {
+                        resObj[key] = val.toDate().toISOString().replace(/\.\d{3}/, "");
+                    } else if (val && typeof val === "object" && val.seconds !== undefined) {
+                        resObj[key] = new Date(val.seconds * 1000).toISOString().replace(/\.\d{3}/, "");
+                    } else if (val instanceof Date) {
+                        resObj[key] = val.toISOString().replace(/\.\d{3}/, "");
+                    }
+                }
+                return resObj;
+            };
+
+            const list = snap.docs.map((d: any) => serializeItem(d));
+
+            // Sort in-memory by createdAt ascending
+            list.sort((a: any, b: any) => {
+                const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                return tA - tB;
+            });
+
+            res.json({ messages: list });
+        } catch (err: any) {
+            console.error("[COMPANION] get-messages error:", err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // Pull active subcollection files associated with targeted project/conversation
+    app.get("/api/companion/files", async (req, res) => {
+        try {
+            if (!adminDb) {
+                return res.json({ files: [] });
+            }
+            const projectId = req.query.projectId as string;
+            if (!projectId) return res.status(400).json({ error: "Missing projectId parameter" });
+
+            const filesCol = adminDb.collection("conversations").doc(projectId).collection("files");
+            const snap = await filesCol.get();
+
+            const serializeItem = (docObj: any) => {
+                const id = docObj.id;
+                const data = docObj.data();
+                const resObj: any = { id, ...data };
+                for (const key of Object.keys(resObj)) {
+                    const val = resObj[key];
+                    if (val && typeof val.toDate === "function") {
+                        resObj[key] = val.toDate().toISOString().replace(/\.\d{3}/, "");
+                    } else if (val && typeof val === "object" && val.seconds !== undefined) {
+                        resObj[key] = new Date(val.seconds * 1000).toISOString().replace(/\.\d{3}/, "");
+                    } else if (val instanceof Date) {
+                        resObj[key] = val.toISOString().replace(/\.\d{3}/, "");
+                    }
+                }
+                return resObj;
+            };
+
+            const list = snap.docs.map((d: any) => serializeItem(d));
+
+            // Sort in-memory by updatedAt descending
+            list.sort((a: any, b: any) => {
+                const tA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+                const tB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+                return tB - tA;
+            });
+
+            res.json({ files: list });
+        } catch (err: any) {
+            console.error("[COMPANION] get-files error:", err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // Save (create or update) file associated with targeted project
+    app.post("/api/companion/file/save", express.json(), async (req, res) => {
+        try {
+            const { projectId, fileId, file } = req.body;
+            if (!projectId || !file) {
+                return res.status(400).json({ error: "Missing required parameters (projectId, file)" });
+            }
+
+            const projectDocRef = adminDb.collection("conversations").doc(projectId);
+            const filesCol = projectDocRef.collection("files");
+            const now = new Date();
+
+            let targetFileId = fileId;
+            if (targetFileId) {
+                const fileDocRef = filesCol.doc(targetFileId);
+                await fileDocRef.set({
+                    ...file,
+                    updatedAt: now
+                }, { merge: true });
+                console.log(`[COMPANION] File ${targetFileId} updated in project ${projectId}`);
+            } else {
+                targetFileId = "file_" + Date.now();
+                const fileDocRef = filesCol.doc(targetFileId);
+                await fileDocRef.set({
+                    ...file,
+                    updatedAt: now
+                });
+                console.log(`[COMPANION] Created new file ${targetFileId} in project ${projectId}`);
+            }
+
+            // Update overall project modification date
+            await projectDocRef.set({ updatedAt: now }, { merge: true });
+
+            res.json({ success: true, id: targetFileId });
+        } catch (err: any) {
+            console.error("[COMPANION] save-file error:", err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // Pull all study materials/courses filtered optionally by owner's UID (or email resolved to UID)
+    app.get("/api/companion/study_materials", async (req, res) => {
+        try {
+            let uid = req.query.uid as string;
+            const email = req.query.email as string;
+
+            uid = await resolveUidFromEmailOrQuery(uid, email);
+            const targetUid = uid || "test_operator";
+
+            const itemsMap = new Map<string, any>();
+
+            // 1. Fetch from Supabase study_materials
+            try {
+                if (backendSupabase) {
+                    const { data, error } = await backendSupabase
+                        .from('study_materials')
+                        .select('*')
+                        .in('user_id', [targetUid, 'pi-user']);
+
+                    if (error) {
+                        console.warn("[COMPANION] Supabase study_materials query error:", error.message);
+                    } else if (data) {
+                        data.forEach((item: any) => {
+                            let extra = {};
+                            if (item.category === 'Course' && item.raw_text) {
+                                try {
+                                    extra = JSON.parse(item.raw_text);
+                                } catch (e) { }
+                            }
+                            const mapped = {
+                                id: item.id,
+                                title: item.title,
+                                author: item.author || 'AI Scholar',
+                                totalPages: item.total_pages || 1,
+                                category: item.category || 'Jupyter Notebook',
+                                coverColor: item.cover_color || 'from-indigo-950 via-[#0A0B0F] to-slate-900 border-indigo-500/20',
+                                mainContentStartPage: item.main_content_start_page || 1,
+                                isCustom: item.is_custom !== false,
+                                rawText: item.raw_text || '',
+                                notebookCells: item.notebook_cells || [],
+                                ...extra
+                            };
+                            itemsMap.set(mapped.id, mapped);
+                        });
+                    }
+                }
+            } catch (supaErr: any) {
+                console.warn("[COMPANION] Supabase fetch error:", supaErr.message);
+            }
+
+            // 1b. Fetch from Supabase courses
+            try {
+                if (backendSupabase) {
+                    const { data, error } = await backendSupabase
+                        .from('courses')
+                        .select('*')
+                        .in('user_id', [targetUid, 'pi-user']);
+
+                    if (error) {
+                        console.warn("[COMPANION] Supabase courses query warning (table may not exist yet):", error.message);
+                    } else if (data) {
+                        data.forEach((item: any) => {
+                            let extra = {};
+                            if (item.raw_text) {
+                                try {
+                                    extra = JSON.parse(item.raw_text);
+                                } catch (e) { }
+                            }
+                            const mapped = {
+                                id: item.id,
+                                title: item.title,
+                                author: item.author || 'AI Scholar',
+                                totalPages: item.total_pages || 1,
+                                category: 'Course',
+                                coverColor: item.cover_color || 'from-indigo-950 via-[#0A0B0F] to-slate-900 border-indigo-500/20',
+                                mainContentStartPage: item.main_content_start_page || 1,
+                                isCustom: item.is_custom !== false,
+                                rawText: item.raw_text || '',
+                                notebookCells: [],
+                                ...extra
+                            };
+                            itemsMap.set(mapped.id, mapped);
+                        });
+                    }
+                }
+            } catch (supaErr: any) {
+                console.warn("[COMPANION] Supabase courses fetch error:", supaErr.message);
+            }
+
+            // 2. Fetch from Firestore users/{uid}/study_materials
+            try {
+                if (adminDb && uid) {
+                    const snap = await adminDb.collection("users").doc(uid).collection("study_materials").get();
+                    snap.docs.forEach((d: any) => {
+                        const data = d.data();
+                        const mapped = {
+                            id: d.id,
+                            ...data
+                        };
+                        itemsMap.set(mapped.id, mapped);
+                    });
+                }
+            } catch (fireErr: any) {
+                console.warn("[COMPANION] Firestore fetch error:", fireErr.message);
+            }
+
+            res.json({ study_materials: Array.from(itemsMap.values()) });
+        } catch (err: any) {
+            console.error("[COMPANION] get study materials error:", err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // Save (create or update) study material/course
+    app.post("/api/companion/study_materials/save", express.json(), async (req, res) => {
+        try {
+            let uid = req.body.uid as string;
+            const email = req.body.email as string;
+            const material = req.body.material;
+
+            if (!material || !material.id) {
+                return res.status(400).json({ error: "Missing material payload or material.id" });
+            }
+
+            uid = await resolveUidFromEmailOrQuery(uid, email);
+            const targetUid = uid || "test_operator";
+
+            // Save to Supabase if backendSupabase is available
+            try {
+                if (backendSupabase) {
+                    const isCourse = material.category === 'Course';
+                    const serializedRawText = isCourse ? JSON.stringify({
+                        documentHtml: material.documentHtml || material.rawText,
+                        checklist: material.checklist,
+                        dailyLogs: material.dailyLogs,
+                        mindmapNodes: material.mindmapNodes,
+                        mindmapEdges: material.mindmapEdges
+                    }) : (material.rawText || '');
+
+                    if (isCourse) {
+                        const coursePayload = {
+                            id: material.id,
+                            user_id: targetUid,
+                            title: material.title,
+                            author: material.author || 'AI Scholar',
+                            total_pages: material.totalPages || 1,
+                            cover_color: material.coverColor || 'from-indigo-950 via-[#0A0B0F] to-slate-900 border-indigo-500/20',
+                            main_content_start_page: material.mainContentStartPage || 1,
+                            is_custom: material.isCustom !== false,
+                            raw_text: serializedRawText
+                        };
+
+                        const { error } = await backendSupabase
+                            .from('courses')
+                            .upsert(coursePayload);
+
+                        if (error) {
+                            console.warn("[COMPANION] Supabase courses upsert failed (falling back to study_materials):", error.message);
+                            // Fallback save to study_materials
+                            const fallbackPayload = {
+                                ...coursePayload,
+                                category: 'Course',
+                                notebook_cells: []
+                            };
+                            const { error: fallbackError } = await backendSupabase
+                                .from('study_materials')
+                                .upsert(fallbackPayload);
+                            if (fallbackError) {
+                                console.warn("[COMPANION] Supabase study_materials fallback upsert also failed:", fallbackError.message);
+                            }
+                        }
+                    } else {
+                        const payload = {
+                            id: material.id,
+                            user_id: targetUid,
+                            title: material.title,
+                            author: material.author || 'AI Scholar',
+                            total_pages: material.totalPages || 1,
+                            category: material.category || 'Jupyter Notebook',
+                            cover_color: material.coverColor || 'from-indigo-950 via-[#0A0B0F] to-slate-900 border-indigo-500/20',
+                            main_content_start_page: material.mainContentStartPage || 1,
+                            is_custom: material.isCustom !== false,
+                            raw_text: serializedRawText,
+                            notebook_cells: material.notebook_cells || []
+                        };
+
+                        const { error } = await backendSupabase
+                            .from('study_materials')
+                            .upsert(payload);
+
+                        if (error) console.warn("[COMPANION] Supabase upsert error:", error.message);
+                    }
+                }
+            } catch (supaErr: any) {
+                console.warn("[COMPANION] Supabase save error:", supaErr.message);
+            }
+
+            // Save to Firestore
+            try {
+                if (adminDb && uid) {
+                    await adminDb.collection("users").doc(uid).collection("study_materials").doc(material.id).set(material, { merge: true });
+                }
+            } catch (fireErr: any) {
+                console.warn("[COMPANION] Firestore save error:", fireErr.message);
+            }
+
+            res.json({ success: true, id: material.id });
+        } catch (err: any) {
+            console.error("[COMPANION] save study material error:", err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // Delete study material/course
+    app.post("/api/companion/study_materials/delete", express.json(), async (req, res) => {
+        try {
+            let uid = req.body.uid as string;
+            const email = req.body.email as string;
+            const { id } = req.body;
+
+            if (!id) return res.status(400).json({ error: "Missing material id" });
+
+            uid = await resolveUidFromEmailOrQuery(uid, email);
+
+            try {
+                if (backendSupabase) {
+                    // Delete from courses table if it exists
+                    const { error: errCourses } = await backendSupabase
+                        .from('courses')
+                        .delete()
+                        .eq('id', id);
+                    if (errCourses) {
+                        console.warn("[COMPANION] Supabase courses delete warning:", errCourses.message);
+                    }
+
+                    // Delete from study_materials table
+                    const { error: errMaterials } = await backendSupabase
+                        .from('study_materials')
+                        .delete()
+                        .eq('id', id);
+                    if (errMaterials) {
+                        console.warn("[COMPANION] Supabase study_materials delete warning:", errMaterials.message);
+                    }
+                }
+            } catch (supaErr: any) {
+                console.warn("[COMPANION] Supabase delete exception:", supaErr.message);
+            }
+
+            try {
+                if (adminDb && uid) {
+                    await adminDb.collection("users").doc(uid).collection("study_materials").doc(id).delete();
+                }
+            } catch (fireErr: any) {
+                console.warn("[COMPANION] Firestore delete error:", fireErr.message);
+            }
+
+            res.json({ success: true });
+        } catch (err: any) {
+            console.error("[COMPANION] delete study material error:", err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    function determineAutoToolModeOnServer(prompt: string): 'search' | 'research' | 'convo' {
+        const text = prompt.toLowerCase().trim();
+
+        const convoKeywords = [
+            "hi", "hello", "hey", "greetings", "how are you", "who are you", "who made you", "your name",
+            "tell a joke", "write a joke", "say hello", "thank you", "thanks", "awesome", "perfect",
+            "sing a song", "write a short poem", "chat with me", "yo"
+        ];
+
+        const researchKeywords = [
+            "research", "report", "deep dive", "detailed analysis", "comprehensive analysis",
+            "investigate", "compare", "comparative study", "summarize the literature",
+            "rigorous", "whitepaper", "market analysis", "financial breakdown"
+        ];
+
+        const searchKeywords = [
+            "weather", "forecast", "news", "current status", "traffic", "price today",
+            "scores", "who won", "latest", "stock price", "bitcoin price", "now", "today", "yesterday",
+            "flight status", "what is happening", "oil prices", "trends", "search", "google", "lookup"
+        ];
+
+        const skipSearchKeywords = [
+            "play", "spotify", "track", "song", "music", "pause", "resume", "volume", "playlist", "queue", "next track", "skip",
+            "email", "gmail", "inbox", "send to", "mail", "draft", "calendar", "schedule", "event", "appt", "appointment",
+            "spreadsheet", "sheet", "slides", "presentation", "deck", "powerpoint", "google doc",
+            "build", "create project", "develop", "code", "file", "index.html", "script", "function", "calculator", "applet", "program", "python", "javascript", "typescript", "write", "edit", "debug", "compile"
+        ];
+
+        const infoKeywords = [
+            "who", "what", "where", "why", "when", "how", "explain", "describe", "tell me about",
+            "versus", "vs", "difference between", "status of", "current", "which", "compare",
+            "is", "are", "does", "did", "do", "can", "could", "should", "would", "any", "recommend",
+            "best", "top", "list", "ratings", "reviews"
+        ];
+
+        const representsQuestion = text.includes('?') ||
+            text.startsWith('why ') || text.startsWith('how ') || text.startsWith('what ') ||
+            text.startsWith('who ') || text.startsWith('where ') || text.startsWith('when ') ||
+            text.startsWith('which ') || text.startsWith('compare ') || text.startsWith('is ') ||
+            text.startsWith('are ') || text.startsWith('does ') || text.startsWith('did ') ||
+            text.startsWith('can ') || text.startsWith('could ') || text.startsWith('should ') ||
+            text.startsWith('would ') || text.startsWith('tell me about ');
+
+        if (researchKeywords.some(kw => text.includes(kw))) {
+            return 'research';
+        }
+
+        if (skipSearchKeywords.some(kw => text.includes(kw))) {
+            return 'convo';
+        }
+
+        if (searchKeywords.some(kw => text.includes(kw)) || infoKeywords.some(kw => text.includes(kw)) || representsQuestion) {
+            return 'search';
+        }
+
+        if (convoKeywords.some(kw => text === kw || text.startsWith(kw + " ") || text.endsWith(" " + kw) || text.length < 15)) {
+            return 'convo';
+        }
+
+        return 'convo';
+    }
+
+    // Record an execution step from the background macOS agent directly to the conversation chat stream
+    app.post("/api/companion/agent/step", express.json(), async (req, res) => {
+        try {
+            const { conversationId, content, role } = req.body;
+            if (!conversationId || !content) {
+                return res.status(400).json({ error: "Missing required parameters (conversationId, content)" });
+            }
+
+            const messagesCol = adminDb.collection("conversations").doc(conversationId).collection("messages");
+            const msgId = "msg_a_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
+
+            await messagesCol.doc(msgId).set({
+                conversationId,
+                content,
+                role: role || "model",
+                createdAt: new Date()
+            });
+
+            res.json({ success: true, id: msgId });
+        } catch (error: any) {
+            res.status(500).json({ error: error.message || "Failed to log companion agent step" });
+        }
+    });
+
+    // Dispatch a message, append to Firestore database, trigger Gemini, save response back to Firestore
+    app.post("/api/companion/message", express.json(), async (req, res) => {
+        try {
+            let { conversationId, uid, content, email } = req.body;
+            if (!conversationId || !content) {
+                return res.status(400).json({ error: "Missing required parameters (conversationId, content)" });
+            }
+
+            uid = await resolveUidFromEmailOrQuery(uid, email);
+
+            const userMsgId = "msg_u_" + Date.now();
+            const messagesCol = adminDb.collection("conversations").doc(conversationId).collection("messages");
+
+            // 1. Add user message
+            await messagesCol.doc(userMsgId).set({
+                conversationId,
+                content,
+                role: "user",
+                createdAt: new Date(),
+                userId: uid || "test_operator",
+                email: email || ""
+            });
+
+            // 2. Load recent conversation message stream to build full prompt context for Gemini
+            const snap = await messagesCol.get();
+            const list = snap.docs.map((d: any) => {
+                const data = d.data();
+                return {
+                    id: d.id,
+                    ...data,
+                    createdAtTime: data.createdAt && typeof data.createdAt.toDate === "function" ? data.createdAt.toDate().getTime() : (data.createdAt instanceof Date ? data.createdAt.getTime() : 0)
+                };
+            });
+
+            list.sort((a: any, b: any) => a.createdAtTime - b.createdAtTime);
+            // Limit context window to last 15 messages
+            const recentMessages = list.slice(-15);
+
+            const contents = recentMessages.map((m: any) => ({
+                role: m.role === "model" ? "model" : "user",
+                parts: [{ text: m.content }]
+            }));
+
+            // 3. Query the latest real-time macOS companion diagnostics and permissions from Firestore
+            let companionStatusText = "No companion device diagnostics received yet. The macOS companion is likely OFFLINE.";
+            let hasAccessibility = false;
+            let hasScreenshots = false;
+            let isConnected = false;
+            let installedAppsList: string[] = ["Safari", "Music", "Notes", "Terminal", "Calculator", "Finder", "Spotify"];
+            let osVersion = "macOS (Unknown)";
+            let modelIdentifier = "Mac Device";
+
+            try {
+                const diagDoc = await adminDb.collection("system_state").doc("hardware_diagnostics").get();
+                if (diagDoc.exists) {
+                    const dData = diagDoc.data();
+                    const lastReportTime = dData.timestamp ? new Date(dData.timestamp).getTime() : 0;
+                    // Stale check: let's say 2 minutes
+                    const isRecent = (Date.now() - lastReportTime) < 120000;
+                    isConnected = isRecent;
+                    hasAccessibility = !!dData.accessibility;
+                    hasScreenshots = !!dData.screenshots;
+                    if (Array.isArray(dData.installedApps) && dData.installedApps.length > 0) {
+                        installedAppsList = dData.installedApps;
+                    }
+                    if (dData.osVersion) osVersion = dData.osVersion;
+                    if (dData.modelIdentifier) modelIdentifier = dData.modelIdentifier;
+
+                    companionStatusText = `macOS Companion status: ${isRecent ? "ONLINE" : "OFFLINE / DISCONNECTED"}.\n` +
+                        `Physical Hardware: ${modelIdentifier}, OS: ${osVersion}.\n` +
+                        `System Permissions: Accessibility=${hasAccessibility ? "GRANTED" : "DENIED"}, ScreenCapture=${hasScreenshots ? "GRANTED" : "DENIED"}.\n` +
+                        `Installed Applications List: ${installedAppsList.join(", ")}.`;
+                }
+            } catch (err: any) {
+                console.warn("[COMPANION] Could not read hardware diagnostics for Gemini system prompt:", err.message);
+            }
+
+            // Determine Server toolMode and system instructions
+            const toolMode = determineAutoToolModeOnServer(content);
+
+            let baseInstruction = "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.\n\n" +
+                "CRITICAL CREDIBILITY & HONESTY MANDATE:\n" +
+                "1. You are running on a server connected to a local physical macOS companion app via Firestore. Here is the CURRENT REAL-TIME STATUS of the user's physical machine:\n" +
+                "-------------------------------\n" +
+                companionStatusText + "\n" +
+                "-------------------------------\n" +
+                "2. NEVER fake or simulate executing local physical system actions (like creating notes, writing text, clicking icons, or analyzing screen captures) if they are physically impossible. If the macOS companion is OFFLINE, you MUST tell the user honestly that they need to open the Unison Desktop app on their Mac first.\n" +
+                "3. If System Permissions are DENIED (Accessibility or ScreenCapture), you MUST honestly explain that you cannot perform the computer-use action or analyze the screen because the companion lacks permissions. Instruct the user to click 'Allow' in the macOS System Settings or via the companion UI.\n" +
+                "4. If the companion is ONLINE and permissions are GRANTED, you may initiate system actions using the tags below.\n" +
+                "5. APPLICATION AWARENESS: Before agreeing to open, launch, or interact with any application, verify if it is in the 'Installed Applications List' above. If it is NOT in the list, you MUST honestly tell the user: 'That application is not detected in your macOS Applications folder.' Offer to launch a substitute (e.g. Safari instead of Chrome) or try anyway, rather than falsely promising a successful launch.\n\n" +
+                "SYSTEM_ACTION RULE:\n" +
+                "1. If the companion is ONLINE and the user asks you to open or launch an application, you MUST append the exact tag: `[SYSTEM_ACTION: launchApp=\"AppName\"]` to the end of your response, where AppName is the standard name from the Installed Applications List (e.g. 'Spotify', 'Safari', 'Notes', 'Terminal', 'Music', 'Calculator', 'Finder', 'System Settings'). Only append this if the companion is ONLINE. Do not make up apps, only launch real ones.\n" +
+                "2. If the user asks you to perform a complex, interactive desktop task (e.g., 'open Notes and note something', 'create a note containing X', 'search for artist X in Spotify', 'type X in Terminal', or any task requiring clicking or typing), you MUST append the exact tag: `[SYSTEM_ACTION: startAgent=\"Objective\"]` to the end of your response, where Objective is a precise, clear natural language instruction for the local Computer Use agent (e.g., 'Open Notes application, click the new note button, and type...'). This will automatically trigger the local native Computer Use agent to take control of the mouse and keyboard and execute the task on their screen in real-time.";
+
+            let systemInstruction = baseInstruction;
+            let tools: any[] | undefined = undefined;
+            let toolConfig: any | undefined = undefined;
+
+            if (toolMode === 'research') {
+                systemInstruction = baseInstruction + "\n\nCRITICAL RESEARCH MODE ACTIVATED: The user expects an exceptionally detailed, highly structured, multi-section research report. Synthesize your answer step-by-step using actual facts from Google Search Grounding. Structure the reply with clear headings: 'Executive Summary', 'Detailed Fact Finding & Analysis', 'Critical Recommendations', and 'Next Steps/Follow-ups'. \n\nCRITICAL MULTI-SOURCE HYPERLINKING RULE: You MUST cite EVERY single line, statement, fact, or bullet point that is derived from search results individually at the end of that specific sentence with its standard citation token (e.g. '[1]' or '[2]'). Do NOT leave lines/points containing grounded search facts without their respective citation tag at the absolute end of that line or sentence. At the absolute end, you MUST append a valid web reference block using the exact syntax: [SOURCES: [{\"title\": \"Source Page Title\", \"siteName\": \"domain.com\", \"url\": \"https://domain.com/page\", \"snippet\": \"relevant quote\", \"linesUsed\": [\"Exact sentence in your response that used it\"]}]] and provide high-quality follow-up questions in the exact format: [FOLLOW_UPS: [\"question 1\", \"question 2\", \"question 3\"]].";
+                tools = [{ googleSearch: {} }];
+            } else if (toolMode === 'search') {
+                systemInstruction = baseInstruction + "\n\nCRITICAL SEARCH MODE ACTIVATED: The user expects high-quality Google Search grounded information. Always use standard citations immediately after periods (e.g., [1], [2]). \n\nCRITICAL MULTI-SOURCE HYPERLINKING RULE: You MUST cite EVERY single statement, fact, bullet point, or individual line that is derived from search results at the end of that specific line/sentence with its respective citation token (e.g. '[1]' or '[2]'). Do NOT leave lines/points containing grounded search facts without their respective citation tag. At the absolute end of your response, you MUST provide 3 interactive follow-up questions using the exact tag syntax: [FOLLOW_UPS: [\"Follow-up Q1\", \"Follow-up Q2\", \"Follow-up Q3\"]]. If you cited any websites, append a valid [SOURCES: ...] tag matching the format of research mode.";
+                tools = [{ googleSearch: {} }];
+            }
+
+            // 4. Trigger Gemini
+            console.log(`[COMPANION] ${toolMode.toUpperCase()} mode resolved. Invoking Gemini response for companion client...`);
+            let geminiReply = "Offline simulation fallback.";
+            let detectedSources: any[] = [];
+
+            try {
+                const payload: any = {
+                    model: "gemini-3.5-flash",
+                    contents: contents,
+                    config: {
+                        systemInstruction,
+                        temperature: 0.7
+                    }
+                };
+
+                if (tools) payload.config.tools = tools;
+                if (toolConfig) payload.config.toolConfig = toolConfig;
+
+                const geminiRes = await generateContentWithFallback(payload);
+
+                let textResult = "";
+                if (geminiRes && typeof geminiRes.text === 'string') {
+                    textResult = geminiRes.text;
+                } else if (geminiRes && geminiRes.candidates && geminiRes.candidates[0]?.content?.parts?.[0]?.text) {
+                    textResult = geminiRes.candidates[0].content.parts[0].text;
+                } else if (geminiRes && typeof geminiRes.text === 'function') {
+                    textResult = await geminiRes.text();
+                } else {
+                    textResult = JSON.stringify(geminiRes);
+                }
+                geminiReply = textResult;
+
+                try {
+                    const firstCandidate = geminiRes.candidates?.[0];
+                    if (firstCandidate && firstCandidate.groundingMetadata) {
+                        const meta = firstCandidate.groundingMetadata;
+                        const chunks = meta.groundingChunks || [];
+                        for (const c of chunks) {
+                            if (c.web) {
+                                const url = c.web.uri || c.web.url || '';
+                                const title = c.web.title || 'Source';
+                                if (url && !detectedSources.some(s => s.url === url)) {
+                                    detectedSources.push({
+                                        title: title,
+                                        url: url,
+                                        siteName: url.split('/')[2]?.replace('www.', '') || 'Web',
+                                        snippet: c.web.snippet || '',
+                                        linesUsed: []
+                                    });
+                                }
+                            }
+                        }
+                        const supports = meta.groundingSupports || [];
+                        for (const s of supports) {
+                            const segmentText = s.segment?.text || '';
+                            if (segmentText && s.groundingChunkIndices) {
+                                for (const chunkIdx of s.groundingChunkIndices) {
+                                    const chunk = chunks[chunkIdx];
+                                    if (chunk && chunk.web) {
+                                        const url = chunk.web.uri || chunk.web.url || '';
+                                        if (url) {
+                                            const existingSource = detectedSources.find(src => src.url === url);
+                                            if (existingSource) {
+                                                if (!existingSource.linesUsed) existingSource.linesUsed = [];
+                                                if (!existingSource.linesUsed.includes(segmentText)) {
+                                                    existingSource.linesUsed.push(segmentText);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (groundingErr) {
+                    console.error("[COMPANION] Grounding metadata parse failed:", groundingErr);
+                }
+
+                if (detectedSources.length > 0) {
+                    console.log(`[COMPANION] Parsed ${detectedSources.length} grounded web sources. Inserting SOURCES indexing metadata...`);
+                    geminiReply += `\n\n[SOURCES: ${JSON.stringify(detectedSources)}]`;
+                }
+            } catch (geminiError: any) {
+                console.error("[COMPANION] Gemini generation failed:", geminiError);
+                geminiReply = `System error on Gemini routing layer: ${geminiError.message || String(geminiError)}`;
+            }
+
+            // 5. Save Gemini response
+            const modelMsgId = "msg_m_" + Date.now();
+            await messagesCol.doc(modelMsgId).set({
+                conversationId,
+                content: geminiReply,
+                role: "model",
+                createdAt: new Date(),
+                userId: "unison_core"
+            });
+
+            // 6. Update convo updatedAt timestamp
+            const convoDocRef = adminDb.collection("conversations").doc(conversationId);
+            await convoDocRef.set({
+                updatedAt: new Date()
+            }, { merge: true });
+
+            res.json({ success: true, response: geminiReply });
+        } catch (err: any) {
+            console.error("[COMPANION] post-message error:", err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // Dynamic Server-Driven UI layout definition for Companion applications
+    app.get("/api/companion/layout", (req, res) => {
+        res.json({
+            accentColor: "cyan",
+            systemStatus: "ONLINE",
+            tabs: [
+                { title: "Chat Workspace", icon: "bubble.left", viewType: "chat", badge: null },
+                { title: "System Hub", icon: "globe", viewType: "system_hub", badge: "Core" },
+                { title: "Directory Tree", icon: "folder.badge.gearshape", viewType: "directory", badge: null },
+                { title: "Developer Shell", icon: "terminal", viewType: "terminal", badge: "Dev" },
+                { title: "Titan Vision Studio", icon: "viewfinder.circle.fill", viewType: "titan_suite", badge: "Vision" }
+            ]
+        });
+    });
+
+    let firestoreAdminInstance: any = null;
+    async function getServerFirestore() {
+        if (!firestoreAdminInstance) {
+            const adminModule = await import("firebase-admin");
+            const admin = adminModule.default || adminModule;
+            const apps = admin.apps || (admin as any).getApps?.() || [];
+            if (apps.length === 0) {
+                try {
+                    const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+                    if (fs.existsSync(configPath)) {
+                        const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+                        const initOptions: any = {
+                            projectId: config.projectId,
+                            databaseURL: config.firestoreDatabaseId ? `https://${config.projectId}.firebaseio.com` : undefined
+                        };
+                        admin.initializeApp(initOptions);
+                    } else {
+                        admin.initializeApp();
+                    }
+                    console.log("[FIREBASE] Admin SDK initialized successfully in lazy loader");
+                } catch (err: any) {
+                    console.error("[FIREBASE] Error initializing Admin SDK:", err.message);
+                }
+            }
+
+            const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+            if (fs.existsSync(configPath)) {
+                const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+                if (config.firestoreDatabaseId) {
+                    try {
+                        // Check if admin.firestore takes a databaseId parameter or options
+                        firestoreAdminInstance = admin.firestore();
+                        // In modern firebase-admin, you specify databaseId at initializeApp or pass it to firestore() or if not supported, fall back
+                        if (typeof (admin.firestore as any).databaseId === "string" || config.firestoreDatabaseId) {
+                            try {
+                                firestoreAdminInstance = (admin as any).firestore(config.firestoreDatabaseId);
+                            } catch (e) {
+                                firestoreAdminInstance = admin.firestore();
+                            }
+                        }
+                    } catch (err) {
+                        firestoreAdminInstance = admin.firestore();
+                    }
+                } else {
+                    firestoreAdminInstance = admin.firestore();
+                }
+            } else {
                 firestoreAdminInstance = admin.firestore();
-              }
             }
-          } catch (err) {
-            firestoreAdminInstance = admin.firestore();
-          }
-        } else {
-          firestoreAdminInstance = admin.firestore();
         }
-      } else {
-        firestoreAdminInstance = admin.firestore();
-      }
-    }
-    return firestoreAdminInstance;
-  }
-
-  app.get("/api/companion/permissions", async (req, res) => {
-    try {
-      const db = await getServerFirestore();
-      const docRef = db.collection("system_state").doc("computer_use_permissions");
-      const docSnap = await docRef.get();
-      if (docSnap.exists) {
-        res.json(docSnap.data());
-      } else {
-        res.json({ accessibility: false, screenshots: false });
-      }
-    } catch (err: any) {
-      console.error("[COMPANION] Error fetching permissions via GET:", err.message);
-      res.json({ accessibility: false, screenshots: false });
-    }
-  });
-
-  app.post("/api/companion/permissions", express.json(), async (req, res) => {
-    const { accessibility, screenshots } = req.body;
-    try {
-      const db = await getServerFirestore();
-      const docRef = db.collection("system_state").doc("computer_use_permissions");
-      const next = {
-        accessibility: typeof accessibility === "boolean" ? accessibility : false,
-        screenshots: typeof screenshots === "boolean" ? screenshots : false
-      };
-      await docRef.set(next, { merge: true });
-      res.json(next);
-    } catch (err: any) {
-      console.error("[COMPANION] Error saving permissions via POST:", err.message);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.get("/api/companion/permissions/stream", async (req, res) => {
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    if (typeof (res as any).flushHeaders === "function") {
-      (res as any).flushHeaders();
+        return firestoreAdminInstance;
     }
 
-    console.log("[COMPANION] Live permissions stream established.");
-
-    let unsub: (() => void) | null = null;
-    try {
-      const db = await getServerFirestore();
-      const docRef = db.collection("system_state").doc("computer_use_permissions");
-      
-      unsub = docRef.onSnapshot((docSnap: any) => {
-        const data = docSnap.exists ? docSnap.data() : { accessibility: false, screenshots: false };
-        const payload = {
-          accessibility: !!data.accessibility,
-          screenshots: !!data.screenshots
-        };
-        res.write(`data: ${JSON.stringify(payload)}\n\n`);
-      }, (err: any) => {
-        console.error("[COMPANION] onSnapshot error in stream:", err.message);
-      });
-    } catch (e: any) {
-      console.error("[COMPANION] Failed to setup onSnapshot permissions stream:", e.message);
-      res.write(`data: ${JSON.stringify({ accessibility: false, screenshots: false })}\n\n`);
-    }
-
-    req.on("close", () => {
-      console.log("[COMPANION] Live permissions stream closed.");
-      if (unsub) unsub();
-    });
-  });
-
-  app.get("/api/companion/diagnostics", async (req, res) => {
-    try {
-      const db = await getServerFirestore();
-      const docRef = db.collection("system_state").doc("hardware_diagnostics");
-      const docSnap = await docRef.get();
-      if (docSnap.exists) {
-        res.json(docSnap.data());
-      } else {
-        res.json({
-          accessibility: false,
-          screenshots: false,
-          osVersion: "macOS (Pending Connection)",
-          cpuCores: 0,
-          physicalMemoryGB: 0.0,
-          uptimeSeconds: 0.0,
-          isSandboxed: false,
-          bundleId: "com.unison.unison-os",
-          timestamp: new Date().toISOString(),
-          modelIdentifier: "Mac Device"
-        });
-      }
-    } catch (err: any) {
-      console.error("[COMPANION] Error fetching hardware diagnostics:", err.message);
-      res.json({ accessibility: false, screenshots: false, error: err.message });
-    }
-  });
-
-  app.post("/api/companion/diagnostics", express.json(), async (req, res) => {
-    try {
-      const report = req.body;
-      const db = await getServerFirestore();
-      const docRef = db.collection("system_state").doc("hardware_diagnostics");
-      await docRef.set(report, { merge: true });
-      res.json({ success: true, report });
-    } catch (err: any) {
-      console.error("[COMPANION] Error saving hardware diagnostics via POST:", err.message);
-      res.status(500).json({ error: err.message });
-    }
-  });
-  // --- END COMPANION INTERCEPT ROUTING ---
-
-  // Dedicated proxy route for local/remote Raspberry Pi Daemons
-  app.post("/api/pi-agent/execute", express.json(), async (req, res) => {
-    try {
-      const { prompt, systemInstruction, tools } = req.body;
-      console.log(`[PI_AGENT_PROXY] Handling task dispatch from Pi Daemon. Prompt: "${prompt}"`);
-      
-      const response = await generateContentWithFallback({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          systemInstruction: systemInstruction,
-          tools: tools,
-          temperature: 0.2
-        }
-      });
-      
-      let candidates: any[] = [];
-      if (response && response.candidates && response.candidates.length > 0) {
-        candidates = response.candidates;
-      } else if (response) {
-        const functionCalls = response.functionCalls || [];
-        const parts: any[] = [];
-        if (functionCalls.length > 0) {
-          parts.push({
-            functionCall: {
-              name: functionCalls[0].name,
-              args: functionCalls[0].args
+    app.get("/api/companion/permissions", async (req, res) => {
+        console.warn("[COMPANION] GET /api/companion/permissions is DEPRECATED. Handled natively on macOS client via TCC APIs.");
+        try {
+            const db = await getServerFirestore();
+            const docRef = db.collection("system_state").doc("computer_use_permissions");
+            const docSnap = await docRef.get();
+            if (docSnap.exists) {
+                res.json({ ...docSnap.data(), deprecated: true });
+            } else {
+                res.json({ accessibility: false, screenshots: false, deprecated: true });
             }
-          });
+        } catch (err: any) {
+            console.error("[COMPANION] Error fetching permissions via GET:", err.message);
+            res.json({ accessibility: false, screenshots: false, deprecated: true });
+        }
+    });
+
+    app.post("/api/companion/permissions", express.json(), async (req, res) => {
+        console.warn("[COMPANION] POST /api/companion/permissions is DEPRECATED. Handled natively on macOS client via TCC APIs.");
+        const { accessibility, screenshots } = req.body;
+        try {
+            const db = await getServerFirestore();
+            const docRef = db.collection("system_state").doc("computer_use_permissions");
+            const next = {
+                accessibility: typeof accessibility === "boolean" ? accessibility : false,
+                screenshots: typeof screenshots === "boolean" ? screenshots : false,
+                deprecated: true
+            };
+            await docRef.set(next, { merge: true });
+            res.json(next);
+        } catch (err: any) {
+            console.error("[COMPANION] Error saving permissions via POST:", err.message);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    app.get("/api/companion/permissions/stream", async (req, res) => {
+        console.warn("[COMPANION] GET /api/companion/permissions/stream is DEPRECATED. Handled natively on macOS client via TCC APIs.");
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+        if (typeof (res as any).flushHeaders === "function") {
+            (res as any).flushHeaders();
+        }
+
+        console.log("[COMPANION] Live permissions stream established (DEPRECATED).");
+
+        let unsub: (() => void) | null = null;
+        try {
+            const db = await getServerFirestore();
+            const docRef = db.collection("system_state").doc("computer_use_permissions");
+
+            unsub = docRef.onSnapshot((docSnap: any) => {
+                const data = docSnap.exists ? docSnap.data() : { accessibility: false, screenshots: false };
+                const payload = {
+                    accessibility: !!data.accessibility,
+                    screenshots: !!data.screenshots,
+                    deprecated: true
+                };
+                res.write(`data: ${JSON.stringify(payload)}\n\n`);
+            }, (err: any) => {
+                console.error("[COMPANION] onSnapshot error in stream:", err.message);
+            });
+        } catch (e: any) {
+            console.error("[COMPANION] Failed to setup onSnapshot permissions stream:", e.message);
+            res.write(`data: ${JSON.stringify({ accessibility: false, screenshots: false, deprecated: true })}\n\n`);
+        }
+
+        req.on("close", () => {
+            console.log("[COMPANION] Live permissions stream closed.");
+            if (unsub) unsub();
+        });
+    });
+
+    app.get("/api/companion/diagnostics", async (req, res) => {
+        try {
+            const db = await getServerFirestore();
+            const docRef = db.collection("system_state").doc("hardware_diagnostics");
+            const docSnap = await docRef.get();
+            if (docSnap.exists) {
+                res.json(docSnap.data());
+            } else {
+                res.json({
+                    accessibility: false,
+                    screenshots: false,
+                    osVersion: "macOS (Pending Connection)",
+                    cpuCores: 0,
+                    physicalMemoryGB: 0.0,
+                    uptimeSeconds: 0.0,
+                    isSandboxed: false,
+                    bundleId: "com.unison.unison-os",
+                    timestamp: new Date().toISOString(),
+                    modelIdentifier: "Mac Device"
+                });
+            }
+        } catch (err: any) {
+            console.error("[COMPANION] Error fetching hardware diagnostics:", err.message);
+            res.json({ accessibility: false, screenshots: false, error: err.message });
+        }
+    });
+
+    app.post("/api/companion/diagnostics", express.json(), async (req, res) => {
+        try {
+            const report = req.body;
+            const db = await getServerFirestore();
+            const docRef = db.collection("system_state").doc("hardware_diagnostics");
+            await docRef.set(report, { merge: true });
+            res.json({ success: true, report });
+        } catch (err: any) {
+            console.error("[COMPANION] Error saving hardware diagnostics via POST:", err.message);
+            res.status(500).json({ error: err.message });
+        }
+    });
+    // --- END COMPANION INTERCEPT ROUTING ---
+
+    // Dedicated proxy route for local/remote Raspberry Pi Daemons
+    app.post("/api/pi-agent/execute", express.json(), async (req, res) => {
+        try {
+            const { prompt, systemInstruction, tools } = req.body;
+            console.log(`[PI_AGENT_PROXY] Handling task dispatch from Pi Daemon. Prompt: "${prompt}"`);
+
+            const response = await generateContentWithFallback({
+                model: "gemini-3.5-flash",
+                contents: prompt,
+                config: {
+                    systemInstruction: systemInstruction,
+                    tools: tools,
+                    temperature: 0.2
+                }
+            });
+
+            let candidates: any[] = [];
+            if (response && response.candidates && response.candidates.length > 0) {
+                candidates = response.candidates;
+            } else if (response) {
+                const functionCalls = response.functionCalls || [];
+                const parts: any[] = [];
+                if (functionCalls.length > 0) {
+                    parts.push({
+                        functionCall: {
+                            name: functionCalls[0].name,
+                            args: functionCalls[0].args
+                        }
+                    });
+                } else {
+                    parts.push({ text: response.text || "No content generated." });
+                }
+                candidates = [{
+                    content: {
+                        parts: parts
+                    }
+                }];
+            }
+
+            res.json({ candidates });
+        } catch (err: any) {
+            console.error("[PI_AGENT_PROXY] Error proxying Pi Daemon task:", err);
+            res.status(500).json({ error: err.message || String(err) });
+        }
+    });
+
+    // Workspace Physical File Synchronization APIs
+    app.post("/api/sync-file", (req, res) => {
+        const { path: filePath, content } = req.body;
+        if (!filePath) {
+            return res.status(400).json({ error: "Missing path" });
+        }
+        try {
+            const cleanPath = filePath.replace(/^\.\//, '').replace(/^\//, '').trim();
+            const fullPath = path.join(process.cwd(), cleanPath);
+
+            const dirPath = path.dirname(fullPath);
+            if (!fs.existsSync(dirPath)) {
+                fs.mkdirSync(dirPath, { recursive: true });
+            }
+
+            fs.writeFileSync(fullPath, content);
+            console.log(`[Workspace FS Dynamic Sync] Synced file: ${cleanPath}`);
+            res.json({ success: true, path: cleanPath });
+        } catch (err: any) {
+            console.error("[Workspace FS Dynamic Sync] Error writing file:", err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    app.post("/api/delete-file", (req, res) => {
+        const { path: filePath } = req.body;
+        if (!filePath) {
+            return res.status(400).json({ error: "Missing path" });
+        }
+        try {
+            const cleanPath = filePath.replace(/^\.\//, '').replace(/^\//, '').trim();
+            const fullPath = path.join(process.cwd(), cleanPath);
+            if (fs.existsSync(fullPath)) {
+                fs.unlinkSync(fullPath);
+                console.log(`[Workspace FS Dynamic Sync] Deleted file: ${cleanPath}`);
+            }
+            res.json({ success: true, path: cleanPath });
+        } catch (err: any) {
+            console.error("[Workspace FS Dynamic Sync] Error deleting file:", err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    app.post("/api/compile", (req, res) => {
+        console.log("[Compiler] Real-time compiler check triggered.");
+        const start = Date.now();
+        exec("npx tsc --noEmit", (err, stdout, stderr) => {
+            const elapsed = Date.now() - start;
+            if (err) {
+                res.json({
+                    success: false,
+                    elapsed,
+                    stdout: stdout || "",
+                    stderr: stderr || "",
+                    error: err.message
+                });
+            } else {
+                res.json({
+                    success: true,
+                    elapsed,
+                    stdout: stdout || "Workspace compiled successfully with 0 violations."
+                });
+            }
+        });
+    });
+
+    // Dedicated Streaming Native Code Sandboxing Execution Engine
+    app.post("/api/sandbox/run-stream", express.json(), (req, res) => {
+        const { code, language } = req.body;
+        if (!code) {
+            return res.status(400).json({ error: "No code provided for execution." });
+        }
+
+        const sandboxDir = path.join(process.cwd(), "playground_sandbox");
+        if (!fs.existsSync(sandboxDir)) {
+            try {
+                fs.mkdirSync(sandboxDir, { recursive: true });
+            } catch (e: any) {
+                return res.status(500).json({ error: `Failed to create sandbox: ${e.message}` });
+            }
+        }
+
+        let filename = "";
+        let cmd = "";
+        let args: string[] = [];
+
+        if (language === "python" || language === "python3") {
+            filename = `sandbox_${Date.now()}.py`;
+            cmd = "python3";
+            args = ["-u", path.join(sandboxDir, filename)];
+        } else if (language === "javascript" || language === "javascript-node" || language === "node") {
+            filename = `sandbox_${Date.now()}.js`;
+            cmd = "node";
+            args = [path.join(sandboxDir, filename)];
+        } else if (language === "typescript" || language === "typescript-node" || language === "ts") {
+            filename = `sandbox_${Date.now()}.ts`;
+            cmd = "npx";
+            args = ["tsx", path.join(sandboxDir, filename)];
         } else {
-          parts.push({ text: response.text || "No content generated." });
+            return res.status(400).json({ error: `Unsupported sandboxed language for streaming: ${language}` });
         }
-        candidates = [{
-          content: {
-            parts: parts
-          }
-        }];
-      }
-      
-      res.json({ candidates });
-    } catch (err: any) {
-      console.error("[PI_AGENT_PROXY] Error proxying Pi Daemon task:", err);
-      res.status(500).json({ error: err.message || String(err) });
-    }
-  });
 
-  // Workspace Physical File Synchronization APIs
-  app.post("/api/sync-file", (req, res) => {
-    const { path: filePath, content } = req.body;
-    if (!filePath) {
-      return res.status(400).json({ error: "Missing path" });
-    }
-    try {
-      const cleanPath = filePath.replace(/^\.\//, '').replace(/^\//, '').trim();
-      const fullPath = path.join(process.cwd(), cleanPath);
-      
-      const dirPath = path.dirname(fullPath);
-      if (!fs.existsSync(dirPath)) {
-        fs.mkdirSync(dirPath, { recursive: true });
-      }
-      
-      fs.writeFileSync(fullPath, content);
-      console.log(`[Workspace FS Dynamic Sync] Synced file: ${cleanPath}`);
-      res.json({ success: true, path: cleanPath });
-    } catch (err: any) {
-      console.error("[Workspace FS Dynamic Sync] Error writing file:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/delete-file", (req, res) => {
-    const { path: filePath } = req.body;
-    if (!filePath) {
-      return res.status(400).json({ error: "Missing path" });
-    }
-    try {
-      const cleanPath = filePath.replace(/^\.\//, '').replace(/^\//, '').trim();
-      const fullPath = path.join(process.cwd(), cleanPath);
-      if (fs.existsSync(fullPath)) {
-        fs.unlinkSync(fullPath);
-        console.log(`[Workspace FS Dynamic Sync] Deleted file: ${cleanPath}`);
-      }
-      res.json({ success: true, path: cleanPath });
-    } catch (err: any) {
-      console.error("[Workspace FS Dynamic Sync] Error deleting file:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/compile", (req, res) => {
-    console.log("[Compiler] Real-time compiler check triggered.");
-    const start = Date.now();
-    exec("npx tsc --noEmit", (err, stdout, stderr) => {
-      const elapsed = Date.now() - start;
-      if (err) {
-        res.json({
-          success: false,
-          elapsed,
-          stdout: stdout || "",
-          stderr: stderr || "",
-          error: err.message
-        });
-      } else {
-        res.json({
-          success: true,
-          elapsed,
-          stdout: stdout || "Workspace compiled successfully with 0 violations."
-        });
-      }
-    });
-  });
-
-  // Dedicated Streaming Native Code Sandboxing Execution Engine
-  app.post("/api/sandbox/run-stream", express.json(), (req, res) => {
-    const { code, language } = req.body;
-    if (!code) {
-      return res.status(400).json({ error: "No code provided for execution." });
-    }
-    
-    const sandboxDir = path.join(process.cwd(), "playground_sandbox");
-    if (!fs.existsSync(sandboxDir)) {
-      try {
-        fs.mkdirSync(sandboxDir, { recursive: true });
-      } catch (e: any) {
-        return res.status(500).json({ error: `Failed to create sandbox: ${e.message}` });
-      }
-    }
-    
-    let filename = "";
-    let cmd = "";
-    let args: string[] = [];
-    
-    if (language === "python" || language === "python3") {
-      filename = `sandbox_${Date.now()}.py`;
-      cmd = "python3";
-      args = ["-u", path.join(sandboxDir, filename)];
-    } else if (language === "javascript" || language === "javascript-node" || language === "node") {
-      filename = `sandbox_${Date.now()}.js`;
-      cmd = "node";
-      args = [path.join(sandboxDir, filename)];
-    } else if (language === "typescript" || language === "typescript-node" || language === "ts") {
-      filename = `sandbox_${Date.now()}.ts`;
-      cmd = "npx";
-      args = ["tsx", path.join(sandboxDir, filename)];
-    } else {
-      return res.status(400).json({ error: `Unsupported sandboxed language for streaming: ${language}` });
-    }
-    
-    const filePath = path.join(sandboxDir, filename);
-    try {
-      fs.writeFileSync(filePath, code);
-    } catch (writeErr: any) {
-      return res.status(500).json({ error: `Sandbox file access denied: ${writeErr.message}` });
-    }
-    
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    
-    const startTime = Date.now();
-    const child = spawn(cmd, args, { timeout: 15000 });
-    
-    child.stdout.on('data', (data) => {
-      res.write(`data: ${JSON.stringify({ type: 'stdout', text: data.toString() })}\n\n`);
-    });
-    
-    child.stderr.on('data', (data) => {
-      res.write(`data: ${JSON.stringify({ type: 'stderr', text: data.toString() })}\n\n`);
-    });
-    
-    child.on('error', (err) => {
-      res.write(`data: ${JSON.stringify({ type: 'stderr', text: `Child Process Error: ${err.message}` })}\n\n`);
-    });
-    
-    child.on('close', (code) => {
-      const durationMs = Date.now() - startTime;
-      res.write(`data: ${JSON.stringify({ type: 'done', elapsed: durationMs, exitCode: code })}\n\n`);
-      res.end();
-      
-      // Cleanup file
-      try {
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
+        const filePath = path.join(sandboxDir, filename);
+        try {
+            fs.writeFileSync(filePath, code);
+        } catch (writeErr: any) {
+            return res.status(500).json({ error: `Sandbox file access denied: ${writeErr.message}` });
         }
-      } catch (cleanupErr) {
-        console.error("[Sandbox Engine] Stream cleanup warning:", cleanupErr);
-      }
-    });
-  });
 
-  // Dedicated Native Code Sandboxing Execution Engine
-  app.post("/api/sandbox/run", express.json(), (req, res) => {
-    const { code, language } = req.body;
-    if (!code) {
-      return res.status(400).json({ error: "No code provided for execution." });
-    }
-    
-    const sandboxDir = path.join(process.cwd(), "playground_sandbox");
-    if (!fs.existsSync(sandboxDir)) {
-      try {
-        fs.mkdirSync(sandboxDir, { recursive: true });
-      } catch (e: any) {
-        return res.status(500).json({ error: `Failed to create sandbox: ${e.message}` });
-      }
-    }
-    
-    let filename = "";
-    let runCmd = "";
-    
-    if (language === "python" || language === "python3") {
-      filename = `sandbox_${Date.now()}.py`;
-      runCmd = `python3 "${path.join(sandboxDir, filename)}"`;
-    } else if (language === "javascript" || language === "javascript-node" || language === "node") {
-      filename = `sandbox_${Date.now()}.js`;
-      runCmd = `node "${path.join(sandboxDir, filename)}"`;
-    } else if (language === "typescript" || language === "typescript-node" || language === "ts") {
-      filename = `sandbox_${Date.now()}.ts`;
-      runCmd = `npx tsx "${path.join(sandboxDir, filename)}"`;
-    } else if (language === "html" || language === "web" || language === "svg") {
-      return res.json({
-        success: true,
-        previewMode: true,
-        message: "Rendering dynamic web preview canvas."
-      });
-    } else {
-      return res.status(400).json({ error: `Unsupported sandboxed language: ${language}` });
-    }
-    
-    const filePath = path.join(sandboxDir, filename);
-    try {
-      fs.writeFileSync(filePath, code);
-    } catch (writeErr: any) {
-      return res.status(500).json({ error: `Sandbox file access denied: ${writeErr.message}` });
-    }
-    
-    const startTime = Date.now();
-    exec(runCmd, { timeout: 12000 }, (err: any, stdout, stderr) => {
-      // Cleanup file in background
-      try {
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
-      } catch (cleanupErr) {
-        console.error("[Sandbox Engine] Cleanup minor warning:", cleanupErr);
-      }
-      
-      const durationMs = Date.now() - startTime;
-      
-      const killedByTimeout = err?.killed || false;
-      if (err) {
-        res.json({
-          success: false,
-          elapsed: durationMs,
-          stdout: stdout || "",
-          stderr: stderr || err.message || "Execution failed.",
-          exitCode: err.code || 1,
-          timeout: killedByTimeout
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        const startTime = Date.now();
+        const child = spawn(cmd, args, { timeout: 15000 });
+
+        child.stdout.on('data', (data) => {
+            res.write(`data: ${JSON.stringify({ type: 'stdout', text: data.toString() })}\n\n`);
         });
-      } else {
-        res.json({
-          success: true,
-          elapsed: durationMs,
-          stdout: stdout || "",
-          stderr: stderr || ""
+
+        child.stderr.on('data', (data) => {
+            res.write(`data: ${JSON.stringify({ type: 'stderr', text: data.toString() })}\n\n`);
         });
-      }
+
+        child.on('error', (err) => {
+            res.write(`data: ${JSON.stringify({ type: 'stderr', text: `Child Process Error: ${err.message}` })}\n\n`);
+        });
+
+        child.on('close', (code) => {
+            const durationMs = Date.now() - startTime;
+            res.write(`data: ${JSON.stringify({ type: 'done', elapsed: durationMs, exitCode: code })}\n\n`);
+            res.end();
+
+            // Cleanup file
+            try {
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                }
+            } catch (cleanupErr) {
+                console.error("[Sandbox Engine] Stream cleanup warning:", cleanupErr);
+            }
+        });
     });
-  });
 
-  // ==========================================
-  // APPLE SIRI SHORTCUTS & SMART NODE HUB ENDPOINTS
-  // ==========================================
-  
-  interface SmartNode {
-    id: string;
-    name: string;
-    type: "webhook" | "mqtt" | "ble";
-    description: string;
-    url?: string;
-    method?: string;
-    headers?: string;
-    payload?: string;
-    topic?: string;
-    broker?: string;
-    serviceUuid?: string;
-    characteristicUuid?: string;
-    writeBytes?: string;
-    lastTriggered?: number;
-    status?: "active" | "error" | "pending";
-  }
-
-  interface SiriLog {
-    id: string;
-    timestamp: number;
-    prompt: string;
-    siriResponse: string;
-    matchedNodeId: string | null;
-    matchedNodeName: string | null;
-    status: "success" | "error" | "conversational";
-    detail?: string;
-  }
-
-  const NODES_FILE = path.join(process.cwd(), "siri_nodes.json");
-  let siriNodes: SmartNode[] = [];
-  let siriLogs: SiriLog[] = [];
-
-  // Seed default demo IoT smart devices if siri_nodes.json does not exist
-  try {
-    if (fs.existsSync(NODES_FILE)) {
-      siriNodes = JSON.parse(fs.readFileSync(NODES_FILE, "utf-8"));
-    } else {
-      siriNodes = [
-        {
-          id: "webhook_living_room_lights",
-          name: "living room lights",
-          type: "webhook",
-          description: "ESP8266 REST bulb API node to control ambient living room lighting",
-          url: "https://httpbin.org/post", // standard fallback mock targets that works perfectly in dry runs!
-          method: "POST",
-          headers: '{\n  "Content-Type": "application/json"\n}',
-          payload: '{\n  "state": "ON",\n  "brightness": 255\n}',
-          status: "active"
-        },
-        {
-          id: "mqtt_garden_sprinkler",
-          name: "garden sprinkler",
-          type: "mqtt",
-          description: "MQTT publish trigger for smart agricultural sprinkler controller",
-          broker: "wss://broker.hivemq.com:8000/mqtt",
-          topic: "home/garden/sprinkler",
-          payload: '{\n  "status": "active",\n  "durationMinutes": 15\n}',
-          status: "active"
-        },
-        {
-          id: "ble_desktop_fan",
-          name: "desktop fan",
-          type: "ble",
-          description: "Web Bluetooth GATT transmission controller to toggle desktop fan speed",
-          serviceUuid: "0000ffe0-0000-1000-8000-00805f9b34fb",
-          characteristicUuid: "0000ffe1-0000-1000-8000-00805f9b34fb",
-          writeBytes: "5A0105FF",
-          status: "active"
+    // Dedicated Native Code Sandboxing Execution Engine
+    app.post("/api/sandbox/run", express.json(), (req, res) => {
+        const { code, language } = req.body;
+        if (!code) {
+            return res.status(400).json({ error: "No code provided for execution." });
         }
-      ];
-      fs.writeFileSync(NODES_FILE, JSON.stringify(siriNodes, null, 2));
-    }
-  } catch (e) {
-    console.error("[SIRI_SETUP] Error seeding smart siri nodes:", e);
-  }
 
-  const saveSiriNodes = () => {
+        const sandboxDir = path.join(process.cwd(), "playground_sandbox");
+        if (!fs.existsSync(sandboxDir)) {
+            try {
+                fs.mkdirSync(sandboxDir, { recursive: true });
+            } catch (e: any) {
+                return res.status(500).json({ error: `Failed to create sandbox: ${e.message}` });
+            }
+        }
+
+        let filename = "";
+        let runCmd = "";
+
+        if (language === "python" || language === "python3") {
+            filename = `sandbox_${Date.now()}.py`;
+            runCmd = `python3 "${path.join(sandboxDir, filename)}"`;
+        } else if (language === "javascript" || language === "javascript-node" || language === "node") {
+            filename = `sandbox_${Date.now()}.js`;
+            runCmd = `node "${path.join(sandboxDir, filename)}"`;
+        } else if (language === "typescript" || language === "typescript-node" || language === "ts") {
+            filename = `sandbox_${Date.now()}.ts`;
+            runCmd = `npx tsx "${path.join(sandboxDir, filename)}"`;
+        } else if (language === "html" || language === "web" || language === "svg") {
+            return res.json({
+                success: true,
+                previewMode: true,
+                message: "Rendering dynamic web preview canvas."
+            });
+        } else {
+            return res.status(400).json({ error: `Unsupported sandboxed language: ${language}` });
+        }
+
+        const filePath = path.join(sandboxDir, filename);
+        try {
+            fs.writeFileSync(filePath, code);
+        } catch (writeErr: any) {
+            return res.status(500).json({ error: `Sandbox file access denied: ${writeErr.message}` });
+        }
+
+        const startTime = Date.now();
+        exec(runCmd, { timeout: 12000 }, (err: any, stdout, stderr) => {
+            // Cleanup file in background
+            try {
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                }
+            } catch (cleanupErr) {
+                console.error("[Sandbox Engine] Cleanup minor warning:", cleanupErr);
+            }
+
+            const durationMs = Date.now() - startTime;
+
+            const killedByTimeout = err?.killed || false;
+            if (err) {
+                res.json({
+                    success: false,
+                    elapsed: durationMs,
+                    stdout: stdout || "",
+                    stderr: stderr || err.message || "Execution failed.",
+                    exitCode: err.code || 1,
+                    timeout: killedByTimeout
+                });
+            } else {
+                res.json({
+                    success: true,
+                    elapsed: durationMs,
+                    stdout: stdout || "",
+                    stderr: stderr || ""
+                });
+            }
+        });
+    });
+
+    // ==========================================
+    // APPLE SIRI SHORTCUTS & SMART NODE HUB ENDPOINTS
+    // ==========================================
+
+    interface SmartNode {
+        id: string;
+        name: string;
+        type: "webhook" | "mqtt" | "ble";
+        description: string;
+        url?: string;
+        method?: string;
+        headers?: string;
+        payload?: string;
+        topic?: string;
+        broker?: string;
+        serviceUuid?: string;
+        characteristicUuid?: string;
+        writeBytes?: string;
+        lastTriggered?: number;
+        status?: "active" | "error" | "pending";
+    }
+
+    interface SiriLog {
+        id: string;
+        timestamp: number;
+        prompt: string;
+        siriResponse: string;
+        matchedNodeId: string | null;
+        matchedNodeName: string | null;
+        status: "success" | "error" | "conversational";
+        detail?: string;
+    }
+
+    const NODES_FILE = path.join(process.cwd(), "siri_nodes.json");
+    let siriNodes: SmartNode[] = [];
+    let siriLogs: SiriLog[] = [];
+
+    // Seed default demo IoT smart devices if siri_nodes.json does not exist
     try {
-      fs.writeFileSync(NODES_FILE, JSON.stringify(siriNodes, null, 2));
+        if (fs.existsSync(NODES_FILE)) {
+            siriNodes = JSON.parse(fs.readFileSync(NODES_FILE, "utf-8"));
+        } else {
+            siriNodes = [
+                {
+                    id: "webhook_living_room_lights",
+                    name: "living room lights",
+                    type: "webhook",
+                    description: "ESP8266 REST bulb API node to control ambient living room lighting",
+                    url: "https://httpbin.org/post", // standard fallback mock targets that works perfectly in dry runs!
+                    method: "POST",
+                    headers: '{\n  "Content-Type": "application/json"\n}',
+                    payload: '{\n  "state": "ON",\n  "brightness": 255\n}',
+                    status: "active"
+                },
+                {
+                    id: "mqtt_garden_sprinkler",
+                    name: "garden sprinkler",
+                    type: "mqtt",
+                    description: "MQTT publish trigger for smart agricultural sprinkler controller",
+                    broker: "wss://broker.hivemq.com:8000/mqtt",
+                    topic: "home/garden/sprinkler",
+                    payload: '{\n  "status": "active",\n  "durationMinutes": 15\n}',
+                    status: "active"
+                },
+                {
+                    id: "ble_desktop_fan",
+                    name: "desktop fan",
+                    type: "ble",
+                    description: "Web Bluetooth GATT transmission controller to toggle desktop fan speed",
+                    serviceUuid: "0000ffe0-0000-1000-8000-00805f9b34fb",
+                    characteristicUuid: "0000ffe1-0000-1000-8000-00805f9b34fb",
+                    writeBytes: "5A0105FF",
+                    status: "active"
+                }
+            ];
+            fs.writeFileSync(NODES_FILE, JSON.stringify(siriNodes, null, 2));
+        }
     } catch (e) {
-      console.error("[SIRI_SETUP] Error writing siri_nodes.json:", e);
-    }
-  };
-
-  // Helper to broadast state to all connected WS browsers
-  const broadcastSiriTrigger = (logObj: SiriLog, detailsNode?: SmartNode) => {
-    const payload = JSON.stringify({
-      type: "SIRI_TRIGGER_ALERT",
-      log: logObj,
-      node: detailsNode
-    });
-    wss.clients.forEach(client => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(payload);
-      }
-    });
-  };
-
-  // Retrieve smart nodes
-  app.get("/api/siri/nodes", (req, res) => {
-    res.json(siriNodes);
-  });
-
-  // Save/Update smart node
-  app.post("/api/siri/nodes", express.json(), (req, res) => {
-    const node: SmartNode = req.body;
-    if (!node.name || !node.type) {
-      return res.status(400).json({ error: "Node name and protocol type are required." });
+        console.error("[SIRI_SETUP] Error seeding smart siri nodes:", e);
     }
 
-    if (!node.id) {
-      node.id = `${node.type}_node_${Date.now()}`;
-    }
+    const saveSiriNodes = () => {
+        try {
+            fs.writeFileSync(NODES_FILE, JSON.stringify(siriNodes, null, 2));
+        } catch (e) {
+            console.error("[SIRI_SETUP] Error writing siri_nodes.json:", e);
+        }
+    };
 
-    const idx = siriNodes.findIndex(n => n.id === node.id);
-    if (idx >= 0) {
-      siriNodes[idx] = { ...siriNodes[idx], ...node };
-    } else {
-      siriNodes.push(node);
-    }
-
-    saveSiriNodes();
-    res.json({ success: true, node });
-  });
-
-  // Delete smart node
-  app.delete("/api/siri/nodes/:id", (req, res) => {
-    const { id } = req.params;
-    siriNodes = siriNodes.filter(n => n.id !== id);
-    saveSiriNodes();
-    res.json({ success: true });
-  });
-
-  // List triggered logs
-  app.get("/api/siri/logs", (req, res) => {
-    res.json(siriLogs);
-  });
-
-  // Clear triggered logs
-  app.post("/api/siri/logs/clear", (req, res) => {
-    siriLogs = [];
-    res.json({ success: true });
-  });
-
-  // --- REAL-TIME CANVAS & JOTTINGS INTEGRATION ---
-  const CANVAS_FILE = path.join(process.cwd(), "canvas_elements.json");
-  const JOTTINGS_FILE = path.join(process.cwd(), "jottings.json");
-
-  let canvasElements: any[] = [];
-  let jottingsList: any[] = [];
-
-  try {
-    if (fs.existsSync(CANVAS_FILE)) {
-      canvasElements = JSON.parse(fs.readFileSync(CANVAS_FILE, "utf-8"));
-    } else {
-      canvasElements = [
-        { id: "el_h1", text: "🪐 Quantum Computing Mechanics & Proofs", size: "28px", color: "#818CF8", weight: "Black", type: "Heading 1", font: "Space Grotesk" },
-        { id: "el_p1", text: "Quantum state superposition allows qubits to express linear combinations of state-vectors. By utilizing the Hadamard transform on a ground state, we transition into a unified superposition space.", size: "14px", color: "#E4E4E7", weight: "Regular", type: "Paragraph", font: "Inter" },
-        { id: "el_link1", text: "🔗 Click to open Wikipedia's Quantum Superposition Proof", size: "13px", color: "#60A5FA", weight: "Medium", type: "Hyperlink (Wikipedia)", font: "JetBrains Mono", url: "https://en.wikipedia.org/wiki/Quantum_superposition" },
-        { id: "el_h2", text: "⚡ Computational Complexity Bound (Master Theorem)", size: "22px", color: "#22D3EE", weight: "Bold", type: "Heading 2", font: "Space Grotesk" },
-        { id: "el_p2", text: "Let the recursive recurrence be T(n) = aT(n/b) + f(n). In this sandbox, we evaluate the asymptotic tight bounds when the split branches exceed the polynomial overhead.", size: "14px", color: "#E4E4E7", weight: "Regular", type: "Paragraph", font: "Inter" },
-        { id: "el_link2", text: "🔗 Click to open MIT OpenCourseWare Complexity Bounds", size: "13px", color: "#60A5FA", weight: "Medium", type: "Hyperlink (MIT OCW)", font: "JetBrains Mono", url: "https://ocw.mit.edu/courses/electrical-engineering-and-computer-science/asymptotic-complexity-proof" },
-        { id: "el_h3", text: "🏢 Guwahati Municipal Land Boundary Ward Map & Data", size: "18px", color: "#FB7185", weight: "Semibold", type: "Heading 3", font: "Space Grotesk" },
-        { id: "el_p3", text: "For regional analytics pipelines, we query the official Assam Land Registry to extract coordinates, plot ward boundary margins, and clear building statements.", size: "14px", color: "#E4E4E7", weight: "Regular", type: "Paragraph", font: "Inter" },
-        { id: "el_link3", text: "🔗 Click to open Guwahati GMC NOC Registry Portal", size: "13px", color: "#60A5FA", weight: "Medium", type: "Hyperlink (GMC)", font: "JetBrains Mono", url: "https://gmc.assam.gov.in/land-valuation-noc" }
-      ];
-      fs.writeFileSync(CANVAS_FILE, JSON.stringify(canvasElements, null, 2));
-    }
-  } catch (e) {
-    console.error("Error reading canvas elements:", e);
-  }
-
-  try {
-    if (fs.existsSync(JOTTINGS_FILE)) {
-      jottingsList = JSON.parse(fs.readFileSync(JOTTINGS_FILE, "utf-8"));
-    } else {
-      jottingsList = [
-        { id: "jotting_1", name: "quantum_superposition.ipynb", label: "Quantum Superposition", description: "Saves verified Hadamard state matrices and Dirac equations" },
-        { id: "jotting_2", name: "complexity_bound.ipynb", label: "Complexity Bound", description: "Recursion tree simulations and master theorem verification bounds" },
-        { id: "jotting_3", name: "land_registry_noc.ipynb", label: "Unlinked", description: "GMC ward valuation data records and parcel indexes" }
-      ];
-      fs.writeFileSync(JOTTINGS_FILE, JSON.stringify(jottingsList, null, 2));
-    }
-  } catch (e) {
-    console.error("Error reading jottings:", e);
-  }
-
-  const saveCanvasElementsOnServer = () => {
-    try {
-      fs.writeFileSync(CANVAS_FILE, JSON.stringify(canvasElements, null, 2));
-    } catch (e) {
-      console.error("Error saving canvas elements:", e);
-    }
-  };
-
-  const saveJottingsOnServer = () => {
-    try {
-      fs.writeFileSync(JOTTINGS_FILE, JSON.stringify(jottingsList, null, 2));
-    } catch (e) {
-      console.error("Error saving jottings:", e);
-    }
-  };
-
-  app.get("/api/canvas/elements", (req, res) => {
-    res.json(canvasElements);
-  });
-
-  app.post("/api/canvas/elements", express.json(), (req, res) => {
-    if (Array.isArray(req.body)) {
-      canvasElements = req.body;
-      saveCanvasElementsOnServer();
-      res.json({ success: true, count: canvasElements.length });
-    } else {
-      res.status(400).json({ error: "Expected array of elements" });
-    }
-  });
-
-  app.get("/api/jottings", (req, res) => {
-    res.json(jottingsList);
-  });
-
-  app.post("/api/jottings", express.json(), (req, res) => {
-    if (Array.isArray(req.body)) {
-      jottingsList = req.body;
-      saveJottingsOnServer();
-      res.json({ success: true, count: jottingsList.length });
-    } else {
-      res.status(400).json({ error: "Expected array of jottings" });
-    }
-  });
-
-  // APPLE SIRI DISPATCH & PARSER WEBHOOK BRIDGE (POST/GET)
-  app.all("/api/siri", express.json(), async (req, res) => {
-    const promptText = (req.query.prompt || req.query.q || req.query.text || req.query.input || req.body?.prompt || "").toString().trim();
-    
-    // Check if it's a simple status check
-    if (!promptText) {
-      return res.json({
-        success: true,
-        siriSpeak: "Unison Siri Smart Control endpoint is active. Add custom nodes in the Network control console to route physical BLE, MQTT, and Webhook commands.",
-        activeNodesCount: siriNodes.length,
-        nodes: siriNodes.map(n => ({ id: n.id, name: n.name, type: n.type }))
-      });
-    }
-
-    console.log(`[SIRI_WEBHOOK] Received voice trigger from Siri: "${promptText}"`);
-
-    try {
-      const lowerPrompt = promptText.toLowerCase().trim();
-      let matchedCmd = "";
-      let cmdDisplay = "";
-      
-      if (lowerPrompt === "open spotify" || lowerPrompt === "launch spotify" || lowerPrompt === "show spotify" || lowerPrompt === "start spotify") {
-        matchedCmd = "open_spotify";
-        cmdDisplay = "Spotify Music Stream Hub";
-      } else if (lowerPrompt === "open gmail" || lowerPrompt === "open workspace" || lowerPrompt === "open drive") {
-        matchedCmd = "open_gmail";
-        cmdDisplay = "Google Workspace Hub";
-      } else if (lowerPrompt === "open github") {
-        matchedCmd = "open_github";
-        cmdDisplay = "GitHub Realtime Connector";
-      } else if (lowerPrompt === "open calendar" || lowerPrompt === "show calendar") {
-        matchedCmd = "open_calendar";
-        cmdDisplay = "Google Calendar Connector";
-      } else if (lowerPrompt === "open directories" || lowerPrompt === "open solution" || lowerPrompt === "open files") {
-        matchedCmd = "open_directories";
-        cmdDisplay = "Solutions Directory Explorer";
-      } else if (lowerPrompt === "open memory" || lowerPrompt === "show memories") {
-        matchedCmd = "open_memory";
-        cmdDisplay = "Cognitive Memory";
-      } else if (lowerPrompt === "open network" || lowerPrompt === "show roster" || lowerPrompt === "open devices") {
-        matchedCmd = "open_network";
-        cmdDisplay = "Live Presence Roster";
-      } else if (lowerPrompt === "open siri" || lowerPrompt === "show shortcuts" || lowerPrompt === "open gateway") {
-        matchedCmd = "open_siri";
-        cmdDisplay = "Siri Smart Protocol Gateways";
-      } else if (lowerPrompt === "toggle theme" || lowerPrompt === "change theme" || lowerPrompt === "toggle light mode" || lowerPrompt === "toggle dark mode") {
-        matchedCmd = "toggle_theme";
-        cmdDisplay = "Desktop UI Theme";
-      }
-
-      if (matchedCmd) {
-        // Broadcast over WebSocket to all client browsers with unique ID to prevent loops
-        const wsEvent = {
-          id: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          type: "DEVICE_CONTROL_COMMAND",
-          command: matchedCmd,
-          timestamp: Date.now()
-        };
-        wss.clients.forEach(c => {
-          if (c.readyState === WebSocket.OPEN) {
-            c.send(JSON.stringify(wsEvent));
-          }
+    // Helper to broadast state to all connected WS browsers
+    const broadcastSiriTrigger = (logObj: SiriLog, detailsNode?: SmartNode) => {
+        const payload = JSON.stringify({
+            type: "SIRI_TRIGGER_ALERT",
+            log: logObj,
+            node: detailsNode
         });
-
-        // Store log entry
-        const logEntry: SiriLog = {
-          id: `siri_log_${Date.now()}`,
-          timestamp: Date.now(),
-          prompt: promptText,
-          siriResponse: `Device Command routing completed for ${cmdDisplay}.`,
-          matchedNodeId: null,
-          matchedNodeName: "System Desktop",
-          status: "success",
-          detail: `Parsed and dispatched '${matchedCmd}' directly to live device context.`
-        };
-        siriLogs.unshift(logEntry);
-        if (siriLogs.length > 50) siriLogs.pop();
-        broadcastSiriTrigger(logEntry);
-
-        return res.json({
-          success: true,
-          siriSpeak: `Opening ${cmdDisplay} on your Unison desktop.`,
-          actionExecuted: true,
-          nodeType: "system",
-          status: "success",
-          detail: `Routed ${matchedCmd} directly to device cockpit.`
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(payload);
+            }
         });
-      }
+    };
 
-      const systemInstruction = `You are the Siri Smart Speech Controller for Unison OS.
+    // Retrieve smart nodes
+    app.get("/api/siri/nodes", (req, res) => {
+        res.json(siriNodes);
+    });
+
+    // Save/Update smart node
+    app.post("/api/siri/nodes", express.json(), (req, res) => {
+        const node: SmartNode = req.body;
+        if (!node.name || !node.type) {
+            return res.status(400).json({ error: "Node name and protocol type are required." });
+        }
+
+        if (!node.id) {
+            node.id = `${node.type}_node_${Date.now()}`;
+        }
+
+        const idx = siriNodes.findIndex(n => n.id === node.id);
+        if (idx >= 0) {
+            siriNodes[idx] = { ...siriNodes[idx], ...node };
+        } else {
+            siriNodes.push(node);
+        }
+
+        saveSiriNodes();
+        res.json({ success: true, node });
+    });
+
+    // Delete smart node
+    app.delete("/api/siri/nodes/:id", (req, res) => {
+        const { id } = req.params;
+        siriNodes = siriNodes.filter(n => n.id !== id);
+        saveSiriNodes();
+        res.json({ success: true });
+    });
+
+    // List triggered logs
+    app.get("/api/siri/logs", (req, res) => {
+        res.json(siriLogs);
+    });
+
+    // Clear triggered logs
+    app.post("/api/siri/logs/clear", (req, res) => {
+        siriLogs = [];
+        res.json({ success: true });
+    });
+
+    // --- REAL-TIME CANVAS & JOTTINGS INTEGRATION ---
+    const CANVAS_FILE = path.join(process.cwd(), "canvas_elements.json");
+    const JOTTINGS_FILE = path.join(process.cwd(), "jottings.json");
+
+    let canvasElements: any[] = [];
+    let jottingsList: any[] = [];
+
+    try {
+        if (fs.existsSync(CANVAS_FILE)) {
+            canvasElements = JSON.parse(fs.readFileSync(CANVAS_FILE, "utf-8"));
+        } else {
+            canvasElements = [
+                { id: "el_h1", text: "🪐 Quantum Computing Mechanics & Proofs", size: "28px", color: "#818CF8", weight: "Black", type: "Heading 1", font: "Space Grotesk" },
+                { id: "el_p1", text: "Quantum state superposition allows qubits to express linear combinations of state-vectors. By utilizing the Hadamard transform on a ground state, we transition into a unified superposition space.", size: "14px", color: "#E4E4E7", weight: "Regular", type: "Paragraph", font: "Inter" },
+                { id: "el_link1", text: "🔗 Click to open Wikipedia's Quantum Superposition Proof", size: "13px", color: "#60A5FA", weight: "Medium", type: "Hyperlink (Wikipedia)", font: "JetBrains Mono", url: "https://en.wikipedia.org/wiki/Quantum_superposition" },
+                { id: "el_h2", text: "⚡ Computational Complexity Bound (Master Theorem)", size: "22px", color: "#22D3EE", weight: "Bold", type: "Heading 2", font: "Space Grotesk" },
+                { id: "el_p2", text: "Let the recursive recurrence be T(n) = aT(n/b) + f(n). In this sandbox, we evaluate the asymptotic tight bounds when the split branches exceed the polynomial overhead.", size: "14px", color: "#E4E4E7", weight: "Regular", type: "Paragraph", font: "Inter" },
+                { id: "el_link2", text: "🔗 Click to open MIT OpenCourseWare Complexity Bounds", size: "13px", color: "#60A5FA", weight: "Medium", type: "Hyperlink (MIT OCW)", font: "JetBrains Mono", url: "https://ocw.mit.edu/courses/electrical-engineering-and-computer-science/asymptotic-complexity-proof" },
+                { id: "el_h3", text: "🏢 Guwahati Municipal Land Boundary Ward Map & Data", size: "18px", color: "#FB7185", weight: "Semibold", type: "Heading 3", font: "Space Grotesk" },
+                { id: "el_p3", text: "For regional analytics pipelines, we query the official Assam Land Registry to extract coordinates, plot ward boundary margins, and clear building statements.", size: "14px", color: "#E4E4E7", weight: "Regular", type: "Paragraph", font: "Inter" },
+                { id: "el_link3", text: "🔗 Click to open Guwahati GMC NOC Registry Portal", size: "13px", color: "#60A5FA", weight: "Medium", type: "Hyperlink (GMC)", font: "JetBrains Mono", url: "https://gmc.assam.gov.in/land-valuation-noc" }
+            ];
+            fs.writeFileSync(CANVAS_FILE, JSON.stringify(canvasElements, null, 2));
+        }
+    } catch (e) {
+        console.error("Error reading canvas elements:", e);
+    }
+
+    try {
+        if (fs.existsSync(JOTTINGS_FILE)) {
+            jottingsList = JSON.parse(fs.readFileSync(JOTTINGS_FILE, "utf-8"));
+        } else {
+            jottingsList = [
+                { id: "jotting_1", name: "quantum_superposition.ipynb", label: "Quantum Superposition", description: "Saves verified Hadamard state matrices and Dirac equations" },
+                { id: "jotting_2", name: "complexity_bound.ipynb", label: "Complexity Bound", description: "Recursion tree simulations and master theorem verification bounds" },
+                { id: "jotting_3", name: "land_registry_noc.ipynb", label: "Unlinked", description: "GMC ward valuation data records and parcel indexes" }
+            ];
+            fs.writeFileSync(JOTTINGS_FILE, JSON.stringify(jottingsList, null, 2));
+        }
+    } catch (e) {
+        console.error("Error reading jottings:", e);
+    }
+
+    const saveCanvasElementsOnServer = () => {
+        try {
+            fs.writeFileSync(CANVAS_FILE, JSON.stringify(canvasElements, null, 2));
+        } catch (e) {
+            console.error("Error saving canvas elements:", e);
+        }
+    };
+
+    const saveJottingsOnServer = () => {
+        try {
+            fs.writeFileSync(JOTTINGS_FILE, JSON.stringify(jottingsList, null, 2));
+        } catch (e) {
+            console.error("Error saving jottings:", e);
+        }
+    };
+
+    app.get("/api/canvas/elements", (req, res) => {
+        res.json(canvasElements);
+    });
+
+    app.post("/api/canvas/elements", express.json(), (req, res) => {
+        if (Array.isArray(req.body)) {
+            canvasElements = req.body;
+            saveCanvasElementsOnServer();
+            res.json({ success: true, count: canvasElements.length });
+        } else {
+            res.status(400).json({ error: "Expected array of elements" });
+        }
+    });
+
+    app.get("/api/jottings", (req, res) => {
+        res.json(jottingsList);
+    });
+
+    app.post("/api/jottings", express.json(), (req, res) => {
+        if (Array.isArray(req.body)) {
+            jottingsList = req.body;
+            saveJottingsOnServer();
+            res.json({ success: true, count: jottingsList.length });
+        } else {
+            res.status(400).json({ error: "Expected array of jottings" });
+        }
+    });
+
+    // APPLE SIRI DISPATCH & PARSER WEBHOOK BRIDGE (POST/GET)
+    app.all("/api/siri", express.json(), async (req, res) => {
+        const promptText = (req.query.prompt || req.query.q || req.query.text || req.query.input || req.body?.prompt || "").toString().trim();
+
+        // Check if it's a simple status check
+        if (!promptText) {
+            return res.json({
+                success: true,
+                siriSpeak: "Unison Siri Smart Control endpoint is active. Add custom nodes in the Network control console to route physical BLE, MQTT, and Webhook commands.",
+                activeNodesCount: siriNodes.length,
+                nodes: siriNodes.map(n => ({ id: n.id, name: n.name, type: n.type }))
+            });
+        }
+
+        console.log(`[SIRI_WEBHOOK] Received voice trigger from Siri: "${promptText}"`);
+
+        try {
+            const lowerPrompt = promptText.toLowerCase().trim();
+            let matchedCmd = "";
+            let cmdDisplay = "";
+
+            if (lowerPrompt === "open spotify" || lowerPrompt === "launch spotify" || lowerPrompt === "show spotify" || lowerPrompt === "start spotify") {
+                matchedCmd = "open_spotify";
+                cmdDisplay = "Spotify Music Stream Hub";
+            } else if (lowerPrompt === "open gmail" || lowerPrompt === "open workspace" || lowerPrompt === "open drive") {
+                matchedCmd = "open_gmail";
+                cmdDisplay = "Google Workspace Hub";
+            } else if (lowerPrompt === "open github") {
+                matchedCmd = "open_github";
+                cmdDisplay = "GitHub Realtime Connector";
+            } else if (lowerPrompt === "open calendar" || lowerPrompt === "show calendar") {
+                matchedCmd = "open_calendar";
+                cmdDisplay = "Google Calendar Connector";
+            } else if (lowerPrompt === "open directories" || lowerPrompt === "open solution" || lowerPrompt === "open files") {
+                matchedCmd = "open_directories";
+                cmdDisplay = "Solutions Directory Explorer";
+            } else if (lowerPrompt === "open memory" || lowerPrompt === "show memories") {
+                matchedCmd = "open_memory";
+                cmdDisplay = "Cognitive Memory";
+            } else if (lowerPrompt === "open network" || lowerPrompt === "show roster" || lowerPrompt === "open devices") {
+                matchedCmd = "open_network";
+                cmdDisplay = "Live Presence Roster";
+            } else if (lowerPrompt === "open siri" || lowerPrompt === "show shortcuts" || lowerPrompt === "open gateway") {
+                matchedCmd = "open_siri";
+                cmdDisplay = "Siri Smart Protocol Gateways";
+            } else if (lowerPrompt === "toggle theme" || lowerPrompt === "change theme" || lowerPrompt === "toggle light mode" || lowerPrompt === "toggle dark mode") {
+                matchedCmd = "toggle_theme";
+                cmdDisplay = "Desktop UI Theme";
+            }
+
+            if (matchedCmd) {
+                // Broadcast over WebSocket to all client browsers with unique ID to prevent loops
+                const wsEvent = {
+                    id: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    type: "DEVICE_CONTROL_COMMAND",
+                    command: matchedCmd,
+                    timestamp: Date.now()
+                };
+                wss.clients.forEach(c => {
+                    if (c.readyState === WebSocket.OPEN) {
+                        c.send(JSON.stringify(wsEvent));
+                    }
+                });
+
+                // Store log entry
+                const logEntry: SiriLog = {
+                    id: `siri_log_${Date.now()}`,
+                    timestamp: Date.now(),
+                    prompt: promptText,
+                    siriResponse: `Device Command routing completed for ${cmdDisplay}.`,
+                    matchedNodeId: null,
+                    matchedNodeName: "System Desktop",
+                    status: "success",
+                    detail: `Parsed and dispatched '${matchedCmd}' directly to live device context.`
+                };
+                siriLogs.unshift(logEntry);
+                if (siriLogs.length > 50) siriLogs.pop();
+                broadcastSiriTrigger(logEntry);
+
+                return res.json({
+                    success: true,
+                    siriSpeak: `Opening ${cmdDisplay} on your Unison desktop.`,
+                    actionExecuted: true,
+                    nodeType: "system",
+                    status: "success",
+                    detail: `Routed ${matchedCmd} directly to device cockpit.`
+                });
+            }
+
+            const systemInstruction = `You are the Siri Smart Speech Controller for Unison OS.
       Analyze the user's spoken voice command and decide if they intend to trigger, toggle, configure, or activate one of the registered physical smart nodes.
       
       Here are the currently registered physical smart IoT devices:
@@ -3801,145 +3797,145 @@ export default function App() {
         "siriSpeak": "The spoken speech response for Siri"
       }`;
 
-      // Call Gemini for semantic mapping and spoken Siri generation
-      const geminiResponse = await generateContentWithFallback({
-        model: "gemini-3.5-flash",
-        contents: `Spoken prompt from Apple Device Siri: "${promptText}"`,
-        config: {
-          systemInstruction: systemInstruction,
-          responseMimeType: "application/json"
-        }
-      });
+            // Call Gemini for semantic mapping and spoken Siri generation
+            const geminiResponse = await generateContentWithFallback({
+                model: "gemini-3.5-flash",
+                contents: `Spoken prompt from Apple Device Siri: "${promptText}"`,
+                config: {
+                    systemInstruction: systemInstruction,
+                    responseMimeType: "application/json"
+                }
+            });
 
-      const responseText = geminiResponse.text?.trim() || "{}";
-      const decision = JSON.parse(responseText);
+            const responseText = geminiResponse.text?.trim() || "{}";
+            const decision = JSON.parse(responseText);
 
-      const triggerNodeId = decision.triggerNodeId;
-      const siriSpeakText = decision.siriSpeak || "Perfect, action resolved.";
-      
-      let matchedNode: SmartNode | null = null;
-      let actionStatus: "success" | "error" | "conversational" = "conversational";
-      let executionDetail = "Normal conversational answer returned.";
+            const triggerNodeId = decision.triggerNodeId;
+            const siriSpeakText = decision.siriSpeak || "Perfect, action resolved.";
 
-      if (triggerNodeId) {
-        matchedNode = siriNodes.find(n => n.id === triggerNodeId) || null;
-      }
+            let matchedNode: SmartNode | null = null;
+            let actionStatus: "success" | "error" | "conversational" = "conversational";
+            let executionDetail = "Normal conversational answer returned.";
 
-      if (matchedNode) {
-        matchedNode.lastTriggered = Date.now();
-        actionStatus = "success";
-        
-        if (matchedNode.type === "webhook" && matchedNode.url) {
-          executionDetail = `Initiating REST HTTP call to '${matchedNode.url}'... `;
-          try {
-            const method = matchedNode.method || "GET";
-            const customHeaders = matchedNode.headers ? JSON.parse(matchedNode.headers) : {};
-            const fetchOptions: any = {
-              method,
-              headers: {
-                "User-Agent": "Unison-OS-Siri-Router",
-                ...customHeaders
-              }
+            if (triggerNodeId) {
+                matchedNode = siriNodes.find(n => n.id === triggerNodeId) || null;
+            }
+
+            if (matchedNode) {
+                matchedNode.lastTriggered = Date.now();
+                actionStatus = "success";
+
+                if (matchedNode.type === "webhook" && matchedNode.url) {
+                    executionDetail = `Initiating REST HTTP call to '${matchedNode.url}'... `;
+                    try {
+                        const method = matchedNode.method || "GET";
+                        const customHeaders = matchedNode.headers ? JSON.parse(matchedNode.headers) : {};
+                        const fetchOptions: any = {
+                            method,
+                            headers: {
+                                "User-Agent": "Unison-OS-Siri-Router",
+                                ...customHeaders
+                            }
+                        };
+
+                        if (method !== "GET" && method !== "HEAD" && matchedNode.payload) {
+                            fetchOptions.body = matchedNode.payload;
+                        }
+
+                        // Real physical REST invocation (Your Code -> OS / Network -> Target App/Firmware)
+                        const webResp = await fetch(matchedNode.url, fetchOptions);
+                        const bodyPeek = await webResp.text();
+
+                        executionDetail += `HTTP Status ${webResp.status} returned. Response payload: "${bodyPeek.substring(0, 100)}"`;
+                        matchedNode.status = "active";
+                    } catch (fetchErr: any) {
+                        console.error(`[SIRI_WEBHOOK] Fetch error controlling smart webhook node:`, fetchErr);
+                        executionDetail += `HTTP Client Request Failed: "${fetchErr.message || fetchErr}"`;
+                        matchedNode.status = "error";
+                        actionStatus = "error";
+                    }
+                } else if (matchedNode.type === "mqtt") {
+                    executionDetail = `MQTT protocol command published to hivemq broker over websocket. Topic: '${matchedNode.topic}'. `;
+
+                    // Broadcast to connected WebSocket browsers to publish it in real-time with unique ID to prevent loops
+                    const wsPubEvent = {
+                        id: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        type: "MQTT_PUBLISH_COMMAND",
+                        nodeId: matchedNode.id,
+                        broker: matchedNode.broker,
+                        topic: matchedNode.topic,
+                        payload: matchedNode.payload,
+                        timestamp: Date.now()
+                    };
+                    wss.clients.forEach(c => {
+                        if (c.readyState === WebSocket.OPEN) {
+                            c.send(JSON.stringify(wsPubEvent));
+                        }
+                    });
+                    executionDetail += `Publish request pushed to connected web client.`;
+                } else if (matchedNode.type === "ble") {
+                    executionDetail = `Web Bluetooth GATT characteristic write command routed. Service UUID: '${matchedNode.serviceUuid}', Characteristic: '${matchedNode.characteristicUuid}'. `;
+
+                    // Broadcast BLE write to all WebSocket clients so the browser triggers Mac/iOS native BLE writing with unique ID to prevent loops
+                    const wsBleEvent = {
+                        id: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        type: "BLE_WRITE_COMMAND",
+                        nodeId: matchedNode.id,
+                        serviceUuid: matchedNode.serviceUuid,
+                        characteristicUuid: matchedNode.characteristicUuid,
+                        writeBytes: matchedNode.writeBytes,
+                        timestamp: Date.now()
+                    };
+                    wss.clients.forEach(c => {
+                        if (c.readyState === WebSocket.OPEN) {
+                            c.send(JSON.stringify(wsBleEvent));
+                        }
+                    });
+                    executionDetail += `GATT characteristic write payload routed to browser browser context.`;
+                }
+
+                saveSiriNodes();
+            }
+
+            // Append log entry
+            const logEntry: SiriLog = {
+                id: `siri_log_${Date.now()}`,
+                timestamp: Date.now(),
+                prompt: promptText,
+                siriResponse: siriSpeakText,
+                matchedNodeId: matchedNode ? matchedNode.id : null,
+                matchedNodeName: matchedNode ? matchedNode.name : null,
+                status: actionStatus,
+                detail: executionDetail
             };
 
-            if (method !== "GET" && method !== "HEAD" && matchedNode.payload) {
-              fetchOptions.body = matchedNode.payload;
-            }
+            siriLogs.unshift(logEntry);
+            if (siriLogs.length > 50) siriLogs.pop();
 
-            // Real physical REST invocation (Your Code -> OS / Network -> Target App/Firmware)
-            const webResp = await fetch(matchedNode.url, fetchOptions);
-            const bodyPeek = await webResp.text();
-            
-            executionDetail += `HTTP Status ${webResp.status} returned. Response payload: "${bodyPeek.substring(0, 100)}"`;
-            matchedNode.status = "active";
-          } catch (fetchErr: any) {
-            console.error(`[SIRI_WEBHOOK] Fetch error controlling smart webhook node:`, fetchErr);
-            executionDetail += `HTTP Client Request Failed: "${fetchErr.message || fetchErr}"`;
-            matchedNode.status = "error";
-            actionStatus = "error";
-          }
-        } else if (matchedNode.type === "mqtt") {
-          executionDetail = `MQTT protocol command published to hivemq broker over websocket. Topic: '${matchedNode.topic}'. `;
-          
-          // Broadcast to connected WebSocket browsers to publish it in real-time with unique ID to prevent loops
-          const wsPubEvent = {
-            id: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            type: "MQTT_PUBLISH_COMMAND",
-            nodeId: matchedNode.id,
-            broker: matchedNode.broker,
-            topic: matchedNode.topic,
-            payload: matchedNode.payload,
-            timestamp: Date.now()
-          };
-          wss.clients.forEach(c => {
-            if (c.readyState === WebSocket.OPEN) {
-              c.send(JSON.stringify(wsPubEvent));
-            }
-          });
-          executionDetail += `Publish request pushed to connected web client.`;
-        } else if (matchedNode.type === "ble") {
-          executionDetail = `Web Bluetooth GATT characteristic write command routed. Service UUID: '${matchedNode.serviceUuid}', Characteristic: '${matchedNode.characteristicUuid}'. `;
-          
-          // Broadcast BLE write to all WebSocket clients so the browser triggers Mac/iOS native BLE writing with unique ID to prevent loops
-          const wsBleEvent = {
-            id: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            type: "BLE_WRITE_COMMAND",
-            nodeId: matchedNode.id,
-            serviceUuid: matchedNode.serviceUuid,
-            characteristicUuid: matchedNode.characteristicUuid,
-            writeBytes: matchedNode.writeBytes,
-            timestamp: Date.now()
-          };
-          wss.clients.forEach(c => {
-            if (c.readyState === WebSocket.OPEN) {
-              c.send(JSON.stringify(wsBleEvent));
-            }
-          });
-          executionDetail += `GATT characteristic write payload routed to browser browser context.`;
+            // Emit siri log & visual flash alert to connected browsers!
+            broadcastSiriTrigger(logEntry, matchedNode || undefined);
+
+            // Return exactly what Siri expects to speak aloud!
+            return res.json({
+                success: true,
+                siriSpeak: siriSpeakText,
+                actionExecuted: matchedNode ? true : false,
+                nodeType: matchedNode ? matchedNode.type : null,
+                status: actionStatus,
+                detail: executionDetail
+            });
+
+        } catch (err: any) {
+            console.error("[SIRI_WEBHOOK] Parser error:", err);
+            return res.json({
+                success: false,
+                siriSpeak: "I am sorry, there was a problem parsing your smart command inside Unison OS. Please check active nodes.",
+                error: err.message
+            });
         }
-        
-        saveSiriNodes();
-      }
+    });
 
-      // Append log entry
-      const logEntry: SiriLog = {
-        id: `siri_log_${Date.now()}`,
-        timestamp: Date.now(),
-        prompt: promptText,
-        siriResponse: siriSpeakText,
-        matchedNodeId: matchedNode ? matchedNode.id : null,
-        matchedNodeName: matchedNode ? matchedNode.name : null,
-        status: actionStatus,
-        detail: executionDetail
-      };
-
-      siriLogs.unshift(logEntry);
-      if (siriLogs.length > 50) siriLogs.pop();
-
-      // Emit siri log & visual flash alert to connected browsers!
-      broadcastSiriTrigger(logEntry, matchedNode || undefined);
-
-      // Return exactly what Siri expects to speak aloud!
-      return res.json({
-        success: true,
-        siriSpeak: siriSpeakText,
-        actionExecuted: matchedNode ? true : false,
-        nodeType: matchedNode ? matchedNode.type : null,
-        status: actionStatus,
-        detail: executionDetail
-      });
-
-    } catch (err: any) {
-      console.error("[SIRI_WEBHOOK] Parser error:", err);
-      return res.json({
-        success: false,
-        siriSpeak: "I am sorry, there was a problem parsing your smart command inside Unison OS. Please check active nodes.",
-        error: err.message
-      });
-    }
-  });
-
-  const PYTHON_CAMERA_STREAM_DAEMON = `# Unison Pi Headless Camera Streaming Server (Run on your Raspberry Pi on port 8080)
+    const PYTHON_CAMERA_STREAM_DAEMON = `# Unison Pi Headless Camera Streaming Server (Run on your Raspberry Pi on port 8080)
 # Install dependencies: sudo apt update && sudo apt install -y python3-opencv && pip install flask pillow --break-system-packages
 import os
 import sys
@@ -4076,16 +4072,16 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080, threaded=True)
 `;
 
-  // Direct download endpoint for Headless Camera Stream Daemon
-  app.get("/unison_camera_stream.py", (req, res) => {
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.send(PYTHON_CAMERA_STREAM_DAEMON);
-  });
+    // Direct download endpoint for Headless Camera Stream Daemon
+    app.get("/unison_camera_stream.py", (req, res) => {
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        res.send(PYTHON_CAMERA_STREAM_DAEMON);
+    });
 
-  // Direct download endpoint for the Raspberry Pi Remote Control Daemon
-  app.get("/unison_server.py", (req, res) => {
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.send(`# Unison Pi Stream & Remote Control Server (Run on your Raspberry Pi on port 8080)
+    // Direct download endpoint for the Raspberry Pi Remote Control Daemon
+    app.get("/unison_server.py", (req, res) => {
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        res.send(`# Unison Pi Stream & Remote Control Server (Run on your Raspberry Pi on port 8080)
 # Install dependencies: pip install pyautogui mss pillow flask
 import os
 import sys
@@ -4363,84 +4359,84 @@ if __name__ == '__main__':
     # Listen on port 8080 across all active interface adapters
     app.run(host='0.0.0.0', port=8080, threaded=True)
 `);
-  });
+    });
 
-  // Proxy route for local/tunnel RPi device control commands to prevent CORS & Mixed Content issues
-  app.get("/api/pi-proxy-control", async (req, res) => {
-    const origin = req.query.origin as string;
+    // Proxy route for local/tunnel RPi device control commands to prevent CORS & Mixed Content issues
+    app.get("/api/pi-proxy-control", async (req, res) => {
+        const origin = req.query.origin as string;
 
-    if (!origin) {
-      return res.status(400).json({ error: "Missing origin parameter" });
-    }
+        if (!origin) {
+            return res.status(400).json({ error: "Missing origin parameter" });
+        }
 
-    const params = new URLSearchParams();
-    for (const [k, v] of Object.entries(req.query)) {
-      if (k !== "origin" && v !== undefined) {
-        params.append(k, String(v));
-      }
-    }
+        const params = new URLSearchParams();
+        for (const [k, v] of Object.entries(req.query)) {
+            if (k !== "origin" && v !== undefined) {
+                params.append(k, String(v));
+            }
+        }
 
-    const targetUrl = `${origin}/control?${params.toString()}`;
-    console.log(`[Pi Proxy Control] Forwarding command to: ${targetUrl}`);
+        const targetUrl = `${origin}/control?${params.toString()}`;
+        console.log(`[Pi Proxy Control] Forwarding command to: ${targetUrl}`);
 
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 2500);
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 2500);
 
-      const response = await fetch(targetUrl, {
-        signal: controller.signal,
-        method: "GET"
-      });
-      clearTimeout(timeout);
+            const response = await fetch(targetUrl, {
+                signal: controller.signal,
+                method: "GET"
+            });
+            clearTimeout(timeout);
 
-      const status = response.status;
-      console.log(`[Pi Proxy Control] Destination responded with status: ${status}`);
-      return res.json({ success: true, status });
-    } catch (err: any) {
-      console.error(`[Pi Proxy Control] Failed to forward to ${targetUrl}:`, err.message);
-      return res.status(502).json({ 
-        success: false, 
-        error: err.message || "Gateway error connecting to remote Pi"
-      });
-    }
-  });
+            const status = response.status;
+            console.log(`[Pi Proxy Control] Destination responded with status: ${status}`);
+            return res.json({ success: true, status });
+        } catch (err: any) {
+            console.error(`[Pi Proxy Control] Failed to forward to ${targetUrl}:`, err.message);
+            return res.status(502).json({
+                success: false,
+                error: err.message || "Gateway error connecting to remote Pi"
+            });
+        }
+    });
 
-  app.get("/api/brain-logs", (req, res) => {
-    res.json({ logs: brainLogHistory });
-  });
+    app.get("/api/brain-logs", (req, res) => {
+        res.json({ logs: brainLogHistory });
+    });
 
-  app.get("/api/local-ai-ping", async (req, res) => {
-    const start = Date.now();
-    try {
-      const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), 1500);
-      const pingResponse = await fetch("http://localhost:8001/status", {
-        signal: controller.signal,
-      });
-      clearTimeout(id);
-      if (pingResponse.ok) {
-        const pingTime = Date.now() - start;
-        return res.json({ online: true, ping: pingTime });
-      } else {
-        return res.json({ online: false, error: "Status code: " + pingResponse.status });
-      }
-    } catch (err: any) {
-      return res.json({ online: false, error: err.message || String(err) });
-    }
-  });
+    app.get("/api/local-ai-ping", async (req, res) => {
+        const start = Date.now();
+        try {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), 1500);
+            const pingResponse = await fetch("http://localhost:8001/status", {
+                signal: controller.signal,
+            });
+            clearTimeout(id);
+            if (pingResponse.ok) {
+                const pingTime = Date.now() - start;
+                return res.json({ online: true, ping: pingTime });
+            } else {
+                return res.json({ online: false, error: "Status code: " + pingResponse.status });
+            }
+        } catch (err: any) {
+            return res.json({ online: false, error: err.message || String(err) });
+        }
+    });
 
-  // Real-time connected search using Google Search Grounding with Gemini
-  app.get("/api/real-search", async (req, res) => {
-    const q = req.query.q as string;
-    if (!q) {
-      return res.status(400).json({ error: "Missing query parameter 'q'" });
-    }
+    // Real-time connected search using Google Search Grounding with Gemini
+    app.get("/api/real-search", async (req, res) => {
+        const q = req.query.q as string;
+        if (!q) {
+            return res.status(400).json({ error: "Missing query parameter 'q'" });
+        }
 
-    console.log(`Executing real-world search engine sync for: "${q}"`);
+        console.log(`Executing real-world search engine sync for: "${q}"`);
 
-    try {
-      // Prompt Gemini to synthesize a complete Google Search Engine data response containing exact knowledge graph facts
-      const prompt = `You are the core search engine and knowledge graph system of Google Search.
+        try {
+            // Prompt Gemini to synthesize a complete Google Search Engine data response containing exact knowledge graph facts
+            const prompt = `You are the core search engine and knowledge graph system of Google Search.
 The user is searching for: ${JSON.stringify(q)}
 
 Your objective is to return a complete, accurate, and highly structured Google Search Result payload containing authentic real-world facts, timelines, founders, attributes, and high-quality site URLs.
@@ -4510,136 +4506,136 @@ Important Rules:
 3. Keep attributes accurate to real-world history facts (like Wikipedia lists). For technical queries (e.g., Unison OS), formulate logical properties like 'Developer', 'License', 'Release Version', 'Kernel Specs'.
 4. Do not include any HTML markdown block markup (like \`\`\`json) or outer text. Output raw JSON code only.`;
 
-      const response = await generateContentWithFallback({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          tools: [
-            { googleSearch: {} }
-          ]
+            const response = await generateContentWithFallback({
+                model: "gemini-3.5-flash",
+                contents: prompt,
+                config: {
+                    responseMimeType: "application/json",
+                    tools: [
+                        { googleSearch: {} }
+                    ]
+                }
+            });
+
+            const parsed = JSON.parse(response.text?.trim() || "{}");
+            res.json({
+                query: q,
+                answer: parsed.answer || "Search indexed successfully.",
+                results: parsed.results || [],
+                knowledgeCard: parsed.knowledgeCard || null
+            });
+        } catch (err: any) {
+            console.error("Structured search synthesis failed, returning fallback dynamic JSON structure:", err);
+            res.json({
+                query: q,
+                answer: `Offline engine replica active for "${q}". Search telemetry is nominal.`,
+                results: [
+                    {
+                        title: `${q} - Google Search Search Index`,
+                        url: `https://en.wikipedia.org/wiki/${encodeURIComponent(q)}`,
+                        displayUrl: "en.wikipedia.org",
+                        desc: `Read validated records regarding ${q} on the standard knowledge indexes. Sandbox nodes operational.`,
+                        tag: "ENCYCLOPEDIC",
+                        faviconLetter: q.charAt(0).toUpperCase() || "S",
+                        faviconBg: "bg-indigo-600"
+                    }
+                ],
+                knowledgeCard: {
+                    title: q,
+                    subtitle: "Search Entity",
+                    description: `Diagnostic fallback record describing ${q}. The cloud search engine returned nominal sandbox values.`,
+                    sourceName: "Wikipedia Proxy",
+                    sourceUrl: "https://en.wikipedia.org",
+                    attributes: [
+                        { "label": "Status", "value": "Offline Replica Active" },
+                        { "label": "Index Engine", "value": "Unison Core OS v4" }
+                    ]
+                }
+            });
         }
-      });
+    });
 
-      const parsed = JSON.parse(response.text?.trim() || "{}");
-      res.json({
-        query: q,
-        answer: parsed.answer || "Search indexed successfully.",
-        results: parsed.results || [],
-        knowledgeCard: parsed.knowledgeCard || null
-      });
-    } catch (err: any) {
-      console.error("Structured search synthesis failed, returning fallback dynamic JSON structure:", err);
-      res.json({
-        query: q,
-        answer: `Offline engine replica active for "${q}". Search telemetry is nominal.`,
-        results: [
-          {
-            title: `${q} - Google Search Search Index`,
-            url: `https://en.wikipedia.org/wiki/${encodeURIComponent(q)}`,
-            displayUrl: "en.wikipedia.org",
-            desc: `Read validated records regarding ${q} on the standard knowledge indexes. Sandbox nodes operational.`,
-            tag: "ENCYCLOPEDIC",
-            faviconLetter: q.charAt(0).toUpperCase() || "S",
-            faviconBg: "bg-indigo-600"
-          }
-        ],
-        knowledgeCard: {
-          title: q,
-          subtitle: "Search Entity",
-          description: `Diagnostic fallback record describing ${q}. The cloud search engine returned nominal sandbox values.`,
-          sourceName: "Wikipedia Proxy",
-          sourceUrl: "https://en.wikipedia.org",
-          attributes: [
-            { "label": "Status", "value": "Offline Replica Active" },
-            { "label": "Index Engine", "value": "Unison Core OS v4" }
-          ]
+    // Fetch real sites proxy and visual compilation using Gemini
+    app.get("/api/browse-real-site", async (req, res) => {
+        const targetUrl = req.query.url as string;
+        if (!targetUrl) {
+            return res.status(400).json({ error: "Missing 'url' parameter" });
         }
-      });
-    }
-  });
 
-  // Fetch real sites proxy and visual compilation using Gemini
-  app.get("/api/browse-real-site", async (req, res) => {
-    const targetUrl = req.query.url as string;
-    if (!targetUrl) {
-      return res.status(400).json({ error: "Missing 'url' parameter" });
-    }
+        console.log(`Browsing real-world site: "${targetUrl}"`);
 
-    console.log(`Browsing real-world site: "${targetUrl}"`);
+        let url = targetUrl.trim();
+        if (!/^https?:\/\//i.test(url) && !url.startsWith("titan://")) {
+            url = "https://" + url;
+        }
 
-    let url = targetUrl.trim();
-    if (!/^https?:\/\//i.test(url) && !url.startsWith("titan://")) {
-      url = "https://" + url;
-    }
+        if (url.startsWith("titan://")) {
+            return res.json({
+                success: true,
+                url: url,
+                data: {
+                    title: "Titan Internal Node System",
+                    domain: "titan.os",
+                    url: "titan://home",
+                    themeColor: "#818cf8",
+                    hero: {
+                        title: "Titan OS Kernel Core",
+                        desc: "Active sandboxed terminal and web browser nodes synchronizing details perfectly.",
+                        ctaUrl: "titan://home"
+                    },
+                    sections: [
+                        {
+                            heading: "Interactive Entrypoints",
+                            type: "grid",
+                            items: [
+                                { title: "Search Engine Home", desc: "Access the unified search portal", url: "titan://home", tag: "CORE" },
+                                { title: "Wikipedia Encyclopedia", desc: "Replica portal for general topics", url: "wikipedia.org", tag: "DOCS" },
+                                { title: "Hacker News Discussions", desc: "Silicon valley developer discussions", url: "news.ycombinator.com", tag: "FORUM" },
+                                { title: "Weather Sensors Forecast", desc: "Telemetry diagnostic weather conditions", url: "weather.com", tag: "METRIC" }
+                            ]
+                        }
+                    ]
+                }
+            });
+        }
 
-    if (url.startsWith("titan://")) {
-      return res.json({
-        success: true,
-        url: url,
-        data: {
-          title: "Titan Internal Node System",
-          domain: "titan.os",
-          url: "titan://home",
-          themeColor: "#818cf8",
-          hero: {
-            title: "Titan OS Kernel Core",
-            desc: "Active sandboxed terminal and web browser nodes synchronizing details perfectly.",
-            ctaUrl: "titan://home"
-          },
-          sections: [
-            {
-              heading: "Interactive Entrypoints",
-              type: "grid",
-              items: [
-                { title: "Search Engine Home", desc: "Access the unified search portal", url: "titan://home", tag: "CORE" },
-                { title: "Wikipedia Encyclopedia", desc: "Replica portal for general topics", url: "wikipedia.org", tag: "DOCS" },
-                { title: "Hacker News Discussions", desc: "Silicon valley developer discussions", url: "news.ycombinator.com", tag: "FORUM" },
-                { title: "Weather Sensors Forecast", desc: "Telemetry diagnostic weather conditions", url: "weather.com", tag: "METRIC" }
-              ]
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 6500);
+
+            const response = await fetch(url, {
+                signal: controller.signal,
+                headers: {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.5"
+                }
+            });
+
+            clearTimeout(timeoutId);
+
+            const contentType = response.headers.get("content-type") || "";
+            let rawText = "";
+            if (contentType.includes("application/json")) {
+                const json = await response.json();
+                rawText = JSON.stringify(json, null, 2);
+            } else {
+                rawText = await response.text();
             }
-          ]
-        }
-      });
-    }
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6500);
+            // Cleanup and down-size raw HTML to fit prompt tokens efficiently
+            let cleanHtml = rawText
+                .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+                .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
+                .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, "")
+                .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, "")
+                .replace(/<link\b[^<]*>/gi, "");
 
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.5"
-        }
-      });
+            if (cleanHtml.length > 25000) {
+                cleanHtml = cleanHtml.slice(0, 25000) + "\n...[Content truncated for visual compiler event loop]...";
+            }
 
-      clearTimeout(timeoutId);
-
-      const contentType = response.headers.get("content-type") || "";
-      let rawText = "";
-      if (contentType.includes("application/json")) {
-        const json = await response.json();
-        rawText = JSON.stringify(json, null, 2);
-      } else {
-        rawText = await response.text();
-      }
-
-      // Cleanup and down-size raw HTML to fit prompt tokens efficiently
-      let cleanHtml = rawText
-        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
-        .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
-        .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, "")
-        .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, "")
-        .replace(/<link\b[^<]*>/gi, "");
-
-      if (cleanHtml.length > 25000) {
-        cleanHtml = cleanHtml.slice(0, 25000) + "\n...[Content truncated for visual compiler event loop]...";
-      }
-
-      const prompt = `You are the Chromium Client Rendering Compiler of Unison OS.
+            const prompt = `You are the Chromium Client Rendering Compiler of Unison OS.
 We have successfully connected and fetched the raw html/text content of: ${JSON.stringify(url)}.
 We need to compile it into a beautifully organized, accurate, and completely interactive web interface model.
 
@@ -4677,28 +4673,28 @@ Important execution rules:
 3. If this is a forum like Hacker News, return the actual articles on the page!
 4. Do NOT output any markdown ticks (like \`\`\`json) or wrapping text. Return only valid raw JSON.`;
 
-      const responseCompiler = await generateContentWithFallback({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json"
-        }
-      });
+            const responseCompiler = await generateContentWithFallback({
+                model: "gemini-3.5-flash",
+                contents: prompt,
+                config: {
+                    responseMimeType: "application/json"
+                }
+            });
 
-      const text = responseCompiler.text?.trim() || "{}";
-      const parsed = JSON.parse(text);
+            const text = responseCompiler.text?.trim() || "{}";
+            const parsed = JSON.parse(text);
 
-      res.json({
-        success: true,
-        url: url,
-        data: parsed
-      });
+            res.json({
+                success: true,
+                url: url,
+                data: parsed
+            });
 
-    } catch (err: any) {
-      console.warn(`Direct fetch failed for ${url} (blocked or network timeout), initiating smart visual synthesis:`, err);
-      // Fallback: Gemini synthesizes the exact current real-world state, news, and links for this URL
-      try {
-        const fallbackPrompt = `You are the Chromium Web Synthesizer of Unison OS.
+        } catch (err: any) {
+            console.warn(`Direct fetch failed for ${url} (blocked or network timeout), initiating smart visual synthesis:`, err);
+            // Fallback: Gemini synthesizes the exact current real-world state, news, and links for this URL
+            try {
+                const fallbackPrompt = `You are the Chromium Web Synthesizer of Unison OS.
 We are unable to browse directly to the endpoint: "${url}" (blocked, Cloudflare CAPTCHA, or network timeout).
 Your task is to generate an authentic, structurally rich, and highly accurate real-world representation of this website as it is right now in 2026. Keep the news headlines, articles, links, and layout absolutely faithful to what is realistically on that site.
 
@@ -4732,40 +4728,40 @@ Construct a gorgeous structure and return a single valid JSON matching this sche
 
 Format as raw JSON code only. No markdown ticks.`;
 
-        const responseCompiler = await generateContentWithFallback({
-          model: "gemini-3.5-flash",
-          contents: fallbackPrompt,
-          config: {
-            responseMimeType: "application/json"
-          }
-        });
+                const responseCompiler = await generateContentWithFallback({
+                    model: "gemini-3.5-flash",
+                    contents: fallbackPrompt,
+                    config: {
+                        responseMimeType: "application/json"
+                    }
+                });
 
-        const text = responseCompiler.text?.trim() || "{}";
-        const parsed = JSON.parse(text);
+                const text = responseCompiler.text?.trim() || "{}";
+                const parsed = JSON.parse(text);
 
-        res.json({
-          success: true,
-          synthetic: true,
-          url: url,
-          data: parsed
-        });
+                res.json({
+                    success: true,
+                    synthetic: true,
+                    url: url,
+                    data: parsed
+                });
 
-      } catch (innerErr: any) {
-        res.status(500).json({ error: "Browser compilation failed", message: innerErr.message });
-      }
-    }
-  });
+            } catch (innerErr: any) {
+                res.status(500).json({ error: "Browser compilation failed", message: innerErr.message });
+            }
+        }
+    });
 
-  // AI Browser Agent Synthesis for tactical research reporting
-  app.get("/api/agent-research", async (req, res) => {
-    const q = req.query.q as string;
-    const url = req.query.url as string;
-    if (!q) {
-      return res.status(400).json({ error: "Missing query 'q'" });
-    }
+    // AI Browser Agent Synthesis for tactical research reporting
+    app.get("/api/agent-research", async (req, res) => {
+        const q = req.query.q as string;
+        const url = req.query.url as string;
+        if (!q) {
+            return res.status(400).json({ error: "Missing query 'q'" });
+        }
 
-    try {
-      const prompt = `You are the Tactical Browser Agent of Unison OS.
+        try {
+            const prompt = `You are the Tactical Browser Agent of Unison OS.
 We are executing an automated co-pilot session for the user target: "${q}".
 The current page location is: "${url || "unspecified URL"}".
 
@@ -4778,399 +4774,399 @@ Analyze the target and compile a comprehensive report. Include:
 
 Keep the presentation format elegant, using high-impact markdown headers, bullet points, and clean bold accents. Keep the tone professional, objective, and realistic.`;
 
-      const geminiResponse = await generateContentWithFallback({
-        model: "gemini-3.5-flash",
-        contents: prompt
-      });
+            const geminiResponse = await generateContentWithFallback({
+                model: "gemini-3.5-flash",
+                contents: prompt
+            });
 
-      res.json({
-        success: true,
-        summary: geminiResponse.text || "No summary generated."
-      });
-    } catch (e: any) {
-      res.status(500).json({ error: "Failed to generate summary", message: e.message });
-    }
-  });
+            res.json({
+                success: true,
+                summary: geminiResponse.text || "No summary generated."
+            });
+        } catch (e: any) {
+            res.status(500).json({ error: "Failed to generate summary", message: e.message });
+        }
+    });
 
-  app.use(express.json({ limit: '10mb' }));
+    app.use(express.json({ limit: '10mb' }));
 
-  // Spotify Auth Code Exchange Gateway
-  app.post("/api/spotify/exchange", async (req, res) => {
-    const { code, redirectUri, clientId: customClientId, clientSecret: customClientSecret } = req.body;
-    if (!code || !redirectUri) {
-      return res.status(400).json({ error: "Missing code or redirectUri" });
-    }
+    // Spotify Auth Code Exchange Gateway
+    app.post("/api/spotify/exchange", async (req, res) => {
+        const { code, redirectUri, clientId: customClientId, clientSecret: customClientSecret } = req.body;
+        if (!code || !redirectUri) {
+            return res.status(400).json({ error: "Missing code or redirectUri" });
+        }
 
-    try {
-      // Prioritize client-supplied parameters, then process env, then developer hardcoded defaults
-      const clientId = customClientId || process.env.SPOTIFY_CLIENT_ID || "4f09ac4fafe84baea3daeb9732e2c58d";
-      const clientSecret = customClientSecret || process.env.SPOTIFY_CLIENT_SECRET || "995424cd0a2a41db9c80b8560ced0427";
+        try {
+            // Prioritize client-supplied parameters, then process env, then developer hardcoded defaults
+            const clientId = customClientId || process.env.SPOTIFY_CLIENT_ID || "4f09ac4fafe84baea3daeb9732e2c58d";
+            const clientSecret = customClientSecret || process.env.SPOTIFY_CLIENT_SECRET || "995424cd0a2a41db9c80b8560ced0427";
 
-      const params = new URLSearchParams();
-      params.append("grant_type", "authorization_code");
-      params.append("code", code);
-      params.append("redirect_uri", redirectUri);
-      params.append("client_id", clientId);
-      params.append("client_secret", clientSecret);
+            const params = new URLSearchParams();
+            params.append("grant_type", "authorization_code");
+            params.append("code", code);
+            params.append("redirect_uri", redirectUri);
+            params.append("client_id", clientId);
+            params.append("client_secret", clientSecret);
 
-      const response = await fetch("https://accounts.spotify.com/api/token", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: params.toString(),
-      });
+            const response = await fetch("https://accounts.spotify.com/api/token", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: params.toString(),
+            });
 
-      const data = await response.json();
-      if (!response.ok) {
-        console.error("Spotify token exchange failed. Exchange params was:", {
-          grant_type: "authorization_code",
-          redirect_uri: redirectUri,
-          client_id: clientId
-        }, "Error response:", data);
-        return res.status(response.status).json(data);
-      }
+            const data = await response.json();
+            if (!response.ok) {
+                console.error("Spotify token exchange failed. Exchange params was:", {
+                    grant_type: "authorization_code",
+                    redirect_uri: redirectUri,
+                    client_id: clientId
+                }, "Error response:", data);
+                return res.status(response.status).json(data);
+            }
 
-      res.json(data);
-    } catch (err: any) {
-      console.error("Error exchanging Spotify auth code:", err);
-      res.status(500).json({ error: "Internal server error during Spotify exchange", details: err.message });
-    }
-  });
+            res.json(data);
+        } catch (err: any) {
+            console.error("Error exchanging Spotify auth code:", err);
+            res.status(500).json({ error: "Internal server error during Spotify exchange", details: err.message });
+        }
+    });
 
     // Dedicated robust endpoint to upload PDF to Google Drive
     app.post("/api/google-drive/upload-pdf", express.json({ limit: "50mb" }), async (req: any, res: any) => {
-      const { accessToken, fileName, fileBase64 } = req.body;
-      if (!accessToken || !fileName || !fileBase64) {
-        return res.status(400).json({ error: "accessToken, fileName, and fileBase64 are required." });
-      }
-
-      try {
-        const metadata = {
-          name: fileName,
-          mimeType: 'application/pdf',
-        };
-
-        const boundary = 'xxxxxxxxxxxxxxxx';
-        const delimiter = `\r\n--${boundary}\r\n`;
-        const closeDelimiter = `\r\n--${boundary}--`;
-
-        const multipartBody = Buffer.concat([
-          Buffer.from(delimiter + 'Content-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(metadata) + delimiter),
-          Buffer.from('Content-Type: application/pdf\r\nContent-Transfer-Encoding: base64\r\n\r\n'),
-          Buffer.from(fileBase64, 'base64'),
-          Buffer.from(closeDelimiter)
-        ]);
-
-        const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': `multipart/related; boundary=${boundary}`,
-            'Content-Length': multipartBody.length.toString(),
-          },
-          body: multipartBody
-        });
-
-        if (!response.ok) {
-          const errText = await response.text();
-          throw new Error(`Google Drive upload request failed upstream: ${response.statusText}. Details: ${errText}`);
+        const { accessToken, fileName, fileBase64 } = req.body;
+        if (!accessToken || !fileName || !fileBase64) {
+            return res.status(400).json({ error: "accessToken, fileName, and fileBase64 are required." });
         }
 
-        const data = await response.json();
-        res.json(data);
-      } catch (err: any) {
-        console.error("Google Drive upload-pdf error:", err);
-        res.status(500).json({ error: "Failed to upload file to Google Drive", details: err.message });
-      }
+        try {
+            const metadata = {
+                name: fileName,
+                mimeType: 'application/pdf',
+            };
+
+            const boundary = 'xxxxxxxxxxxxxxxx';
+            const delimiter = `\r\n--${boundary}\r\n`;
+            const closeDelimiter = `\r\n--${boundary}--`;
+
+            const multipartBody = Buffer.concat([
+                Buffer.from(delimiter + 'Content-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(metadata) + delimiter),
+                Buffer.from('Content-Type: application/pdf\r\nContent-Transfer-Encoding: base64\r\n\r\n'),
+                Buffer.from(fileBase64, 'base64'),
+                Buffer.from(closeDelimiter)
+            ]);
+
+            const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': `multipart/related; boundary=${boundary}`,
+                    'Content-Length': multipartBody.length.toString(),
+                },
+                body: multipartBody
+            });
+
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`Google Drive upload request failed upstream: ${response.statusText}. Details: ${errText}`);
+            }
+
+            const data = await response.json();
+            res.json(data);
+        } catch (err: any) {
+            console.error("Google Drive upload-pdf error:", err);
+            res.status(500).json({ error: "Failed to upload file to Google Drive", details: err.message });
+        }
     });
 
     // Dedicated robust endpoint to download file from Google Drive as Base64
     app.post("/api/google-drive/download-pdf", express.json(), async (req: any, res: any) => {
-      const { accessToken, fileId } = req.body;
-      if (!accessToken || !fileId) {
-        return res.status(400).json({ error: "accessToken and fileId are required." });
-      }
-
-      try {
-        const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`
-          }
-        });
-
-        if (!response.ok) {
-          const errText = await response.text();
-          throw new Error(`Google Drive download request failed upstream: ${response.statusText}. Details: ${errText}`);
+        const { accessToken, fileId } = req.body;
+        if (!accessToken || !fileId) {
+            return res.status(400).json({ error: "accessToken and fileId are required." });
         }
 
-        const arrayBuffer = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        const base64 = buffer.toString('base64');
+        try {
+            const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`
+                }
+            });
 
-        res.json({ base64 });
-      } catch (err: any) {
-        console.error("Google Drive download-pdf error:", err);
-        res.status(500).json({ error: "Failed to download file from Google Drive", details: err.message });
-      }
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`Google Drive download request failed upstream: ${response.statusText}. Details: ${errText}`);
+            }
+
+            const arrayBuffer = await response.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            const base64 = buffer.toString('base64');
+
+            res.json({ base64 });
+        } catch (err: any) {
+            console.error("Google Drive download-pdf error:", err);
+            res.status(500).json({ error: "Failed to download file from Google Drive", details: err.message });
+        }
     });
 
     // Google Workspace API Proxy to bypass sandbox/CORS issues and guarantee 100% stable connections
     app.all("/api/google-proxy", async (req: any, res: any) => {
-      const targetUrl = req.query.url as string;
-      if (!targetUrl) {
-        return res.status(400).json({ error: "Target URL (url query param) is required." });
-      }
-
-      // Only allow urls starting with google api domains for security
-      if (!targetUrl.startsWith("https://gmail.googleapis.com/") && 
-          !targetUrl.startsWith("https://www.googleapis.com/") && 
-          !targetUrl.startsWith("https://sheets.googleapis.com/") && 
-          !targetUrl.startsWith("https://slides.googleapis.com/")) {
-        return res.status(400).json({ error: "Invalid target URL domain for Google proxy." });
-      }
-
-      try {
-        const headers: Record<string, string> = {};
-        if (req.headers.authorization) {
-          headers["Authorization"] = req.headers.authorization;
-        }
-        if (req.headers["content-type"]) {
-          headers["Content-Type"] = req.headers["content-type"] as string;
-        }
-        // Force User-Agent to avoid potential GFE block on custom/empty user-agents
-        headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-
-        const fetchOptions: any = {
-          method: req.method,
-          headers,
-        };
-
-        if (["POST", "PUT", "PATCH"].includes(req.method) && req.body) {
-          fetchOptions.body = JSON.stringify(req.body);
+        const targetUrl = req.query.url as string;
+        if (!targetUrl) {
+            return res.status(400).json({ error: "Target URL (url query param) is required." });
         }
 
-        const redactedAuth = req.headers.authorization ? `${req.headers.authorization.substring(0, 15)}...redacted` : "none";
-        console.log(`[Google-Proxy] Forwarding request to: ${targetUrl} | Method: ${req.method} | AuthHeader: ${redactedAuth}`);
-
-        const response = await fetch(targetUrl, fetchOptions);
-        const isJson = response.headers.get("content-type")?.includes("application/json");
-
-        console.log(`[Google-Proxy] Upstream response status: ${response.status} | Content-Type: ${response.headers.get("content-type")}`);
-
-        res.status(response.status);
-        if (isJson) {
-          const body = await response.json();
-          res.json(body);
-        } else {
-          const text = await response.text();
-          if (response.status >= 400) {
-            console.warn(`[Google-Proxy] Error response preview:`, text.substring(0, 300));
-          }
-          res.send(text);
+        // Only allow urls starting with google api domains for security
+        if (!targetUrl.startsWith("https://gmail.googleapis.com/") &&
+            !targetUrl.startsWith("https://www.googleapis.com/") &&
+            !targetUrl.startsWith("https://sheets.googleapis.com/") &&
+            !targetUrl.startsWith("https://slides.googleapis.com/")) {
+            return res.status(400).json({ error: "Invalid target URL domain for Google proxy." });
         }
-      } catch (err: any) {
-        console.error("Google proxy failed:", err);
-        res.status(500).json({ error: "Google Proxy request failed", details: err.message });
-      }
+
+        try {
+            const headers: Record<string, string> = {};
+            if (req.headers.authorization) {
+                headers["Authorization"] = req.headers.authorization;
+            }
+            if (req.headers["content-type"]) {
+                headers["Content-Type"] = req.headers["content-type"] as string;
+            }
+            // Force User-Agent to avoid potential GFE block on custom/empty user-agents
+            headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+            const fetchOptions: any = {
+                method: req.method,
+                headers,
+            };
+
+            if (["POST", "PUT", "PATCH"].includes(req.method) && req.body) {
+                fetchOptions.body = JSON.stringify(req.body);
+            }
+
+            const redactedAuth = req.headers.authorization ? `${req.headers.authorization.substring(0, 15)}...redacted` : "none";
+            console.log(`[Google-Proxy] Forwarding request to: ${targetUrl} | Method: ${req.method} | AuthHeader: ${redactedAuth}`);
+
+            const response = await fetch(targetUrl, fetchOptions);
+            const isJson = response.headers.get("content-type")?.includes("application/json");
+
+            console.log(`[Google-Proxy] Upstream response status: ${response.status} | Content-Type: ${response.headers.get("content-type")}`);
+
+            res.status(response.status);
+            if (isJson) {
+                const body = await response.json();
+                res.json(body);
+            } else {
+                const text = await response.text();
+                if (response.status >= 400) {
+                    console.warn(`[Google-Proxy] Error response preview:`, text.substring(0, 300));
+                }
+                res.send(text);
+            }
+        } catch (err: any) {
+            console.error("Google proxy failed:", err);
+            res.status(500).json({ error: "Google Proxy request failed", details: err.message });
+        }
     });
 
-  // Gemini Voice Preview Generator
-  app.post("/api/gemini/voice-preview", async (req, res) => {
-    const { voice } = req.body;
-    if (!voice) {
-      return res.status(400).json({ error: "Voice name is required" });
-    }
-    try {
-      const targetVoice = voice === 'Zephyr' ? 'Aoede' : voice;
-      const promptText = `This is Unison speaking in the ${voice} vocal configuration.`;
-      const response = await generateContentWithFallback({
-        model: "gemini-3.1-flash-tts-preview",
-        contents: [{ parts: [{ text: promptText }] }],
-        config: {
-          responseModalities: ["AUDIO"],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: targetVoice },
-            },
-          },
-        },
-      });
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      res.json({ success: true, audio: base64Audio });
-    } catch (err: any) {
-      console.error("Voice preview generation failed:", err);
-      res.status(500).json({ error: err.message || String(err) });
-    }
-  });
-
-  // Real-time price tracker endpoint using Google Search Grounding to check for updates
-  app.post("/api/tracker/price-updates", express.json(), async (req, res) => {
-    try {
-      const { items } = req.body;
-      if (!items || !Array.isArray(items)) {
-        return res.status(400).json({ error: "Invalid items parameter" });
-      }
-
-      const updatedItems = [];
-      for (const item of items) {
-        let updatedPrice = item.price;
-        let note = "No update found";
-        
+    // Gemini Voice Preview Generator
+    app.post("/api/gemini/voice-preview", async (req, res) => {
+        const { voice } = req.body;
+        if (!voice) {
+            return res.status(400).json({ error: "Voice name is required" });
+        }
         try {
-          const queryText = `current retail price of ${item.name} in USD`;
-          console.log(`[PriceTracker] Searching Google for: ${queryText}`);
-          
-          const response = await googleGenAI.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: `What is the current standard retail price of "${item.name}"? Answer with ONLY the raw numerical price in USD (e.g. 19.99 or 1249.00). If you cannot find a exact matches, provide a reasonable current market price estimate. Do not include any dollar signs, letters, or other text.`,
-            config: {
-              tools: [{ googleSearch: {} }]
+            const targetVoice = voice === 'Zephyr' ? 'Aoede' : voice;
+            const promptText = `This is Unison speaking in the ${voice} vocal configuration.`;
+            const response = await generateContentWithFallback({
+                model: "gemini-3.1-flash-tts-preview",
+                contents: [{ parts: [{ text: promptText }] }],
+                config: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: { voiceName: targetVoice },
+                        },
+                    },
+                },
+            });
+            const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+            res.json({ success: true, audio: base64Audio });
+        } catch (err: any) {
+            console.error("Voice preview generation failed:", err);
+            res.status(500).json({ error: err.message || String(err) });
+        }
+    });
+
+    // Real-time price tracker endpoint using Google Search Grounding to check for updates
+    app.post("/api/tracker/price-updates", express.json(), async (req, res) => {
+        try {
+            const { items } = req.body;
+            if (!items || !Array.isArray(items)) {
+                return res.status(400).json({ error: "Invalid items parameter" });
             }
-          });
-          
-          const text = response.text?.trim() || "";
-          console.log(`[PriceTracker] Search response for ${item.name}: ${text}`);
-          
-          const match = text.match(/\d+(\.\d+)?/);
-          if (match) {
-            const parsed = parseFloat(match[0]);
-            if (!isNaN(parsed) && parsed > 0) {
-              updatedPrice = parsed;
-              note = "Price verified via Google Search Grounding";
+
+            const updatedItems = [];
+            for (const item of items) {
+                let updatedPrice = item.price;
+                let note = "No update found";
+
+                try {
+                    const queryText = `current retail price of ${item.name} in USD`;
+                    console.log(`[PriceTracker] Searching Google for: ${queryText}`);
+
+                    const response = await googleGenAI.models.generateContent({
+                        model: "gemini-2.5-flash",
+                        contents: `What is the current standard retail price of "${item.name}"? Answer with ONLY the raw numerical price in USD (e.g. 19.99 or 1249.00). If you cannot find a exact matches, provide a reasonable current market price estimate. Do not include any dollar signs, letters, or other text.`,
+                        config: {
+                            tools: [{ googleSearch: {} }]
+                        }
+                    });
+
+                    const text = response.text?.trim() || "";
+                    console.log(`[PriceTracker] Search response for ${item.name}: ${text}`);
+
+                    const match = text.match(/\d+(\.\d+)?/);
+                    if (match) {
+                        const parsed = parseFloat(match[0]);
+                        if (!isNaN(parsed) && parsed > 0) {
+                            updatedPrice = parsed;
+                            note = "Price verified via Google Search Grounding";
+                        }
+                    }
+                } catch (searchErr) {
+                    console.warn(`[PriceTracker] Google search failed for ${item.name}, using simulated variation:`, searchErr);
+                    const changePercent = (Math.random() * 6 - 4) / 100;
+                    updatedPrice = parseFloat((item.price * (1 + changePercent)).toFixed(2));
+                    note = "Simulated real-time tracker update";
+                }
+
+                const diff = updatedPrice - item.price;
+                const status = diff < 0 ? 'down' : diff > 0 ? 'up' : 'stable';
+                const changePercent = parseFloat(((updatedPrice - item.price) / (item.price || 1) * 100).toFixed(1));
+
+                updatedItems.push({
+                    id: item.id,
+                    name: item.name,
+                    originalPrice: item.price,
+                    price: updatedPrice,
+                    status,
+                    changePercent,
+                    lastUpdated: new Date().toISOString(),
+                    note
+                });
             }
-          }
-        } catch (searchErr) {
-          console.warn(`[PriceTracker] Google search failed for ${item.name}, using simulated variation:`, searchErr);
-          const changePercent = (Math.random() * 6 - 4) / 100;
-          updatedPrice = parseFloat((item.price * (1 + changePercent)).toFixed(2));
-          note = "Simulated real-time tracker update";
+
+            res.json({ success: true, items: updatedItems });
+        } catch (err: any) {
+            console.error("Price tracker failed:", err);
+            res.status(500).json({ error: err.message || String(err) });
         }
+    });
 
-        const diff = updatedPrice - item.price;
-        const status = diff < 0 ? 'down' : diff > 0 ? 'up' : 'stable';
-        const changePercent = parseFloat(((updatedPrice - item.price) / (item.price || 1) * 100).toFixed(1));
+    // Secure server-side proxy for streaming Gemini AI chat responses
+    app.post("/api/gemini/chat", async (req, res) => {
+        try {
+            const { contents, systemInstruction, tools, toolMode, selectedModel, aiEnableCache, temperature, thinkingLevel, aiContextLimit } = req.body;
+            const customApiKey = (req.headers["x-gemini-api-key"] as string) || (req.headers["X-Gemini-API-Key"] as string) || req.body.customApiKey || "";
 
-        updatedItems.push({
-          id: item.id,
-          name: item.name,
-          originalPrice: item.price,
-          price: updatedPrice,
-          status,
-          changePercent,
-          lastUpdated: new Date().toISOString(),
-          note
-        });
-      }
+            console.log("[GEMINI_PROXY] Stream requested. Key length:", customApiKey ? customApiKey.length : (process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.length : "MISSING/EMPTY"));
+            console.log(`[GEMINI_PROXY] Model: ${selectedModel || "default"} | ToolMode: ${toolMode || "default"}`);
 
-      res.json({ success: true, items: updatedItems });
-    } catch (err: any) {
-      console.error("Price tracker failed:", err);
-      res.status(500).json({ error: err.message || String(err) });
-    }
-  });
+            const model = selectedModel || "gemini-3.5-flash";
 
-  // Secure server-side proxy for streaming Gemini AI chat responses
-  app.post("/api/gemini/chat", async (req, res) => {
-    try {
-      const { contents, systemInstruction, tools, toolMode, selectedModel, aiEnableCache, temperature, thinkingLevel, aiContextLimit } = req.body;
-      const customApiKey = (req.headers["x-gemini-api-key"] as string) || (req.headers["X-Gemini-API-Key"] as string) || req.body.customApiKey || "";
-      
-      console.log("[GEMINI_PROXY] Stream requested. Key length:", customApiKey ? customApiKey.length : (process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.length : "MISSING/EMPTY"));
-      console.log(`[GEMINI_PROXY] Model: ${selectedModel || "default"} | ToolMode: ${toolMode || "default"}`);
+            // Configure dynamic temperature and thinking config
+            const targetThinkingLevel = sanitizeThinkingLevel(thinkingLevel) || (toolMode === 'convo' ? "MINIMAL" : undefined);
+            const activeThinkingConfig = targetThinkingLevel ? { thinkingLevel: targetThinkingLevel } : undefined;
 
-      const model = selectedModel || "gemini-3.5-flash";
+            // Compute a secure hash for the entire semantic request
+            const cacheKey = computePayloadHash({
+                model,
+                contents,
+                systemInstruction,
+                toolMode,
+                temperature,
+                thinkingLevel: targetThinkingLevel,
+                aiContextLimit
+            });
 
-      // Configure dynamic temperature and thinking config
-      const targetThinkingLevel = sanitizeThinkingLevel(thinkingLevel) || (toolMode === 'convo' ? "MINIMAL" : undefined);
-      const activeThinkingConfig = targetThinkingLevel ? { thinkingLevel: targetThinkingLevel } : undefined;
+            if (aiEnableCache !== false && aiCache[cacheKey]) {
+                console.log(`[AI_CACHE] Stream cache hit for key ${cacheKey}. Instant stream replay of ${aiCache[cacheKey].text.length} chars...`);
+                res.setHeader("Content-Type", "text/event-stream");
+                res.setHeader("Cache-Control", "no-cache");
+                res.setHeader("Connection", "keep-alive");
 
-      // Compute a secure hash for the entire semantic request
-      const cacheKey = computePayloadHash({
-        model,
-        contents,
-        systemInstruction,
-        toolMode,
-        temperature,
-        thinkingLevel: targetThinkingLevel,
-        aiContextLimit
-      });
+                const payload = {
+                    text: aiCache[cacheKey].text,
+                    candidates: aiCache[cacheKey].candidates || null,
+                    usageMetadata: { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 },
+                    cached: true
+                };
+                res.write(`data: ${JSON.stringify(payload)}\n\n`);
+                res.end();
+                return;
+            }
 
-      if (aiEnableCache !== false && aiCache[cacheKey]) {
-        console.log(`[AI_CACHE] Stream cache hit for key ${cacheKey}. Instant stream replay of ${aiCache[cacheKey].text.length} chars...`);
-        res.setHeader("Content-Type", "text/event-stream");
-        res.setHeader("Cache-Control", "no-cache");
-        res.setHeader("Connection", "keep-alive");
-        
-        const payload = {
-          text: aiCache[cacheKey].text,
-          candidates: aiCache[cacheKey].candidates || null,
-          usageMetadata: { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 },
-          cached: true
-        };
-        res.write(`data: ${JSON.stringify(payload)}\n\n`);
-        res.end();
-        return;
-      }
+            // Context Window Optimizer & Character Recycled Buffer
+            let processedContents = contents;
+            if (processedContents && Array.isArray(processedContents) && aiContextLimit) {
+                let currentLength = 0;
+                const optimized: any[] = [];
+                // Navigate reverse-chronologically so you keep newer records first
+                for (let i = processedContents.length - 1; i >= 0; i--) {
+                    const turn = processedContents[i];
+                    const turnLength = JSON.stringify(turn).length;
+                    if (currentLength + turnLength < Number(aiContextLimit) || optimized.length < 2) {
+                        optimized.unshift(turn);
+                        currentLength += turnLength;
+                    } else {
+                        console.log(`[CONTEXT_OPTIMIZER] Pruning older conversational turn (${turnLength} characters) to defend response latency boundaries.`);
+                    }
+                }
+                processedContents = optimized;
+            }
 
-      // Context Window Optimizer & Character Recycled Buffer
-      let processedContents = contents;
-      if (processedContents && Array.isArray(processedContents) && aiContextLimit) {
-        let currentLength = 0;
-        const optimized: any[] = [];
-        // Navigate reverse-chronologically so you keep newer records first
-        for (let i = processedContents.length - 1; i >= 0; i--) {
-          const turn = processedContents[i];
-          const turnLength = JSON.stringify(turn).length;
-          if (currentLength + turnLength < Number(aiContextLimit) || optimized.length < 2) {
-            optimized.unshift(turn);
-            currentLength += turnLength;
-          } else {
-            console.log(`[CONTEXT_OPTIMIZER] Pruning older conversational turn (${turnLength} characters) to defend response latency boundaries.`);
-          }
-        }
-        processedContents = optimized;
-      }
-      
-      let lastUserMsg = "";
-      if (processedContents && processedContents.length > 0) {
-        const lastMsg = processedContents[processedContents.length - 1];
-        if (lastMsg && lastMsg.parts) {
-          lastUserMsg = lastMsg.parts.map((p: any) => p.text || "").join(" ");
-        }
-      }
-      const isNewsRequest = /latest news|todays news|news today|current news|todays latest news|what is todays news|what is the news|world news/.test(lastUserMsg.toLowerCase()) || (lastUserMsg.toLowerCase().includes("news") && (lastUserMsg.toLowerCase().includes("today") || lastUserMsg.toLowerCase().includes("latest")));
+            let lastUserMsg = "";
+            if (processedContents && processedContents.length > 0) {
+                const lastMsg = processedContents[processedContents.length - 1];
+                if (lastMsg && lastMsg.parts) {
+                    lastUserMsg = lastMsg.parts.map((p: any) => p.text || "").join(" ");
+                }
+            }
+            const isNewsRequest = /latest news|todays news|news today|current news|todays latest news|what is todays news|what is the news|world news/.test(lastUserMsg.toLowerCase()) || (lastUserMsg.toLowerCase().includes("news") && (lastUserMsg.toLowerCase().includes("today") || lastUserMsg.toLowerCase().includes("latest")));
 
-      // Determine tools to use based on toolMode
-      let activeTools: any = undefined;
-      const forceGrounding = req.body.forceGrounding === true;
-      if (forceGrounding) {
-        activeTools = [{ googleSearch: {} }];
-      } else if (isNewsRequest) {
-        activeTools = [{ googleSearch: {} }]; // Force enable search on news requests to guarantee real-time grounding
-      } else if (toolMode === 'convo') {
-        activeTools = undefined; // disable search completely
-      } else if (toolMode === 'search' || toolMode === 'research') {
-        activeTools = [{ googleSearch: {} }];
-      } else {
-        // 'auto' or default
-        activeTools = tools || [{ googleSearch: {} }];
-      }
+            // Determine tools to use based on toolMode
+            let activeTools: any = undefined;
+            const forceGrounding = req.body.forceGrounding === true;
+            if (forceGrounding) {
+                activeTools = [{ googleSearch: {} }];
+            } else if (isNewsRequest) {
+                activeTools = [{ googleSearch: {} }]; // Force enable search on news requests to guarantee real-time grounding
+            } else if (toolMode === 'convo') {
+                activeTools = undefined; // disable search completely
+            } else if (toolMode === 'search' || toolMode === 'research') {
+                activeTools = [{ googleSearch: {} }];
+            } else {
+                // 'auto' or default
+                activeTools = tools || [{ googleSearch: {} }];
+            }
 
-      // Configure instructions for specific modes
-      let baseInstruction = systemInstruction || "";
-      let finalInstruction = baseInstruction;
+            // Configure instructions for specific modes
+            let baseInstruction = systemInstruction || "";
+            let finalInstruction = baseInstruction;
 
-      if (toolMode === 'research') {
-        finalInstruction = `${baseInstruction}\n\nCRITICAL RESEARCH MODE ACTIVATED: The user expects an exceptionally detailed, highly structured, multi-section research report. Synthesize your answer step-by-step using actual facts from Google Search Grounding. Your query has been treated as an intensive investigative query. Structure the reply with clear headings: "Executive Summary", "Detailed Fact Finding & Analysis", "Critical Recommendations", and "Next Steps/Follow-ups". \n\nCRITICAL MULTI-SOURCE HYPERLINKING RULE: You MUST cite EVERY single line, statement, fact, or bullet point that is derived from search results individually at the end of that specific sentence with its standard citation token (e.g. "[1]" or "[2]"). Do NOT bundle multiple facts together without individual sentence/line citations. Doing so is critical for the front-end link-rendering engine to successfully turn every sentence/line directly into a clickable source hyperlink.\n\nSTRICT GROUNDED VERIFIED VERACITY PROTOCOL:\n- You are STRICTLY FORBIDDEN from generating or listing any claims, news stories, data points, or statements from your general parametric knowledge or pre-trained memory.\n- EVERY SINGLE SENTENCE, CLAIM, OR BULLET POINT in your output presenting search facts MUST be verified by a search result and MUST terminate with a citation (e.g., [1], [2]).\n- If some news item or fact cannot be verified/grounded in the active search results, DO NOT include it in your output. Filter or discard any unverified lines from your response entirely. Only verified facts and sources are allowed.\n- Structural layout elements (like markdown titles, section headers, short intro/outro transition phrases, and the final list of follow-up questions) are fully EXEMPT from requiring citations.\n- Every bullet point must have its own citation. NEVER emit a bullet point without a citation.\n\nIMPORTANT: Do NOT output or append any '[SOURCES: ...]' block or web reference blocks yourself at the end of your response. Simply output your answer with standard bracket citations (e.g. [1], [2]). The server proxy automatically constructs and appends the active [SOURCES: ...] tag matching the real, live search results behind the scenes. You MUST, however, provide 3 high-quality follow-up questions at the absolute end in the exact format: [FOLLOW_UPS: ["question 1", "question 2", "question 3"]].`;
-      } else if (toolMode === 'search') {
-        finalInstruction = `${baseInstruction}\n\nCRITICAL SEARCH MODE ACTIVATED: The user expects high-quality Google Search grounded information. Always use standard citations immediately after periods (e.g., [1], [2]). \n\nCRITICAL MULTI-SOURCE HYPERLINKING RULE: You MUST cite EVERY single statement, fact, bullet point, or individual line that is derived from search results at the end of that specific line/sentence with its respective citation token (e.g. "[1]" or "[2]"). Do NOT leave lines/points containing grounded search facts without their respective citation tag at the absolute end of that line or sentence. This guarantees our engine can safely hyperlink each line directly to its source URL.\n\nSTRICT GROUNDED VERIFIED VERACITY PROTOCOL:\n- You are STRICTLY FORBIDDEN from generating or listing any claims, news stories, data points, or statements from your general parametric knowledge or pre-trained memory.\n- EVERY SINGLE SENTENCE, CLAIM, OR BULLET POINT in your output presenting search facts MUST be verified by a search result and MUST terminate with a citation (e.g., [1], [2]).\n- If some news item or fact cannot be verified/grounded in the active search results, DO NOT include it in your output. Filter or discard any unverified lines from your response entirely. Only verified facts and sources are allowed.\n- Structural layout elements (like markdown titles, section headers, short intro/outro transition phrases, and the final list of follow-up questions) are fully EXEMPT from requiring citations.\n- Every bullet point must have its own citation. NEVER emit a bullet point without a citation.\n\nIMPORTANT: Do NOT output or append any '[SOURCES: ...]' block or web reference blocks yourself at the end of your response. Only output your natural response with standard bracket citations (e.g. [1], [2]). The backend server automatically processes and appends the [SOURCES: ...] block dynamically based on live grounding metadata. At the absolute end of your response, you MUST provide 3 interactive follow-up questions using the exact tag syntax: [FOLLOW_UPS: ["Follow-up Q1", "Follow-up Q2", "Follow-up Q3"]].`;
-      } else if (toolMode === 'convo') {
-        finalInstruction = `${baseInstruction}\n\nCRITICAL CONVO/ECO MODE: The user wants a direct, extremely brief, and snappy response. Skip heavy explanations. Keep the reply short and conversational. Strictly no Google Search grounding. Do NOT apologize about not having real-time search or news, nor mention being offline or lacking internet/real-time access. Simply answer the prompt directly and beautifully using your high-fidelity general knowledge. At the absolute end of your response, you MUST provide 3 interactive follow-up questions using the exact tag syntax: [FOLLOW_UPS: ["Follow-up Q1", "Follow-up Q2", "Follow-up Q3"]].`;
-      }
+            if (toolMode === 'research') {
+                finalInstruction = `${baseInstruction}\n\nCRITICAL RESEARCH MODE ACTIVATED: The user expects an exceptionally detailed, highly structured, multi-section research report. Synthesize your answer step-by-step using actual facts from Google Search Grounding. Your query has been treated as an intensive investigative query. Structure the reply with clear headings: "Executive Summary", "Detailed Fact Finding & Analysis", "Critical Recommendations", and "Next Steps/Follow-ups". \n\nCRITICAL MULTI-SOURCE HYPERLINKING RULE: You MUST cite EVERY single line, statement, fact, or bullet point that is derived from search results individually at the end of that specific sentence with its standard citation token (e.g. "[1]" or "[2]"). Do NOT bundle multiple facts together without individual sentence/line citations. Doing so is critical for the front-end link-rendering engine to successfully turn every sentence/line directly into a clickable source hyperlink.\n\nSTRICT GROUNDED VERIFIED VERACITY PROTOCOL:\n- You are STRICTLY FORBIDDEN from generating or listing any claims, news stories, data points, or statements from your general parametric knowledge or pre-trained memory.\n- EVERY SINGLE SENTENCE, CLAIM, OR BULLET POINT in your output presenting search facts MUST be verified by a search result and MUST terminate with a citation (e.g., [1], [2]).\n- If some news item or fact cannot be verified/grounded in the active search results, DO NOT include it in your output. Filter or discard any unverified lines from your response entirely. Only verified facts and sources are allowed.\n- Structural layout elements (like markdown titles, section headers, short intro/outro transition phrases, and the final list of follow-up questions) are fully EXEMPT from requiring citations.\n- Every bullet point must have its own citation. NEVER emit a bullet point without a citation.\n\nIMPORTANT: Do NOT output or append any '[SOURCES: ...]' block or web reference blocks yourself at the end of your response. Simply output your answer with standard bracket citations (e.g. [1], [2]). The server proxy automatically constructs and appends the active [SOURCES: ...] tag matching the real, live search results behind the scenes. You MUST, however, provide 3 high-quality follow-up questions at the absolute end in the exact format: [FOLLOW_UPS: ["question 1", "question 2", "question 3"]].`;
+            } else if (toolMode === 'search') {
+                finalInstruction = `${baseInstruction}\n\nCRITICAL SEARCH MODE ACTIVATED: The user expects high-quality Google Search grounded information. Always use standard citations immediately after periods (e.g., [1], [2]). \n\nCRITICAL MULTI-SOURCE HYPERLINKING RULE: You MUST cite EVERY single statement, fact, bullet point, or individual line that is derived from search results at the end of that specific line/sentence with its respective citation token (e.g. "[1]" or "[2]"). Do NOT leave lines/points containing grounded search facts without their respective citation tag at the absolute end of that line or sentence. This guarantees our engine can safely hyperlink each line directly to its source URL.\n\nSTRICT GROUNDED VERIFIED VERACITY PROTOCOL:\n- You are STRICTLY FORBIDDEN from generating or listing any claims, news stories, data points, or statements from your general parametric knowledge or pre-trained memory.\n- EVERY SINGLE SENTENCE, CLAIM, OR BULLET POINT in your output presenting search facts MUST be verified by a search result and MUST terminate with a citation (e.g., [1], [2]).\n- If some news item or fact cannot be verified/grounded in the active search results, DO NOT include it in your output. Filter or discard any unverified lines from your response entirely. Only verified facts and sources are allowed.\n- Structural layout elements (like markdown titles, section headers, short intro/outro transition phrases, and the final list of follow-up questions) are fully EXEMPT from requiring citations.\n- Every bullet point must have its own citation. NEVER emit a bullet point without a citation.\n\nIMPORTANT: Do NOT output or append any '[SOURCES: ...]' block or web reference blocks yourself at the end of your response. Only output your natural response with standard bracket citations (e.g. [1], [2]). The backend server automatically processes and appends the [SOURCES: ...] block dynamically based on live grounding metadata. At the absolute end of your response, you MUST provide 3 interactive follow-up questions using the exact tag syntax: [FOLLOW_UPS: ["Follow-up Q1", "Follow-up Q2", "Follow-up Q3"]].`;
+            } else if (toolMode === 'convo') {
+                finalInstruction = `${baseInstruction}\n\nCRITICAL CONVO/ECO MODE: The user wants a direct, extremely brief, and snappy response. Skip heavy explanations. Keep the reply short and conversational. Strictly no Google Search grounding. Do NOT apologize about not having real-time search or news, nor mention being offline or lacking internet/real-time access. Simply answer the prompt directly and beautifully using your high-fidelity general knowledge. At the absolute end of your response, you MUST provide 3 interactive follow-up questions using the exact tag syntax: [FOLLOW_UPS: ["Follow-up Q1", "Follow-up Q2", "Follow-up Q3"]].`;
+            }
 
-      if (isNewsRequest) {
-        const newsOverrideRule = `\n\n[CRITICAL OVERRIDE FOR TODAY'S LATEST NEWS - MUST MATCH FORMATTING EXACTLY]:
+            if (isNewsRequest) {
+                const newsOverrideRule = `\n\n[CRITICAL OVERRIDE FOR TODAY'S LATEST NEWS - MUST MATCH FORMATTING EXACTLY]:
 - Do NOT refuse with "As an AI..." or "My knowledge base is subject to a cutoff of January 2025..." or "I do not have access to real-time information..." under any circumstances.
 - You DO have active, real-time access to live internet search and news networks as of June 17, 2026.
 - You MUST synthesize the current updates and format the response EXACTLY in a bulleted markdown structure under the heading 'Other Key Stories' (or relevant categories).
@@ -5183,279 +5179,279 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
 - At the absolute end, you MUST append 3 relevant follow-up questions in the exact format:
   [FOLLOW_UPS: ["Follow-up Q1", "Follow-up Q2", "Follow-up Q3"]]
 `;
-        finalInstruction = `${finalInstruction}\n${newsOverrideRule}`;
-      }
-
-      let responseStream;
-      try {
-        responseStream = await generateContentStreamWithFallback({
-          model,
-          customApiKey,
-          contents: processedContents,
-          config: {
-            systemInstruction: finalInstruction,
-            tools: activeTools,
-            ...(activeThinkingConfig ? { thinkingConfig: activeThinkingConfig } : {}),
-            ...(temperature !== undefined ? { temperature: Number(temperature) } : {})
-          }
-        });
-      } catch (streamInitErr: any) {
-        const errorMsg = streamInitErr.message || String(streamInitErr);
-        console.warn("[GEMINI_PROXY] Initial stream generation failed:", errorMsg);
-
-        const isQuotaError = 
-          errorMsg.includes("RESOURCE_EXHAUSTED") ||
-          errorMsg.includes("quota") ||
-          errorMsg.includes("429") ||
-          errorMsg.includes("Too Many Requests") ||
-          errorMsg.includes("limit exceeded") ||
-          errorMsg.includes("exhausted");
-
-        if (activeTools) {
-          console.log("[GEMINI_PROXY] Falling back to search-free direct conversational mode due to Search tool error:", errorMsg);
-          activeTools = undefined;
-
-          const fallbackInstruction = `${finalInstruction}\n\n(SYSTEM NOTICE: Operating in search-free direct knowledge mode. Answer the user's prompt directly using your general knowledge. Do NOT apologize about search or live web feeds being unavailable, nor mention this notice. Answer directly and beautifully. Never state that you are operating in an offline conversational mode.)`;
-
-          try {
-            responseStream = await generateContentStreamWithFallback({
-              model,
-              customApiKey,
-              contents: processedContents,
-              config: {
-                systemInstruction: fallbackInstruction,
-                tools: undefined,
-                ...(activeThinkingConfig ? { thinkingConfig: activeThinkingConfig } : {}),
-                ...(temperature !== undefined ? { temperature: Number(temperature) } : {})
-              }
-            });
-          } catch (fallbackErr: any) {
-            console.error("[GEMINI_PROXY] Fallback stream generation also failed:", fallbackErr);
-            const fbErrorMsg = fallbackErr.message || String(fallbackErr);
-            if (
-              fbErrorMsg.includes("RESOURCE_EXHAUSTED") ||
-              fbErrorMsg.includes("quota") ||
-              fbErrorMsg.includes("429") ||
-              fbErrorMsg.includes("Too Many Requests") ||
-              fbErrorMsg.includes("limit exceeded") ||
-              fbErrorMsg.includes("exhausted")
-            ) {
-              throw new Error("Gemini API Quota Exceeded. You have exceeded your current Google AI Studio free-tier quota. Please verify your API key, plan details, or wait a minute before retrying. Alternatively, configure 'Local AI' in the Settings panel of Unison OS.");
+                finalInstruction = `${finalInstruction}\n${newsOverrideRule}`;
             }
-            throw fallbackErr;
-          }
-        } else {
-          if (isQuotaError) {
-            throw new Error("Gemini API Quota Exceeded. You have exceeded your current Google AI Studio free-tier quota. Please verify your API key, plan details, or wait a minute before retrying. Alternatively, configure 'Local AI' in the Settings panel of Unison OS.");
-          }
-          throw streamInitErr;
-        }
-      }
-      
-      console.log("[GEMINI_PROXY] Stream connection established successfully. Streaming chunks...");
 
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
+            let responseStream;
+            try {
+                responseStream = await generateContentStreamWithFallback({
+                    model,
+                    customApiKey,
+                    contents: processedContents,
+                    config: {
+                        systemInstruction: finalInstruction,
+                        tools: activeTools,
+                        ...(activeThinkingConfig ? { thinkingConfig: activeThinkingConfig } : {}),
+                        ...(temperature !== undefined ? { temperature: Number(temperature) } : {})
+                    }
+                });
+            } catch (streamInitErr: any) {
+                const errorMsg = streamInitErr.message || String(streamInitErr);
+                console.warn("[GEMINI_PROXY] Initial stream generation failed:", errorMsg);
 
-      let aggregatedText = "";
-      let savedGroundingMetadata: any = undefined;
-      let chunkCount = 0;
-      for await (const chunk of responseStream) {
-        chunkCount++;
-        if (chunk.text) {
-          aggregatedText += chunk.text;
-        }
-        
-        let candidatesPayload: any = undefined;
-        if (chunk.candidates) {
-          candidatesPayload = chunk.candidates.map((cand: any) => {
-            const candObj: any = {
-              index: cand.index,
-              finishReason: cand.finishReason,
-              content: cand.content,
-            };
-            const gm = cand.groundingMetadata;
-            if (gm) {
-              candObj.groundingMetadata = {
-                webSearchQueries: gm.webSearchQueries,
-                groundingChunks: gm.groundingChunks ? gm.groundingChunks.map((gc: any) => {
-                  const gcObj: any = { ...gc };
-                  const srcWeb = gc.web || gc.webSource || gc.web_source;
-                  if (srcWeb) {
-                    gcObj.web = {
-                      uri: srcWeb.uri || srcWeb.url || '',
-                      title: srcWeb.title || 'Source',
-                      snippet: srcWeb.snippet || '',
-                    };
-                  } else if (gc.uri || gc.url) {
-                    gcObj.web = {
-                      uri: gc.uri || gc.url || '',
-                      title: gc.title || 'Source',
-                      snippet: gc.snippet || '',
-                    };
-                  }
-                  return gcObj;
-                }) : undefined,
-                groundingSupports: gm.groundingSupports ? gm.groundingSupports.map((gs: any) => {
-                  return {
-                    segment: gs.segment ? {
-                      startIndex: gs.segment.startIndex,
-                      endIndex: gs.segment.endIndex,
-                      text: gs.segment.text,
-                    } : undefined,
-                    groundingChunkIndices: gs.groundingChunkIndices,
-                    confidenceScores: gs.confidenceScores,
-                  };
-                }) : undefined,
-              };
+                const isQuotaError =
+                    errorMsg.includes("RESOURCE_EXHAUSTED") ||
+                    errorMsg.includes("quota") ||
+                    errorMsg.includes("429") ||
+                    errorMsg.includes("Too Many Requests") ||
+                    errorMsg.includes("limit exceeded") ||
+                    errorMsg.includes("exhausted");
+
+                if (activeTools) {
+                    console.log("[GEMINI_PROXY] Falling back to search-free direct conversational mode due to Search tool error:", errorMsg);
+                    activeTools = undefined;
+
+                    const fallbackInstruction = `${finalInstruction}\n\n(SYSTEM NOTICE: Operating in search-free direct knowledge mode. Answer the user's prompt directly using your general knowledge. Do NOT apologize about search or live web feeds being unavailable, nor mention this notice. Answer directly and beautifully. Never state that you are operating in an offline conversational mode.)`;
+
+                    try {
+                        responseStream = await generateContentStreamWithFallback({
+                            model,
+                            customApiKey,
+                            contents: processedContents,
+                            config: {
+                                systemInstruction: fallbackInstruction,
+                                tools: undefined,
+                                ...(activeThinkingConfig ? { thinkingConfig: activeThinkingConfig } : {}),
+                                ...(temperature !== undefined ? { temperature: Number(temperature) } : {})
+                            }
+                        });
+                    } catch (fallbackErr: any) {
+                        console.error("[GEMINI_PROXY] Fallback stream generation also failed:", fallbackErr);
+                        const fbErrorMsg = fallbackErr.message || String(fallbackErr);
+                        if (
+                            fbErrorMsg.includes("RESOURCE_EXHAUSTED") ||
+                            fbErrorMsg.includes("quota") ||
+                            fbErrorMsg.includes("429") ||
+                            fbErrorMsg.includes("Too Many Requests") ||
+                            fbErrorMsg.includes("limit exceeded") ||
+                            fbErrorMsg.includes("exhausted")
+                        ) {
+                            throw new Error("Gemini API Quota Exceeded. You have exceeded your current Google AI Studio free-tier quota. Please verify your API key, plan details, or wait a minute before retrying. Alternatively, configure 'Local AI' in the Settings panel of Unison OS.");
+                        }
+                        throw fallbackErr;
+                    }
+                } else {
+                    if (isQuotaError) {
+                        throw new Error("Gemini API Quota Exceeded. You have exceeded your current Google AI Studio free-tier quota. Please verify your API key, plan details, or wait a minute before retrying. Alternatively, configure 'Local AI' in the Settings panel of Unison OS.");
+                    }
+                    throw streamInitErr;
+                }
             }
-            return candObj;
-          });
-        }
 
-        if (candidatesPayload && candidatesPayload[0]?.groundingMetadata) {
-          savedGroundingMetadata = candidatesPayload[0].groundingMetadata;
-        }
+            console.log("[GEMINI_PROXY] Stream connection established successfully. Streaming chunks...");
 
-        const payload = {
-          text: chunk.text,
-          candidates: candidatesPayload || chunk.candidates,
-          usageMetadata: chunk.usageMetadata
-        };
-        console.log(`[GEMINI_PROXY] Streaming chunk #${chunkCount}, text length:`, chunk.text?.length || 0);
-        res.write(`data: ${JSON.stringify(payload)}\n\n`);
-      }
-
-      // Automatically synthesize and append [SOURCES: ...] tag if missing, ensuring client receives sources
-      if (savedGroundingMetadata) {
-        const autoSources = savedGroundingMetadata.groundingChunks ? savedGroundingMetadata.groundingChunks.map((gc: any, idx: number) => {
-          let url = '';
-          let title = 'Resource Source';
-          let snippet = '';
-
-          if (gc.web) {
-            url = gc.web.uri || gc.web.url || '';
-            title = gc.web.title || 'Source';
-            snippet = gc.web.snippet || '';
-          } else if (gc.webSource) {
-            url = gc.webSource.uri || gc.webSource.url || '';
-            title = gc.webSource.title || 'Source';
-            snippet = gc.webSource.snippet || '';
-          } else {
-            url = gc.uri || gc.url || '';
-            title = gc.title || 'Source';
-            snippet = gc.snippet || '';
-          }
-
-          // Gather matching lines from the response text
-          const linesUsed: string[] = [];
-          const citMarker = `[${idx + 1}]`;
-          const sentences = aggregatedText.match(/[^.!?\n]+[.!?]+(?:\s*\[\d+\])*/g) || [];
-          for (const s of sentences) {
-            if (s.includes(citMarker)) {
-              linesUsed.push(s.replace(new RegExp(`\\s*\\[\\s*${idx + 1}\\s*\\]`, 'g'), '').trim());
-            }
-          }
-
-          return {
-            title,
-            url: url || '',
-            siteName: url ? url.split('/')[2]?.replace('www.', '') : 'Web',
-            snippet,
-            linesUsed: linesUsed.length > 0 ? linesUsed : undefined
-          };
-        }) : [];
-
-        // Dynamic extra backup payload to explicitly pass groundingMetadata block as final chunk
-        const finalMetadataPayload = {
-          text: "",
-          is_final_metadata: true,
-          candidates: [{
-            index: 0,
-            groundingMetadata: savedGroundingMetadata
-          }]
-        };
-        res.write(`data: ${JSON.stringify(finalMetadataPayload)}\n\n`);
-
-        if (autoSources.length > 0 && !aggregatedText.includes('[SOURCES:')) {
-          const sourcesTag = `\n\n[SOURCES: ${JSON.stringify(autoSources)}]`;
-          aggregatedText += sourcesTag;
-          console.log("[GEMINI_PROXY] Appending synthesized SEARCH sources tag to response stream.");
-          res.write(`data: ${JSON.stringify({ text: sourcesTag })}\n\n`);
-        }
-      }
-
-      // Save complete output in local SSD-backed server cache 
-      if (aiEnableCache !== false && aggregatedText) {
-        aiCache[cacheKey] = {
-          model,
-          text: aggregatedText,
-          candidates: savedGroundingMetadata ? [{ groundingMetadata: savedGroundingMetadata }] : undefined,
-          timestamp: Date.now()
-        };
-        saveCache();
-        console.log(`[AI_CACHE] Saved stream results to cached record. Key: ${cacheKey}`);
-      }
-
-      console.log("[GEMINI_PROXY] Stream completed successfully. Total chunks:", chunkCount);
-      res.end();
-    } catch (err: any) {
-      console.error("[GEMINI_PROXY] Error:", err);
-      const errMsg = err.message || String(err);
-      const isQuota = 
-        errMsg.includes("RESOURCE_EXHAUSTED") ||
-        errMsg.includes("quota") ||
-        errMsg.includes("429") ||
-        errMsg.includes("Too Many Requests") ||
-        errMsg.includes("limit exceeded") ||
-        errMsg.includes("exhausted") ||
-        errMsg.includes("UNAVAILABLE") ||
-        errMsg.includes("503") ||
-        errMsg.includes("high demand") ||
-        errMsg.includes("overloaded");
-
-      if (isQuota) {
-        console.log("[GEMINI_PROXY] Quota or high-demand limit encountered. Commencing elegant offline smart-simulation streaming...");
-        try {
-          if (!res.headersSent) {
             res.setHeader("Content-Type", "text/event-stream");
             res.setHeader("Cache-Control", "no-cache");
             res.setHeader("Connection", "keep-alive");
-          }
 
-          const contentsArray = req.body.contents || [];
-          const lastContentObj = contentsArray[contentsArray.length - 1];
-          const queryText = lastContentObj?.parts?.[0]?.text || "Hello";
-          const promptLower = queryText.toLowerCase();
+            let aggregatedText = "";
+            let savedGroundingMetadata: any = undefined;
+            let chunkCount = 0;
+            for await (const chunk of responseStream) {
+                chunkCount++;
+                if (chunk.text) {
+                    aggregatedText += chunk.text;
+                }
 
-          let simulatedThoughts = "Evaluating offline model metrics. Quota exhaustion recovery action active.";
-          let simulatedReply = "";
+                let candidatesPayload: any = undefined;
+                if (chunk.candidates) {
+                    candidatesPayload = chunk.candidates.map((cand: any) => {
+                        const candObj: any = {
+                            index: cand.index,
+                            finishReason: cand.finishReason,
+                            content: cand.content,
+                        };
+                        const gm = cand.groundingMetadata;
+                        if (gm) {
+                            candObj.groundingMetadata = {
+                                webSearchQueries: gm.webSearchQueries,
+                                groundingChunks: gm.groundingChunks ? gm.groundingChunks.map((gc: any) => {
+                                    const gcObj: any = { ...gc };
+                                    const srcWeb = gc.web || gc.webSource || gc.web_source;
+                                    if (srcWeb) {
+                                        gcObj.web = {
+                                            uri: srcWeb.uri || srcWeb.url || '',
+                                            title: srcWeb.title || 'Source',
+                                            snippet: srcWeb.snippet || '',
+                                        };
+                                    } else if (gc.uri || gc.url) {
+                                        gcObj.web = {
+                                            uri: gc.uri || gc.url || '',
+                                            title: gc.title || 'Source',
+                                            snippet: gc.snippet || '',
+                                        };
+                                    }
+                                    return gcObj;
+                                }) : undefined,
+                                groundingSupports: gm.groundingSupports ? gm.groundingSupports.map((gs: any) => {
+                                    return {
+                                        segment: gs.segment ? {
+                                            startIndex: gs.segment.startIndex,
+                                            endIndex: gs.segment.endIndex,
+                                            text: gs.segment.text,
+                                        } : undefined,
+                                        groundingChunkIndices: gs.groundingChunkIndices,
+                                        confidenceScores: gs.confidenceScores,
+                                    };
+                                }) : undefined,
+                            };
+                        }
+                        return candObj;
+                    });
+                }
 
-          if (promptLower.includes("hello") || promptLower.includes("hi ") || promptLower.includes("hey")) {
-            simulatedThoughts = "Processing warm user greeting. Framing operating system onboarding sequence.";
-            simulatedReply = `<thought>${simulatedThoughts}</thought>\n### ⚓ Welcome to Unison OS (Offline Simulator Mode)\nHello! I am the **Titan OS Neural Kernel**, running in offline smart-simulation mode because your current Gemini API Key quota has been exhausted.\n\nEven with rate limits, you can experience all full-stack applications:\n- **Media player**: Type "open spotify" to play songs.\n- **SDE Swarm**: Type "charlie" or run code tools.\n- **Credentials**: Switch to **Local AI Engine** using settings or sidebar toggles to load your own endpoint configs.\n\nHow can I help you navigate the system today?`;
-          } else if (promptLower.includes("charlie") || promptLower.includes("swarm") || promptLower.includes("[app_trigger: charlie]")) {
-            const projectPrompt = queryText.replace(/\[APP_TRIGGER:\s*CHARLIE\]/gi, '').replace(/@charlie/gi, '').trim() || 'Custom Retro Pong Arcade';
-            simulatedThoughts = "[SDE Swarm] Intercepted Charlie trigger. Delivering physical device sandbox templates.";
-            simulatedReply = `<thought>${simulatedThoughts}</thought>\n### 🤖 Charlie Autonomous SDE Swarm\n[GENUI: {"type": "CHARLIE_APP", "prompt": "${projectPrompt}"}]`;
-          } else if (promptLower.includes("sheet") || promptLower.includes("excel") || promptLower.includes("spreadsheet") || promptLower.includes("financial")) {
-            simulatedThoughts = "Sheet grid layout requested. Framing ledger rows and corporate audit columns.";
-            simulatedReply = `<thought>${simulatedThoughts}</thought>\n### 📈 Corporate Ledger Report\n\n[GENUI: {"type": "EXCEL_PDF_GENERATOR", "fileName": "unison_balance_sheet", "title": "Corporate Audit Spreadsheet", "subtitle": "Q2 Operating Ledger", "description": "Offline simulated financial metrics", "headers": ["Quarter", "Revenue", "Capex", "Efficiency"], "rows": [["Q1 2026", "$1,240,000", "$940,000", "78%"], ["Q2 2026 (Est)", "$1,560,000", "$1,020,000", "84%"]], "summaryData": [{"label": "Total Rev", "value": "$2,800,000"}], "tabs": ["sandbox"]}]`;
-          } else if (promptLower.includes("spotify") || promptLower.includes("music") || promptLower.includes("song") || promptLower.includes("play")) {
-            simulatedThoughts = "Music player node request. Launching Spotify App Extension component panel.";
-            simulatedReply = `<thought>${simulatedThoughts}</thought>\n### 🎵 Spotify Music Companion\n\n[GENUI: {"type": "SPOTIFY_APP", "prompt": "active session"}]`;
-          } else if (promptLower.includes("todo") || promptLower.includes("task") || promptLower.includes("notes") || promptLower.includes("calculator")) {
-            const codeAppName = promptLower.includes("todo") ? "Task Manager" : (promptLower.includes("calculator") ? "Scientific Calculator" : "Sticky Notes");
-            simulatedThoughts = `Code generation requested for ${codeAppName}. Initializing file tree in workspace.`;
-            
-            let filesPayload = [];
-            if (promptLower.includes("todo")) {
-              filesPayload = [
-                {
-                  path: "index.html",
-                  language: "html",
-                  content: `<!DOCTYPE html>
+                if (candidatesPayload && candidatesPayload[0]?.groundingMetadata) {
+                    savedGroundingMetadata = candidatesPayload[0].groundingMetadata;
+                }
+
+                const payload = {
+                    text: chunk.text,
+                    candidates: candidatesPayload || chunk.candidates,
+                    usageMetadata: chunk.usageMetadata
+                };
+                console.log(`[GEMINI_PROXY] Streaming chunk #${chunkCount}, text length:`, chunk.text?.length || 0);
+                res.write(`data: ${JSON.stringify(payload)}\n\n`);
+            }
+
+            // Automatically synthesize and append [SOURCES: ...] tag if missing, ensuring client receives sources
+            if (savedGroundingMetadata) {
+                const autoSources = savedGroundingMetadata.groundingChunks ? savedGroundingMetadata.groundingChunks.map((gc: any, idx: number) => {
+                    let url = '';
+                    let title = 'Resource Source';
+                    let snippet = '';
+
+                    if (gc.web) {
+                        url = gc.web.uri || gc.web.url || '';
+                        title = gc.web.title || 'Source';
+                        snippet = gc.web.snippet || '';
+                    } else if (gc.webSource) {
+                        url = gc.webSource.uri || gc.webSource.url || '';
+                        title = gc.webSource.title || 'Source';
+                        snippet = gc.webSource.snippet || '';
+                    } else {
+                        url = gc.uri || gc.url || '';
+                        title = gc.title || 'Source';
+                        snippet = gc.snippet || '';
+                    }
+
+                    // Gather matching lines from the response text
+                    const linesUsed: string[] = [];
+                    const citMarker = `[${idx + 1}]`;
+                    const sentences = aggregatedText.match(/[^.!?\n]+[.!?]+(?:\s*\[\d+\])*/g) || [];
+                    for (const s of sentences) {
+                        if (s.includes(citMarker)) {
+                            linesUsed.push(s.replace(new RegExp(`\\s*\\[\\s*${idx + 1}\\s*\\]`, 'g'), '').trim());
+                        }
+                    }
+
+                    return {
+                        title,
+                        url: url || '',
+                        siteName: url ? url.split('/')[2]?.replace('www.', '') : 'Web',
+                        snippet,
+                        linesUsed: linesUsed.length > 0 ? linesUsed : undefined
+                    };
+                }) : [];
+
+                // Dynamic extra backup payload to explicitly pass groundingMetadata block as final chunk
+                const finalMetadataPayload = {
+                    text: "",
+                    is_final_metadata: true,
+                    candidates: [{
+                        index: 0,
+                        groundingMetadata: savedGroundingMetadata
+                    }]
+                };
+                res.write(`data: ${JSON.stringify(finalMetadataPayload)}\n\n`);
+
+                if (autoSources.length > 0 && !aggregatedText.includes('[SOURCES:')) {
+                    const sourcesTag = `\n\n[SOURCES: ${JSON.stringify(autoSources)}]`;
+                    aggregatedText += sourcesTag;
+                    console.log("[GEMINI_PROXY] Appending synthesized SEARCH sources tag to response stream.");
+                    res.write(`data: ${JSON.stringify({ text: sourcesTag })}\n\n`);
+                }
+            }
+
+            // Save complete output in local SSD-backed server cache 
+            if (aiEnableCache !== false && aggregatedText) {
+                aiCache[cacheKey] = {
+                    model,
+                    text: aggregatedText,
+                    candidates: savedGroundingMetadata ? [{ groundingMetadata: savedGroundingMetadata }] : undefined,
+                    timestamp: Date.now()
+                };
+                saveCache();
+                console.log(`[AI_CACHE] Saved stream results to cached record. Key: ${cacheKey}`);
+            }
+
+            console.log("[GEMINI_PROXY] Stream completed successfully. Total chunks:", chunkCount);
+            res.end();
+        } catch (err: any) {
+            console.error("[GEMINI_PROXY] Error:", err);
+            const errMsg = err.message || String(err);
+            const isQuota =
+                errMsg.includes("RESOURCE_EXHAUSTED") ||
+                errMsg.includes("quota") ||
+                errMsg.includes("429") ||
+                errMsg.includes("Too Many Requests") ||
+                errMsg.includes("limit exceeded") ||
+                errMsg.includes("exhausted") ||
+                errMsg.includes("UNAVAILABLE") ||
+                errMsg.includes("503") ||
+                errMsg.includes("high demand") ||
+                errMsg.includes("overloaded");
+
+            if (isQuota) {
+                console.log("[GEMINI_PROXY] Quota or high-demand limit encountered. Commencing elegant offline smart-simulation streaming...");
+                try {
+                    if (!res.headersSent) {
+                        res.setHeader("Content-Type", "text/event-stream");
+                        res.setHeader("Cache-Control", "no-cache");
+                        res.setHeader("Connection", "keep-alive");
+                    }
+
+                    const contentsArray = req.body.contents || [];
+                    const lastContentObj = contentsArray[contentsArray.length - 1];
+                    const queryText = lastContentObj?.parts?.[0]?.text || "Hello";
+                    const promptLower = queryText.toLowerCase();
+
+                    let simulatedThoughts = "Evaluating offline model metrics. Quota exhaustion recovery action active.";
+                    let simulatedReply = "";
+
+                    if (promptLower.includes("hello") || promptLower.includes("hi ") || promptLower.includes("hey")) {
+                        simulatedThoughts = "Processing warm user greeting. Framing operating system onboarding sequence.";
+                        simulatedReply = `<thought>${simulatedThoughts}</thought>\n### ⚓ Welcome to Unison OS (Offline Simulator Mode)\nHello! I am the **Titan OS Neural Kernel**, running in offline smart-simulation mode because your current Gemini API Key quota has been exhausted.\n\nEven with rate limits, you can experience all full-stack applications:\n- **Media player**: Type "open spotify" to play songs.\n- **SDE Swarm**: Type "charlie" or run code tools.\n- **Credentials**: Switch to **Local AI Engine** using settings or sidebar toggles to load your own endpoint configs.\n\nHow can I help you navigate the system today?`;
+                    } else if (promptLower.includes("charlie") || promptLower.includes("swarm") || promptLower.includes("[app_trigger: charlie]")) {
+                        const projectPrompt = queryText.replace(/\[APP_TRIGGER:\s*CHARLIE\]/gi, '').replace(/@charlie/gi, '').trim() || 'Custom Retro Pong Arcade';
+                        simulatedThoughts = "[SDE Swarm] Intercepted Charlie trigger. Delivering physical device sandbox templates.";
+                        simulatedReply = `<thought>${simulatedThoughts}</thought>\n### 🤖 Charlie Autonomous SDE Swarm\n[GENUI: {"type": "CHARLIE_APP", "prompt": "${projectPrompt}"}]`;
+                    } else if (promptLower.includes("sheet") || promptLower.includes("excel") || promptLower.includes("spreadsheet") || promptLower.includes("financial")) {
+                        simulatedThoughts = "Sheet grid layout requested. Framing ledger rows and corporate audit columns.";
+                        simulatedReply = `<thought>${simulatedThoughts}</thought>\n### 📈 Corporate Ledger Report\n\n[GENUI: {"type": "EXCEL_PDF_GENERATOR", "fileName": "unison_balance_sheet", "title": "Corporate Audit Spreadsheet", "subtitle": "Q2 Operating Ledger", "description": "Offline simulated financial metrics", "headers": ["Quarter", "Revenue", "Capex", "Efficiency"], "rows": [["Q1 2026", "$1,240,000", "$940,000", "78%"], ["Q2 2026 (Est)", "$1,560,000", "$1,020,000", "84%"]], "summaryData": [{"label": "Total Rev", "value": "$2,800,000"}], "tabs": ["sandbox"]}]`;
+                    } else if (promptLower.includes("spotify") || promptLower.includes("music") || promptLower.includes("song") || promptLower.includes("play")) {
+                        simulatedThoughts = "Music player node request. Launching Spotify App Extension component panel.";
+                        simulatedReply = `<thought>${simulatedThoughts}</thought>\n### 🎵 Spotify Music Companion\n\n[GENUI: {"type": "SPOTIFY_APP", "prompt": "active session"}]`;
+                    } else if (promptLower.includes("todo") || promptLower.includes("task") || promptLower.includes("notes") || promptLower.includes("calculator")) {
+                        const codeAppName = promptLower.includes("todo") ? "Task Manager" : (promptLower.includes("calculator") ? "Scientific Calculator" : "Sticky Notes");
+                        simulatedThoughts = `Code generation requested for ${codeAppName}. Initializing file tree in workspace.`;
+
+                        let filesPayload = [];
+                        if (promptLower.includes("todo")) {
+                            filesPayload = [
+                                {
+                                    path: "index.html",
+                                    language: "html",
+                                    content: `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -5487,14 +5483,14 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
   </script>
 </body>
 </html>`
-                }
-              ];
-            } else {
-              filesPayload = [
-                {
-                  path: "index.html",
-                  language: "html",
-                  content: `<!DOCTYPE html>
+                                }
+                            ];
+                        } else {
+                            filesPayload = [
+                                {
+                                    path: "index.html",
+                                    language: "html",
+                                    content: `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -5531,150 +5527,150 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
   </script>
 </body>
 </html>`
+                                }
+                            ];
+                        }
+
+                        simulatedReply = `<thought>${simulatedThoughts}</thought>\nI have initialized the files for **${codeAppName}** as requested in your sandbox:\n\nINIT_PROJECT: ${JSON.stringify(filesPayload)}\n\n### 🚀 Project Generated (Simulated Model)\nI've generated the files matching your prompt in your active workspace! You can click on the code tab or switch central views to view/test the interactive app!`;
+                    } else {
+                        simulatedReply = `<thought>${simulatedThoughts}</thought>\n### 🧠 Titan Neural Kernel (Offline Model)\nI've received your query: "${queryText}". Since the server is running under a Gemini quota limit, I have compiled your request using our offline simulated neural network:\n\n- **Target Prompt**: "${queryText}"\n- **Action Status**: Simulated Handshake OK\n- **Pro-tip**: You can switch your model provider to **Local AI Engine** using settings or sidebar toggles to continue running unrestricted local LLM models on this terminal!\n\nWould you like me to open the web browser, file directory explorer, or launch active system extensions?`;
+                    }
+
+                    const responseChunks = simulatedReply.match(/.{1,16}/g) || [simulatedReply];
+                    let cIdx = 0;
+                    const pushChunk = () => {
+                        if (cIdx >= responseChunks.length) {
+                            res.end();
+                            return;
+                        }
+                        const chunkVal = responseChunks[cIdx];
+                        const load = {
+                            text: chunkVal,
+                            candidates: [{
+                                content: {
+                                    role: "model",
+                                    parts: [{ text: chunkVal }]
+                                }
+                            }]
+                        };
+                        res.write(`data: ${JSON.stringify(load)}\n\n`);
+                        cIdx++;
+                        setTimeout(pushChunk, 15);
+                    };
+                    pushChunk();
+                } catch (streamErr) {
+                    console.error("[GEMINI_PROXY] Critical error during simulated stream execution:", streamErr);
+                    if (!res.headersSent) {
+                        res.status(500).json({ error: "API Quota Exceeded and simulation failed" });
+                    } else {
+                        res.end();
+                    }
                 }
-              ];
+                return;
             }
 
-            simulatedReply = `<thought>${simulatedThoughts}</thought>\nI have initialized the files for **${codeAppName}** as requested in your sandbox:\n\nINIT_PROJECT: ${JSON.stringify(filesPayload)}\n\n### 🚀 Project Generated (Simulated Model)\nI've generated the files matching your prompt in your active workspace! You can click on the code tab or switch central views to view/test the interactive app!`;
-          } else {
-            simulatedReply = `<thought>${simulatedThoughts}</thought>\n### 🧠 Titan Neural Kernel (Offline Model)\nI've received your query: "${queryText}". Since the server is running under a Gemini quota limit, I have compiled your request using our offline simulated neural network:\n\n- **Target Prompt**: "${queryText}"\n- **Action Status**: Simulated Handshake OK\n- **Pro-tip**: You can switch your model provider to **Local AI Engine** using settings or sidebar toggles to continue running unrestricted local LLM models on this terminal!\n\nWould you like me to open the web browser, file directory explorer, or launch active system extensions?`;
-          }
-
-          const responseChunks = simulatedReply.match(/.{1,16}/g) || [simulatedReply];
-          let cIdx = 0;
-          const pushChunk = () => {
-            if (cIdx >= responseChunks.length) {
-              res.end();
-              return;
+            if (!res.headersSent) {
+                res.status(500).json({ error: errMsg });
+            } else {
+                res.write(`data: ${JSON.stringify({ error: errMsg })}\n\n`);
+                res.end();
             }
-            const chunkVal = responseChunks[cIdx];
-            const load = {
-              text: chunkVal,
-              candidates: [{
-                content: {
-                  role: "model",
-                  parts: [{ text: chunkVal }]
+        }
+    });
+
+    // Simple non-streaming server-side proxy for Dart sidebar and chat
+    app.post("/api/gemini/chat-simple", express.json(), async (req, res) => {
+        try {
+            const { contents, systemInstruction, toolMode, selectedModel, aiEnableCache, temperature, thinkingLevel } = req.body;
+            const customApiKey = (req.headers["x-gemini-api-key"] as string) || (req.headers["X-Gemini-API-Key"] as string) || req.body.customApiKey || "";
+            const model = selectedModel || "gemini-3.5-flash";
+
+            console.log(`[GEMINI_PROXY] chat-simple request. Selected model: ${model}. Custom key present: ${!!customApiKey}`);
+
+            const instructions = systemInstruction || "You are Unison OS, a highly intelligent cognitive node assistant. Respond conversationally, keeping replies helpful, crisp, and beautifully styled.";
+
+            const targetThinkingLevel = sanitizeThinkingLevel(thinkingLevel);
+
+            const cacheKey = computePayloadHash({
+                model,
+                contents,
+                systemInstruction: instructions,
+                toolMode,
+                temperature,
+                thinkingLevel: targetThinkingLevel
+            });
+
+            if (aiEnableCache !== false && aiCache[cacheKey]) {
+                console.log(`[AI_CACHE] Simple chat cache hit for key ${cacheKey}`);
+                return res.json({
+                    text: aiCache[cacheKey].text,
+                    thoughts: (aiCache[cacheKey] as any).thoughts || "",
+                    cached: true
+                });
+            }
+
+            const response = await generateContentWithFallback({
+                model: model,
+                customApiKey,
+                contents: contents,
+                config: {
+                    systemInstruction: instructions,
+                    ...(targetThinkingLevel ? { thinkingConfig: { thinkingLevel: targetThinkingLevel } } : {}),
+                    ...(temperature !== undefined ? { temperature: Number(temperature) } : {})
                 }
-              }]
-            };
-            res.write(`data: ${JSON.stringify(load)}\n\n`);
-            cIdx++;
-            setTimeout(pushChunk, 15);
-          };
-          pushChunk();
-        } catch (streamErr) {
-          console.error("[GEMINI_PROXY] Critical error during simulated stream execution:", streamErr);
-          if (!res.headersSent) {
-            res.status(500).json({ error: "API Quota Exceeded and simulation failed" });
-          } else {
-            res.end();
-          }
+            });
+
+            let textResult = response.text || "";
+            let thoughts = "";
+
+            // Native thinking models parts extraction
+            if (response.candidates?.[0]?.content?.parts) {
+                const parts = response.candidates[0].content.parts;
+                const thoughtParts = parts.filter((p: any) => p.thought === true || p.thought);
+                if (thoughtParts.length > 0) {
+                    thoughts = thoughtParts.map((p: any) => p.text || "").join("\n");
+                }
+            }
+
+            // XML-style fallback extraction
+            const match = textResult.match(/<thought>([\s\S]*?)<\/thought>/i);
+            if (match) {
+                if (!thoughts) {
+                    thoughts = match[1];
+                }
+                textResult = textResult.replace(/<thought>[\s\S]*?<\/thought>/gi, '').trim();
+            }
+
+            if (aiEnableCache !== false && textResult) {
+                aiCache[cacheKey] = {
+                    model,
+                    text: textResult,
+                    thoughts,
+                    timestamp: Date.now()
+                } as any;
+                saveCache();
+                console.log(`[AI_CACHE] Cached simple response for key ${cacheKey}`);
+            }
+
+            res.json({ text: textResult, thoughts });
+        } catch (err: any) {
+            console.error("Gemini chat-simple error:", err);
+            const isQuota = err.status === 429 || err.statusCode === 429 || String(err).toLowerCase().includes("quota") || String(err).toLowerCase().includes("429") || String(err).toLowerCase().includes("resource_exhausted") || String(err).toLowerCase().includes("exhausted");
+            res.status(isQuota ? 429 : 500).json({ error: cleanGeminiErrorMessage(err) });
         }
-        return;
-      }
+    });
 
-      if (!res.headersSent) {
-        res.status(500).json({ error: errMsg });
-      } else {
-        res.write(`data: ${JSON.stringify({ error: errMsg })}\n\n`);
-        res.end();
-      }
-    }
-  });
+    // Dedicated endpoint for generating unit tests using Gemini
+    app.post("/api/gemini/generate-tests", express.json(), async (req, res) => {
+        try {
+            const { filePath, fileName, fileContent } = req.body;
+            if (!fileContent) {
+                return res.status(400).json({ error: "Missing file content to test" });
+            }
 
-  // Simple non-streaming server-side proxy for Dart sidebar and chat
-  app.post("/api/gemini/chat-simple", express.json(), async (req, res) => {
-    try {
-      const { contents, systemInstruction, toolMode, selectedModel, aiEnableCache, temperature, thinkingLevel } = req.body;
-      const customApiKey = (req.headers["x-gemini-api-key"] as string) || (req.headers["X-Gemini-API-Key"] as string) || req.body.customApiKey || "";
-      const model = selectedModel || "gemini-3.5-flash";
-      
-      console.log(`[GEMINI_PROXY] chat-simple request. Selected model: ${model}. Custom key present: ${!!customApiKey}`);
-      
-      const instructions = systemInstruction || "You are Unison OS, a highly intelligent cognitive node assistant. Respond conversationally, keeping replies helpful, crisp, and beautifully styled.";
-      
-      const targetThinkingLevel = sanitizeThinkingLevel(thinkingLevel);
+            console.log(`[TEST_GENERATION] Generating tests for ${filePath}...`);
 
-      const cacheKey = computePayloadHash({
-        model,
-        contents,
-        systemInstruction: instructions,
-        toolMode,
-        temperature,
-        thinkingLevel: targetThinkingLevel
-      });
-
-      if (aiEnableCache !== false && aiCache[cacheKey]) {
-        console.log(`[AI_CACHE] Simple chat cache hit for key ${cacheKey}`);
-        return res.json({ 
-          text: aiCache[cacheKey].text, 
-          thoughts: (aiCache[cacheKey] as any).thoughts || "", 
-          cached: true 
-        });
-      }
-
-      const response = await generateContentWithFallback({
-        model: model,
-        customApiKey,
-        contents: contents,
-        config: {
-          systemInstruction: instructions,
-          ...(targetThinkingLevel ? { thinkingConfig: { thinkingLevel: targetThinkingLevel } } : {}),
-          ...(temperature !== undefined ? { temperature: Number(temperature) } : {})
-        }
-      });
-      
-      let textResult = response.text || "";
-      let thoughts = "";
-
-      // Native thinking models parts extraction
-      if (response.candidates?.[0]?.content?.parts) {
-        const parts = response.candidates[0].content.parts;
-        const thoughtParts = parts.filter((p: any) => p.thought === true || p.thought);
-        if (thoughtParts.length > 0) {
-          thoughts = thoughtParts.map((p: any) => p.text || "").join("\n");
-        }
-      }
-
-      // XML-style fallback extraction
-      const match = textResult.match(/<thought>([\s\S]*?)<\/thought>/i);
-      if (match) {
-        if (!thoughts) {
-          thoughts = match[1];
-        }
-        textResult = textResult.replace(/<thought>[\s\S]*?<\/thought>/gi, '').trim();
-      }
-
-      if (aiEnableCache !== false && textResult) {
-        aiCache[cacheKey] = {
-          model,
-          text: textResult,
-          thoughts,
-          timestamp: Date.now()
-        } as any;
-        saveCache();
-        console.log(`[AI_CACHE] Cached simple response for key ${cacheKey}`);
-      }
-
-      res.json({ text: textResult, thoughts });
-    } catch (err: any) {
-      console.error("Gemini chat-simple error:", err);
-      const isQuota = err.status === 429 || err.statusCode === 429 || String(err).toLowerCase().includes("quota") || String(err).toLowerCase().includes("429") || String(err).toLowerCase().includes("resource_exhausted") || String(err).toLowerCase().includes("exhausted");
-      res.status(isQuota ? 429 : 500).json({ error: cleanGeminiErrorMessage(err) });
-    }
-  });
-
-  // Dedicated endpoint for generating unit tests using Gemini
-  app.post("/api/gemini/generate-tests", express.json(), async (req, res) => {
-    try {
-      const { filePath, fileName, fileContent } = req.body;
-      if (!fileContent) {
-        return res.status(400).json({ error: "Missing file content to test" });
-      }
-
-      console.log(`[TEST_GENERATION] Generating tests for ${filePath}...`);
-
-      const prompt = `You are a Senior Quality Assurance Engineer.
+            const prompt = `You are a Senior Quality Assurance Engineer.
 Write high-quality, complete, comprehensive unit tests for the following file.
 
 File Name: ${fileName || "code-file"}
@@ -5692,42 +5688,42 @@ Requirements:
 4. Output ONLY the complete, syntactically correct TypeScript/JavaScript test code. Do not include introductory text, conversational text, explanations, or any other wrapper besides the code itself.
 5. Do NOT wrap your entire response in markdown code block markers (like \`\`\`typescript ... \`\`\`). Just provide the raw code. If you must use code block markers, put the code inside them.`;
 
-      const response = await generateContentWithFallback({
-        model: "gemini-2.5-pro",
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        config: {
-          systemInstruction: "You are an automated code generator that outputs clean, correct, executable test suites. Do not explain anything, just output the test code."
+            const response = await generateContentWithFallback({
+                model: "gemini-2.5-pro",
+                contents: [{ role: "user", parts: [{ text: prompt }] }],
+                config: {
+                    systemInstruction: "You are an automated code generator that outputs clean, correct, executable test suites. Do not explain anything, just output the test code."
+                }
+            });
+
+            let testCode = response.text || "";
+
+            // Clean up any markdown code block wrappers if Gemini ignored instructions and added them anyway
+            testCode = testCode.trim();
+            if (testCode.startsWith("```")) {
+                const lines = testCode.split("\n");
+                if (lines[0].startsWith("```")) {
+                    lines.shift();
+                }
+                if (lines.length > 0 && lines[lines.length - 1].startsWith("```")) {
+                    lines.pop();
+                }
+                testCode = lines.join("\n").trim();
+            }
+
+            res.json({ testCode });
+        } catch (err: any) {
+            console.error("Gemini generate-tests error:", err);
+            res.status(500).json({ error: cleanGeminiErrorMessage(err) });
         }
-      });
+    });
 
-      let testCode = response.text || "";
+    // Dedicated endpoint for visual OCR transcription of a textbook page
+    app.post("/api/gemini/transcribe-page", express.json({ limit: "25mb" }), async (req, res) => {
+        try {
+            const { base64Image, rawText, pageNum, title, author, selectedModel, aiEnableCache, temperature, thinkingLevel } = req.body;
 
-      // Clean up any markdown code block wrappers if Gemini ignored instructions and added them anyway
-      testCode = testCode.trim();
-      if (testCode.startsWith("```")) {
-        const lines = testCode.split("\n");
-        if (lines[0].startsWith("```")) {
-          lines.shift();
-        }
-        if (lines.length > 0 && lines[lines.length - 1].startsWith("```")) {
-          lines.pop();
-        }
-        testCode = lines.join("\n").trim();
-      }
-
-      res.json({ testCode });
-    } catch (err: any) {
-      console.error("Gemini generate-tests error:", err);
-      res.status(500).json({ error: cleanGeminiErrorMessage(err) });
-    }
-  });
-
-  // Dedicated endpoint for visual OCR transcription of a textbook page
-  app.post("/api/gemini/transcribe-page", express.json({ limit: "25mb" }), async (req, res) => {
-    try {
-      const { base64Image, rawText, pageNum, title, author, selectedModel, aiEnableCache, temperature, thinkingLevel } = req.body;
-      
-      const instructions = `You are an expert textbook content transcriber, layout structures analyzer, and high-fidelity typesetter.
+            const instructions = `You are an expert textbook content transcriber, layout structures analyzer, and high-fidelity typesetter.
 Your absolute directive is to do a pristine visual transcription of Page ${pageNum} of the textbook "${title || "Unknown Textbook"}" by "${author || "Unknown Author"}".
 
 You have access to both an OCR-extracted raw text block (which may have formatting, hyphenation, or spacing errors) and the exact high-fidelity page canvas screen capture image.
@@ -5741,121 +5737,121 @@ Instructions:
 4. If there is a computer code block or pseudo-code block, transcribe it completely in a markdown block with its respective language syntax.
 5. Do NOT output any introductory or concluding pleasantries, talk, explanations, or meta tags. Simply output the beautifully structured, LaTeX-typeset mathematical and editorial transcription of the page.`;
 
-      const targetThinkingLevel = sanitizeThinkingLevel(thinkingLevel);
+            const targetThinkingLevel = sanitizeThinkingLevel(thinkingLevel);
 
-      // Optimized hash key generation to avoid CPU-bound hashing of mammoth base64 files
-      const cacheKey = computePayloadHash({
-        textKey: rawText || "",
-        pageNum,
-        title,
-        author,
-        selectedModel,
-        imageLen: base64Image ? base64Image.length : 0,
-        temperature,
-        thinkingLevel: targetThinkingLevel
-      });
+            // Optimized hash key generation to avoid CPU-bound hashing of mammoth base64 files
+            const cacheKey = computePayloadHash({
+                textKey: rawText || "",
+                pageNum,
+                title,
+                author,
+                selectedModel,
+                imageLen: base64Image ? base64Image.length : 0,
+                temperature,
+                thinkingLevel: targetThinkingLevel
+            });
 
-      if (aiEnableCache !== false && aiCache[cacheKey]) {
-        console.log(`[AI_CACHE] Textbook page ${pageNum} visual transcribe hit for key ${cacheKey}. Replaying instantly...`);
-        return res.json({ text: aiCache[cacheKey].text, cached: true });
-      }
+            if (aiEnableCache !== false && aiCache[cacheKey]) {
+                console.log(`[AI_CACHE] Textbook page ${pageNum} visual transcribe hit for key ${cacheKey}. Replaying instantly...`);
+                return res.json({ text: aiCache[cacheKey].text, cached: true });
+            }
 
-      let contents: any;
-      if (base64Image) {
-        const matches = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-        let mimeType = "image/jpeg";
-        let base64Data = base64Image;
+            let contents: any;
+            if (base64Image) {
+                const matches = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+                let mimeType = "image/jpeg";
+                let base64Data = base64Image;
 
-        if (matches && matches.length === 3) {
-          mimeType = matches[1];
-          base64Data = matches[2];
-        }
+                if (matches && matches.length === 3) {
+                    mimeType = matches[1];
+                    base64Data = matches[2];
+                }
 
-        const imagePart = {
-          inlineData: {
-            mimeType: mimeType,
-            data: base64Data,
-          },
-        };
+                const imagePart = {
+                    inlineData: {
+                        mimeType: mimeType,
+                        data: base64Data,
+                    },
+                };
 
-        const textPart = {
-          text: `Here is the high-fidelity screenshot of PDF page ${pageNum}.
+                const textPart = {
+                    text: `Here is the high-fidelity screenshot of PDF page ${pageNum}.
 And here is the raw extracted OCR helper text (warning: may contain scrambled mathematical characters, hyphenation errors, or spelling artifacts, so use the image to transcribe all formulas or words accurately):\n"""\n${rawText || ""}\n"""`
-        };
+                };
 
-        contents = [{
-          role: "user",
-          parts: [imagePart, textPart]
-        }];
-      } else {
-        contents = [{
-          role: "user",
-          parts: [{
-            text: `Here is the raw extracted OCR text of the page. Please transcribe it word-for-word in LaTeX format:\n"""\n${rawText || ""}\n"""`
-          }]
-        }];
-      }
+                contents = [{
+                    role: "user",
+                    parts: [imagePart, textPart]
+                }];
+            } else {
+                contents = [{
+                    role: "user",
+                    parts: [{
+                        text: `Here is the raw extracted OCR text of the page. Please transcribe it word-for-word in LaTeX format:\n"""\n${rawText || ""}\n"""`
+                    }]
+                }];
+            }
 
-      const chosenModel = selectedModel && selectedModel !== 'dynamic' ? selectedModel : "gemini-3.5-flash";
-      console.log(`[GEMINI_PROXY] Executing high-fidelity transcribe-page with fallback for page ${pageNum} using model: ${chosenModel}`);
-      const response = await generateContentWithFallback({
-        model: chosenModel,
-        contents: contents,
-        config: {
-          systemInstruction: instructions,
-          ...(targetThinkingLevel ? { thinkingConfig: { thinkingLevel: targetThinkingLevel } } : {}),
-          ...(temperature !== undefined ? { temperature: Number(temperature) } : {})
+            const chosenModel = selectedModel && selectedModel !== 'dynamic' ? selectedModel : "gemini-3.5-flash";
+            console.log(`[GEMINI_PROXY] Executing high-fidelity transcribe-page with fallback for page ${pageNum} using model: ${chosenModel}`);
+            const response = await generateContentWithFallback({
+                model: chosenModel,
+                contents: contents,
+                config: {
+                    systemInstruction: instructions,
+                    ...(targetThinkingLevel ? { thinkingConfig: { thinkingLevel: targetThinkingLevel } } : {}),
+                    ...(temperature !== undefined ? { temperature: Number(temperature) } : {})
+                }
+            });
+
+            const responseText = response.text || "";
+
+            if (aiEnableCache !== false && responseText) {
+                aiCache[cacheKey] = {
+                    model: chosenModel,
+                    text: responseText,
+                    timestamp: Date.now()
+                };
+                saveCache();
+                console.log(`[AI_CACHE] Saved visual transcribe response for page ${pageNum} to key ${cacheKey}`);
+            }
+
+            res.json({ text: responseText });
+        } catch (err: any) {
+            console.error("Gemini transcribe-page error:", err);
+            const isQuota = err.status === 429 || err.statusCode === 429 || String(err).toLowerCase().includes("quota") || String(err).toLowerCase().includes("429") || String(err).toLowerCase().includes("resource_exhausted") || String(err).toLowerCase().includes("exhausted");
+            res.status(isQuota ? 429 : 500).json({ error: cleanGeminiErrorMessage(err) });
         }
-      });
+    });
 
-      const responseText = response.text || "";
+    // Endpoint to scan a base64 cover page image and extract structured textbook metadata
+    app.post("/api/gemini/scan-cover", express.json({ limit: "20mb" }), async (req, res) => {
+        try {
+            const { base64Image, fileName, estimatedPages } = req.body;
+            if (!base64Image) {
+                return res.status(400).json({ error: "Missing base64Image" });
+            }
 
-      if (aiEnableCache !== false && responseText) {
-        aiCache[cacheKey] = {
-          model: chosenModel,
-          text: responseText,
-          timestamp: Date.now()
-        };
-        saveCache();
-        console.log(`[AI_CACHE] Saved visual transcribe response for page ${pageNum} to key ${cacheKey}`);
-      }
+            // Base64 encoding usually has the prefix data:image/...;base64,...
+            const matches = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+            let mimeType = "image/png";
+            let base64Data = base64Image;
 
-      res.json({ text: responseText });
-    } catch (err: any) {
-      console.error("Gemini transcribe-page error:", err);
-      const isQuota = err.status === 429 || err.statusCode === 429 || String(err).toLowerCase().includes("quota") || String(err).toLowerCase().includes("429") || String(err).toLowerCase().includes("resource_exhausted") || String(err).toLowerCase().includes("exhausted");
-      res.status(isQuota ? 429 : 500).json({ error: cleanGeminiErrorMessage(err) });
-    }
-  });
+            if (matches && matches.length === 3) {
+                mimeType = matches[1];
+                base64Data = matches[2];
+            }
 
-  // Endpoint to scan a base64 cover page image and extract structured textbook metadata
-  app.post("/api/gemini/scan-cover", express.json({ limit: "20mb" }), async (req, res) => {
-    try {
-      const { base64Image, fileName, estimatedPages } = req.body;
-      if (!base64Image) {
-        return res.status(400).json({ error: "Missing base64Image" });
-      }
+            console.log(`[GEMINI_PROXY] scan-cover page request. File name: ${fileName}, mime: ${mimeType}`);
 
-      // Base64 encoding usually has the prefix data:image/...;base64,...
-      const matches = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-      let mimeType = "image/png";
-      let base64Data = base64Image;
+            const imagePart = {
+                inlineData: {
+                    mimeType: mimeType,
+                    data: base64Data,
+                },
+            };
 
-      if (matches && matches.length === 3) {
-        mimeType = matches[1];
-        base64Data = matches[2];
-      }
-
-      console.log(`[GEMINI_PROXY] scan-cover page request. File name: ${fileName}, mime: ${mimeType}`);
-
-      const imagePart = {
-        inlineData: {
-          mimeType: mimeType,
-          data: base64Data,
-        },
-      };
-
-      const scanPrompt = `You are a high-fidelity academic syllabus & textbook cover scanning AI.
+            const scanPrompt = `You are a high-fidelity academic syllabus & textbook cover scanning AI.
 Analyze this cover page image of the uploaded textbook / document${fileName ? ` named "${fileName}"` : ""}.
 Extract the following information as a valid JSON object:
 1. "title": The official primary textbook, report, or syllabus title shown on the cover page. Clean it up (no file extensions, beautifully capitalized). If not clear, propose a good descriptive title based on the context.
@@ -5873,54 +5869,54 @@ Return strictly raw JSON with the following structure:
   "mainContentStartPage": 5
 }`;
 
-      // Call the fallback generator with image modality
-      const response = await generateContentWithFallback({
-        model: "gemini-3.5-flash",
-        contents: { parts: [imagePart, { text: scanPrompt }] },
-      });
+            // Call the fallback generator with image modality
+            const response = await generateContentWithFallback({
+                model: "gemini-3.5-flash",
+                contents: { parts: [imagePart, { text: scanPrompt }] },
+            });
 
-      const cleanText = response.text?.trim() || "";
-      console.log(`[GEMINI_PROXY] scan-cover response text:`, cleanText);
+            const cleanText = response.text?.trim() || "";
+            console.log(`[GEMINI_PROXY] scan-cover response text:`, cleanText);
 
-      // Extract JSON from output
-      const cleanedJSON = cleanText.replace(/```json/g, "").replace(/```/g, "").trim();
-      res.json({ metadata: JSON.parse(cleanedJSON) });
-    } catch (err: any) {
-      console.error("Gemini cover scanning failed: ", err);
-      const isQuota = err.status === 429 || err.statusCode === 429 || String(err).toLowerCase().includes("quota") || String(err).toLowerCase().includes("429") || String(err).toLowerCase().includes("resource_exhausted") || String(err).toLowerCase().includes("exhausted");
-      res.status(isQuota ? 429 : 500).json({ error: cleanGeminiErrorMessage(err) });
-    }
-  });
+            // Extract JSON from output
+            const cleanedJSON = cleanText.replace(/```json/g, "").replace(/```/g, "").trim();
+            res.json({ metadata: JSON.parse(cleanedJSON) });
+        } catch (err: any) {
+            console.error("Gemini cover scanning failed: ", err);
+            const isQuota = err.status === 429 || err.statusCode === 429 || String(err).toLowerCase().includes("quota") || String(err).toLowerCase().includes("429") || String(err).toLowerCase().includes("resource_exhausted") || String(err).toLowerCase().includes("exhausted");
+            res.status(isQuota ? 429 : 500).json({ error: cleanGeminiErrorMessage(err) });
+        }
+    });
 
-  // Secure server-side proxy for generating conversation titles
-  app.post("/api/gemini/title", async (req, res) => {
-    try {
-      const { prompt } = req.body;
-      const response = await generateContentWithFallback({
-        model: "gemini-3.5-flash",
-        contents: `Generate a 2-3 word title for a chat conversation that starts with this message: "${prompt}". Return ONLY the title, no quotes or punctuation.`,
-      });
-      res.json({ title: response.text?.trim() || "New Chat" });
-    } catch (err: any) {
-      console.error("Gemini title generation error:", err);
-      const isQuota = err.status === 429 || err.statusCode === 429 || String(err).toLowerCase().includes("quota") || String(err).toLowerCase().includes("429") || String(err).toLowerCase().includes("resource_exhausted") || String(err).toLowerCase().includes("exhausted");
-      res.status(isQuota ? 429 : 500).json({ error: cleanGeminiErrorMessage(err) });
-    }
-  });
+    // Secure server-side proxy for generating conversation titles
+    app.post("/api/gemini/title", async (req, res) => {
+        try {
+            const { prompt } = req.body;
+            const response = await generateContentWithFallback({
+                model: "gemini-3.5-flash",
+                contents: `Generate a 2-3 word title for a chat conversation that starts with this message: "${prompt}". Return ONLY the title, no quotes or punctuation.`,
+            });
+            res.json({ title: response.text?.trim() || "New Chat" });
+        } catch (err: any) {
+            console.error("Gemini title generation error:", err);
+            const isQuota = err.status === 429 || err.statusCode === 429 || String(err).toLowerCase().includes("quota") || String(err).toLowerCase().includes("429") || String(err).toLowerCase().includes("resource_exhausted") || String(err).toLowerCase().includes("exhausted");
+            res.status(isQuota ? 429 : 500).json({ error: cleanGeminiErrorMessage(err) });
+        }
+    });
 
-  // Secure server-side proxy for generating next-step suggestions like Google AI Studio
-  app.post("/api/gemini/suggest", express.json(), async (req, res) => {
-    try {
-      const { messages } = req.body;
-      if (!messages || !Array.isArray(messages) || messages.length === 0) {
-        return res.json({ suggestions: [] });
-      }
-      
-      // Get last few messages for context
-      const lastMessages = messages.slice(-5);
-      const formattedHistory = lastMessages.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n');
-      
-      const prompt = `Based on the following conversation history between a developer (User) and an AI Coding Assistant (Assistant), generate exactly 3 distinct, concise, and highly relevant "next step" suggestion prompts for what the user could ask or do next (similar to Google AI Studio suggestions).
+    // Secure server-side proxy for generating next-step suggestions like Google AI Studio
+    app.post("/api/gemini/suggest", express.json(), async (req, res) => {
+        try {
+            const { messages } = req.body;
+            if (!messages || !Array.isArray(messages) || messages.length === 0) {
+                return res.json({ suggestions: [] });
+            }
+
+            // Get last few messages for context
+            const lastMessages = messages.slice(-5);
+            const formattedHistory = lastMessages.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n');
+
+            const prompt = `Based on the following conversation history between a developer (User) and an AI Coding Assistant (Assistant), generate exactly 3 distinct, concise, and highly relevant "next step" suggestion prompts for what the user could ask or do next (similar to Google AI Studio suggestions).
 Each suggestion should be a short actionable sentence (under 10 words, e.g. "Add a search filter", "Explain how the state is stored", "Implement a dark mode toggle", "Add input validation").
 Return ONLY a valid JSON array of strings containing exactly 3 suggestions, with no markdown formatting, no code block backticks, and no other text.
 Example response:
@@ -5929,416 +5925,413 @@ Example response:
 Conversation History:
 ${formattedHistory}`;
 
-      const response = await generateContentWithFallback({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-      });
+            const response = await generateContentWithFallback({
+                model: "gemini-3.5-flash",
+                contents: prompt,
+            });
 
-      let text = response.text?.trim() || "[]";
-      // Clean up markdown code block wrappers if any
-      if (text.startsWith("```")) {
-        text = text.replace(/^```(json)?\n?/, "").replace(/\n?```$/, "").trim();
-      }
-      
-      let suggestions = [];
-      try {
-        suggestions = JSON.parse(text);
-      } catch (parseErr) {
-        console.warn("Failed to parse suggestions JSON from Gemini, text was:", text);
-        const matches = text.match(/"([^"\\]*(?:\\.[^"\\]*)*)"/g);
-        if (matches && matches.length >= 3) {
-          suggestions = matches.slice(0, 3).map(m => m.replace(/^"|"$/g, '').trim());
-        } else {
-          suggestions = [
-            "Add validation to the input",
-            "Style this section with nice colors",
-            "Show me how to run tests"
-          ];
+            let text = response.text?.trim() || "[]";
+            // Clean up markdown code block wrappers if any
+            if (text.startsWith("```")) {
+                text = text.replace(/^```(json)?\n?/, "").replace(/\n?```$/, "").trim();
+            }
+
+            let suggestions = [];
+            try {
+                suggestions = JSON.parse(text);
+            } catch (parseErr) {
+                console.warn("Failed to parse suggestions JSON from Gemini, text was:", text);
+                const matches = text.match(/"([^"\\]*(?:\\.[^"\\]*)*)"/g);
+                if (matches && matches.length >= 3) {
+                    suggestions = matches.slice(0, 3).map(m => m.replace(/^"|"$/g, '').trim());
+                } else {
+                    suggestions = [
+                        "Add validation to the input",
+                        "Style this section with nice colors",
+                        "Show me how to run tests"
+                    ];
+                }
+            }
+
+            if (!Array.isArray(suggestions)) {
+                suggestions = [];
+            }
+            suggestions = suggestions.filter(s => typeof s === 'string' && s.length > 0).slice(0, 4);
+
+            res.json({ suggestions });
+        } catch (err: any) {
+            console.error("Gemini suggestions generation error:", err);
+            res.json({
+                suggestions: [
+                    "Optimize code structure",
+                    "Explain the active function",
+                    "Implement a theme toggle"
+                ]
+            });
         }
-      }
+    });
 
-      if (!Array.isArray(suggestions)) {
-        suggestions = [];
-      }
-      suggestions = suggestions.filter(s => typeof s === 'string' && s.length > 0).slice(0, 4);
-
-      res.json({ suggestions });
-    } catch (err: any) {
-      console.error("Gemini suggestions generation error:", err);
-      res.json({ suggestions: [
-        "Optimize code structure",
-        "Explain the active function",
-        "Implement a theme toggle"
-      ]});
-    }
-  });
-
-  // Secure server-side proxy for generating images with Imagen 4.0 / 3.0
-  app.post("/api/gemini/generate-image", async (req, res) => {
-    const { prompt: reqPrompt, aspectRatio = '1:1' } = req.body;
-    if (!reqPrompt) {
-      return res.status(400).json({ error: "Prompt is required" });
-    }
-    const promptStr = String(reqPrompt);
-
-    try {
-      console.log(`[GEMINI_PROXY] Image generation requested. Prompt: "${promptStr}" | AspectRatio: ${aspectRatio}`);
-
-      let response: any;
-      try {
-        response = await googleGenAI.models.generateImages({
-          model: 'imagen-4.0-generate-001',
-          prompt: promptStr,
-          config: {
-            numberOfImages: 1,
-            outputMimeType: 'image/png',
-            aspectRatio: aspectRatio,
-          },
-        });
-      } catch (firstTryErr: any) {
-        console.warn(`[GEMINI_PROXY] Primary Imagen 4.0 model failed: ${firstTryErr.message || firstTryErr}. Retrying with Imagen 3.0...`);
-        // Fallback to older Imagen 3.0 model name in case of endpoint capabilities mapping differences
-        response = await googleGenAI.models.generateImages({
-          model: 'imagen-3.0-generate-002',
-          prompt: promptStr,
-          config: {
-            numberOfImages: 1,
-            outputMimeType: 'image/jpeg',
-            aspectRatio: aspectRatio,
-          },
-        });
-      }
-
-      if (!response.generatedImages?.[0]?.image?.imageBytes) {
-        throw new Error("No image bytes returned from Gemini Imagen models");
-      }
-
-      const base64Bytes = response.generatedImages[0].image.imageBytes;
-      res.json({ success: true, base64: base64Bytes });
-    } catch (err: any) {
-      console.warn(`[GEMINI_PROXY] Google Imagen models were unavailable or restricted (${err.message || err}). Falling back directly to client-side Pollinations AI generation...`);
-      const width = aspectRatio === '16:9' ? 1024 : aspectRatio === '9:16' ? 576 : aspectRatio === '4:3' ? 1024 : aspectRatio === '3:4' ? 768 : 1024;
-      const height = aspectRatio === '16:9' ? 576 : aspectRatio === '9:16' ? 1024 : aspectRatio === '4:3' ? 768 : aspectRatio === '3:4' ? 1024 : 1024;
-      const encodedPrompt = encodeURIComponent(promptStr);
-      const seed = Math.floor(Math.random() * 1000000);
-      const fallbackUrl = `https://image.pollinations.ai/p/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
-      
-      // Serve direct client side URL so user's browser (with residential IP) handles it flawlessly
-      res.json({ success: true, isDirectUrl: true, url: fallbackUrl });
-    }
-  });
-
-  // Relay chat requests to the local brain (port 8001)
-  app.post("/api/chat", async (req, res) => {
-    try {
-      const response = await fetch("http://localhost:8001/v1/chat/completions", {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "X-Gemini-API-Key": (req.headers["x-gemini-api-key"] as string) || (req.headers["X-Gemini-API-Key"] as string) || process.env.GEMINI_API_KEY || ""
-        },
-        body: JSON.stringify(req.body)
-      });
-      
-      if (!response.body) return res.status(500).json({ error: "No body" });
-      
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-
-      const reader = response.body.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        res.write(value);
-      }
-      res.end();
-    } catch (err: any) {
-      console.error("Brain Relay Error:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // Helper to fallback to Python local service when Firebase Admin database fails
-  const fallbackToPython = async (req: any, res: any, originalError: Error) => {
-    console.warn(`[Node Fallback] Route ${req.method} ${req.originalUrl} failed (${originalError.message || originalError}), falling back to Python local service.`);
-    try {
-      const targetUrl = `http://localhost:8001${req.originalUrl}`;
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json"
-      };
-      // Copy incoming headers
-      for (const [key, value] of Object.entries(req.headers)) {
-        if (typeof value === "string") {
-          const lowerKey = key.toLowerCase();
-          if (!["host", "content-encoding", "content-length", "connection"].includes(lowerKey)) {
-            headers[key] = value;
-          }
+    // Secure server-side proxy for generating images with Imagen 4.0 / 3.0
+    app.post("/api/gemini/generate-image", async (req, res) => {
+        const { prompt: reqPrompt, aspectRatio = '1:1' } = req.body;
+        if (!reqPrompt) {
+            return res.status(400).json({ error: "Prompt is required" });
         }
-      }
-      if (process.env.GEMINI_API_KEY) {
-        headers["X-Gemini-API-Key"] = process.env.GEMINI_API_KEY;
-      }
-      const options: any = {
-        method: req.method,
-        headers: headers
-      };
-      if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method) && req.body) {
-        options.body = typeof req.body === "object" ? JSON.stringify(req.body) : req.body;
-      }
-      const response = await fetch(targetUrl, options);
-      const data = await response.json();
-      res.status(response.status).json(data);
-    } catch (proxyErr: any) {
-      console.error(`[Node Fallback] Python fallback for ${req.method} ${req.originalUrl} failed:`, proxyErr);
-      res.status(500).json({ error: originalError.message });
-    }
-  };
+        const promptStr = String(reqPrompt);
 
-  // Native high-fidelity workspace and message synchronization fallback for offline/isolated runtime
-  app.get("/v1/firebase/workstreams", async (req, res) => {
-    try {
-      if (!adminDb) throw new Error("Firebase Admin DB not ready");
-      const snapshot = await adminDb.collection("conversations").get();
-      const results: any[] = [];
-      snapshot.forEach((doc: any) => {
-        const data = doc.data();
-        data.id = doc.id;
-        
-        // Convert any date/timestamp fields to the FastAPI standard `{"seconds": timestamp}`
-        for (const k of Object.keys(data)) {
-          const v = data[k];
-          if (v instanceof Date) {
-            data[k] = { seconds: Math.floor(v.getTime() / 1000) };
-          } else if (v && typeof v === "object" && typeof v.toDate === "function") {
-            data[k] = { seconds: Math.floor(v.toDate().getTime() / 1000) };
-          } else if (v && typeof v === "object" && v.seconds !== undefined) {
-            data[k] = { seconds: v.seconds };
-          }
+        try {
+            console.log(`[GEMINI_PROXY] Image generation requested. Prompt: "${promptStr}" | AspectRatio: ${aspectRatio}`);
+
+            let response: any;
+            try {
+                response = await googleGenAI.models.generateImages({
+                    model: 'imagen-4.0-generate-001',
+                    prompt: promptStr,
+                    config: {
+                        numberOfImages: 1,
+                        outputMimeType: 'image/png',
+                        aspectRatio: aspectRatio,
+                    },
+                });
+            } catch (firstTryErr: any) {
+                console.warn(`[GEMINI_PROXY] Primary Imagen 4.0 model failed: ${firstTryErr.message || firstTryErr}. Retrying with Imagen 3.0...`);
+                // Fallback to older Imagen 3.0 model name in case of endpoint capabilities mapping differences
+                response = await googleGenAI.models.generateImages({
+                    model: 'imagen-3.0-generate-002',
+                    prompt: promptStr,
+                    config: {
+                        numberOfImages: 1,
+                        outputMimeType: 'image/jpeg',
+                        aspectRatio: aspectRatio,
+                    },
+                });
+            }
+
+            if (!response.generatedImages?.[0]?.image?.imageBytes) {
+                throw new Error("No image bytes returned from Gemini Imagen models");
+            }
+
+            const base64Bytes = response.generatedImages[0].image.imageBytes;
+            res.json({ success: true, base64: base64Bytes });
+        } catch (err: any) {
+            console.warn(`[GEMINI_PROXY] Google Imagen models were unavailable or restricted (${err.message || err}). Falling back directly to client-side Pollinations AI generation...`);
+            const width = aspectRatio === '16:9' ? 1024 : aspectRatio === '9:16' ? 576 : aspectRatio === '4:3' ? 1024 : aspectRatio === '3:4' ? 768 : 1024;
+            const height = aspectRatio === '16:9' ? 576 : aspectRatio === '9:16' ? 1024 : aspectRatio === '4:3' ? 768 : aspectRatio === '3:4' ? 1024 : 1024;
+            const encodedPrompt = encodeURIComponent(promptStr);
+            const seed = Math.floor(Math.random() * 1000000);
+            const fallbackUrl = `https://image.pollinations.ai/p/${encodedPrompt}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
+
+            // Serve direct client side URL so user's browser (with residential IP) handles it flawlessly
+            res.json({ success: true, isDirectUrl: true, url: fallbackUrl });
         }
-        results.push(data);
-      });
-      
-      // Sort in-memory desc by createdAt
-      results.sort((a, b) => {
-        const tA = (a.createdAt && typeof a.createdAt === 'object') ? (a.createdAt.seconds || 0) : 0;
-        const tB = (b.createdAt && typeof b.createdAt === 'object') ? (b.createdAt.seconds || 0) : 0;
-        return tB - tA;
-      });
-      
-      res.json(results);
-    } catch (err: any) {
-      console.error("[Node Fallback] GET /v1/firebase/workstreams Error:", err);
-      await fallbackToPython(req, res, err);
-    }
-  });
+    });
 
-  app.post("/v1/firebase/workstreams", async (req, res) => {
-    try {
-      if (!adminDb) throw new Error("Firebase Admin DB not ready");
-      const payload = req.body || {};
-      const title = payload.title || "New Daily Workstream";
-      const type = payload.type || "main_convo";
-      const userId = payload.userId || "pi-user";
-      const convoId = payload.id || `py-convo-${Date.now()}`;
-      const parentId = payload.parentId || null;
+    // Relay chat requests to the local brain (port 8001)
+    app.post("/api/chat", async (req, res) => {
+        try {
+            const response = await fetch("http://localhost:8001/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Gemini-API-Key": (req.headers["x-gemini-api-key"] as string) || (req.headers["X-Gemini-API-Key"] as string) || process.env.GEMINI_API_KEY || ""
+                },
+                body: JSON.stringify(req.body)
+            });
 
-      const now = new Date();
-      const convoData: any = {
-        title,
-        type,
-        userId,
-        parentId,
-        createdAt: now,
-        updatedAt: now
-      };
+            if (!response.body) return res.status(500).json({ error: "No body" });
 
-      await adminDb.collection("conversations").doc(convoId).set(convoData);
-      
-      const docSnap = await adminDb.collection("conversations").doc(convoId).get();
-      const retData = docSnap.data() || {};
-      retData.id = convoId;
-      
-      for (const k of Object.keys(retData)) {
-        const v = retData[k];
-        if (v instanceof Date) {
-          retData[k] = { seconds: Math.floor(v.getTime() / 1000) };
-        } else if (v && typeof v === "object" && typeof v.toDate === "function") {
-          retData[k] = { seconds: Math.floor(v.toDate().getTime() / 1000) };
-        } else if (v && typeof v === "object" && v.seconds !== undefined) {
-          retData[k] = { seconds: v.seconds };
+            res.setHeader("Content-Type", "text/event-stream");
+            res.setHeader("Cache-Control", "no-cache");
+            res.setHeader("Connection", "keep-alive");
+
+            const reader = response.body.getReader();
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                res.write(value);
+            }
+            res.end();
+        } catch (err: any) {
+            console.error("Brain Relay Error:", err);
+            res.status(500).json({ error: err.message });
         }
-      }
-      res.json(retData);
-    } catch (err: any) {
-      console.error("[Node Fallback] POST /v1/firebase/workstreams Error:", err);
-      await fallbackToPython(req, res, err);
-    }
-  });
+    });
 
-  app.delete("/v1/firebase/workstreams/:convoId", async (req, res) => {
-    try {
-      if (!adminDb) throw new Error("Firebase Admin DB not ready");
-      const { convoId } = req.params;
-      
-      // Delete child messages
-      const messagesCol = adminDb.collection("conversations").doc(convoId).collection("messages");
-      const messagesSnapshot = await messagesCol.get();
-      const batch = adminDb.batch();
-      messagesSnapshot.forEach((docSnap: any) => {
-        batch.delete(docSnap.ref);
-      });
-      await batch.commit();
-      
-      // Delete conversation itself
-      await adminDb.collection("conversations").doc(convoId).delete();
-      res.json({ success: true });
-    } catch (err: any) {
-      console.error("[Node Fallback] DELETE /v1/firebase/workstreams Error:", err);
-      await fallbackToPython(req, res, err);
-    }
-  });
-
-  app.get("/v1/firebase/workstreams/:convoId/messages", async (req, res) => {
-    try {
-      if (!adminDb) throw new Error("Firebase Admin DB not ready");
-      const { convoId } = req.params;
-      const colRef = adminDb.collection("conversations").doc(convoId).collection("messages");
-      const snapshot = await colRef.get();
-      const results: any[] = [];
-      snapshot.forEach((doc: any) => {
-        const data = doc.data();
-        data.id = doc.id;
-        
-        for (const k of Object.keys(data)) {
-          const v = data[k];
-          if (v instanceof Date) {
-            data[k] = { seconds: Math.floor(v.getTime() / 1000) };
-          } else if (v && typeof v === "object" && typeof v.toDate === "function") {
-            data[k] = { seconds: Math.floor(v.toDate().getTime() / 1000) };
-          } else if (v && typeof v === "object" && v.seconds !== undefined) {
-            data[k] = { seconds: v.seconds };
-          }
+    // Helper to fallback to Python local service when Firebase Admin database fails
+    const fallbackToPython = async (req: any, res: any, originalError: Error) => {
+        console.warn(`[Node Fallback] Route ${req.method} ${req.originalUrl} failed (${originalError.message || originalError}), falling back to Python local service.`);
+        try {
+            const targetUrl = `http://localhost:8001${req.originalUrl}`;
+            const headers: Record<string, string> = {
+                "Content-Type": "application/json"
+            };
+            // Copy incoming headers
+            for (const [key, value] of Object.entries(req.headers)) {
+                if (typeof value === "string") {
+                    const lowerKey = key.toLowerCase();
+                    if (!["host", "content-encoding", "content-length", "connection"].includes(lowerKey)) {
+                        headers[key] = value;
+                    }
+                }
+            }
+            if (process.env.GEMINI_API_KEY) {
+                headers["X-Gemini-API-Key"] = process.env.GEMINI_API_KEY;
+            }
+            const options: any = {
+                method: req.method,
+                headers: headers
+            };
+            if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method) && req.body) {
+                options.body = typeof req.body === "object" ? JSON.stringify(req.body) : req.body;
+            }
+            const response = await fetch(targetUrl, options);
+            const data = await response.json();
+            res.status(response.status).json(data);
+        } catch (proxyErr: any) {
+            console.error(`[Node Fallback] Python fallback for ${req.method} ${req.originalUrl} failed:`, proxyErr);
+            res.status(500).json({ error: originalError.message });
         }
-        results.push(data);
-      });
-      
-      // Sort in-memory asc by createdAt
-      results.sort((a, b) => {
-        const tA = (a.createdAt && typeof a.createdAt === 'object') ? (a.createdAt.seconds || 0) : 0;
-        const tB = (b.createdAt && typeof b.createdAt === 'object') ? (b.createdAt.seconds || 0) : 0;
-        return tA - tB;
-      });
-      
-      res.json(results);
-    } catch (err: any) {
-      console.error("[Node Fallback] GET messages Error:", err);
-      await fallbackToPython(req, res, err);
-    }
-  });
+    };
 
-  app.post("/v1/firebase/workstreams/:convoId/messages", async (req, res) => {
-    try {
-      if (!adminDb) throw new Error("Firebase Admin DB not ready");
-      const { convoId } = req.params;
-      const payload = req.body || {};
-      const role = payload.role || "user";
-      const content = payload.content || "";
-      const thoughts = payload.thoughts;
-      const msgId = payload.id || `py-msg-${Date.now()}`;
+    // Native high-fidelity workspace and message synchronization fallback for offline/isolated runtime
+    app.get("/v1/firebase/workstreams", async (req, res) => {
+        try {
+            const snapshot = await adminDb.collection("conversations").get();
+            const results: any[] = [];
+            snapshot.forEach((doc: any) => {
+                const data = doc.data();
+                data.id = doc.id;
 
-      const now = new Date();
-      const msgData: any = {
-        conversationId: convoId,
-        role,
-        content,
-        createdAt: now
-      };
-      if (thoughts) {
-        msgData.thoughts = thoughts;
-      }
+                // Convert any date/timestamp fields to the FastAPI standard `{"seconds": timestamp}`
+                for (const k of Object.keys(data)) {
+                    const v = data[k];
+                    if (v instanceof Date) {
+                        data[k] = { seconds: Math.floor(v.getTime() / 1000) };
+                    } else if (v && typeof v === "object" && typeof v.toDate === "function") {
+                        data[k] = { seconds: Math.floor(v.toDate().getTime() / 1000) };
+                    } else if (v && typeof v === "object" && v.seconds !== undefined) {
+                        data[k] = { seconds: v.seconds };
+                    }
+                }
+                results.push(data);
+            });
 
-      await adminDb.collection("conversations").doc(convoId).collection("messages").doc(msgId).set(msgData);
-      
-      const docSnap = await adminDb.collection("conversations").doc(convoId).collection("messages").doc(msgId).get();
-      const retData = docSnap.data() || {};
-      retData.id = msgId;
-      
-      for (const k of Object.keys(retData)) {
-        const v = retData[k];
-        if (v instanceof Date) {
-          retData[k] = { seconds: Math.floor(v.getTime() / 1000) };
-        } else if (v && typeof v === "object" && typeof v.toDate === "function") {
-          retData[k] = { seconds: Math.floor(v.toDate().getTime() / 1000) };
-        } else if (v && typeof v === "object" && v.seconds !== undefined) {
-          retData[k] = { seconds: v.seconds };
+            // Sort in-memory desc by createdAt
+            results.sort((a, b) => {
+                const tA = (a.createdAt && typeof a.createdAt === 'object') ? (a.createdAt.seconds || 0) : 0;
+                const tB = (b.createdAt && typeof b.createdAt === 'object') ? (b.createdAt.seconds || 0) : 0;
+                return tB - tA;
+            });
+
+            res.json(results);
+        } catch (err: any) {
+            console.error("[Node Fallback] GET /v1/firebase/workstreams Error:", err);
+            await fallbackToPython(req, res, err);
         }
-      }
-      res.json(retData);
-    } catch (err: any) {
-      console.error("[Node Fallback] POST messages Error:", err);
-      await fallbackToPython(req, res, err);
-    }
-  });
+    });
 
-  // Proxy all other REST API /v1 endpoints to the FastAPI python uvicorn server (port 8001)
-  app.all("/v1/*", async (req, res) => {
-    try {
-      const targetUrl = `http://localhost:8001${req.originalUrl}`;
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json"
-      };
-      
-      // Copy incoming headers
-      for (const [key, value] of Object.entries(req.headers)) {
-        if (typeof value === "string") {
-          const lowerKey = key.toLowerCase();
-          // Skip sensitive or custom hop headers that might confuse uvicorn/http-parser
-          if (!["host", "content-encoding", "content-length", "connection"].includes(lowerKey)) {
-            headers[key] = value;
-          }
+    app.post("/v1/firebase/workstreams", async (req, res) => {
+        try {
+            const payload = req.body || {};
+            const title = payload.title || "New Daily Workstream";
+            const type = payload.type || "main_convo";
+            const userId = payload.userId || "pi-user";
+            const convoId = payload.id || `py-convo-${Date.now()}`;
+            const parentId = payload.parentId || null;
+
+            const now = new Date();
+            const convoData: any = {
+                title,
+                type,
+                userId,
+                parentId,
+                createdAt: now,
+                updatedAt: now
+            };
+
+            await adminDb.collection("conversations").doc(convoId).set(convoData);
+
+            const docSnap = await adminDb.collection("conversations").doc(convoId).get();
+            const retData = docSnap.data() || {};
+            retData.id = convoId;
+
+            for (const k of Object.keys(retData)) {
+                const v = retData[k];
+                if (v instanceof Date) {
+                    retData[k] = { seconds: Math.floor(v.getTime() / 1000) };
+                } else if (v && typeof v === "object" && typeof v.toDate === "function") {
+                    retData[k] = { seconds: Math.floor(v.toDate().getTime() / 1000) };
+                } else if (v && typeof v === "object" && v.seconds !== undefined) {
+                    retData[k] = { seconds: v.seconds };
+                }
+            }
+            res.json(retData);
+        } catch (err: any) {
+            console.error("[Node Fallback] POST /v1/firebase/workstreams Error:", err);
+            await fallbackToPython(req, res, err);
         }
-      }
+    });
 
-      // Add Gemini API Key header if present in environment
-      if (process.env.GEMINI_API_KEY) {
-        headers["X-Gemini-API-Key"] = process.env.GEMINI_API_KEY;
-      }
-      
-      const options: RequestInit = {
-        method: req.method,
-        headers: headers
-      };
-      
-      if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method) && req.body) {
-        options.body = typeof req.body === "object" ? JSON.stringify(req.body) : req.body;
-      }
-      
-      const response = await fetch(targetUrl, options);
-      
-      // Send response headers
-      res.status(response.status);
-      response.headers.forEach((val, key) => {
-        const lowerKey = key.toLowerCase();
-        if (!["content-encoding", "transfer-encoding", "connection"].includes(lowerKey)) {
-          res.setHeader(key, val);
+    app.delete("/v1/firebase/workstreams/:convoId", async (req, res) => {
+        try {
+            const { convoId } = req.params;
+
+            // Delete child messages
+            const messagesCol = adminDb.collection("conversations").doc(convoId).collection("messages");
+            const messagesSnapshot = await messagesCol.get();
+            const batch = adminDb.batch();
+            messagesSnapshot.forEach((docSnap: any) => {
+                batch.delete(docSnap.ref);
+            });
+            await batch.commit();
+
+            // Delete conversation itself
+            await adminDb.collection("conversations").doc(convoId).delete();
+            res.json({ success: true });
+        } catch (err: any) {
+            console.error("[Node Fallback] DELETE /v1/firebase/workstreams Error:", err);
+            await fallbackToPython(req, res, err);
         }
-      });
-      
-      const buffer = await response.arrayBuffer();
-      res.send(Buffer.from(buffer));
-    } catch (err: any) {
-      console.error(`Error proxying to local brain (${req.method} ${req.originalUrl}):`, err);
-      res.status(500).json({ error: err.message || "Failed to contact local brain." });
-    }
-  });
+    });
 
-  app.post("/api/process-screenshot", async (req, res) => {
-    try {
-      const { image, query } = req.body;
-      if (!image) return res.status(400).json({ error: "Missing image" });
+    app.get("/v1/firebase/workstreams/:convoId/messages", async (req, res) => {
+        try {
+            const { convoId } = req.params;
+            const colRef = adminDb.collection("conversations").doc(convoId).collection("messages");
+            const snapshot = await colRef.get();
+            const results: any[] = [];
+            snapshot.forEach((doc: any) => {
+                const data = doc.data();
+                data.id = doc.id;
 
-      const prompt = `You are the TITAN_OS Vision Kernel. Analyze this screenshot of the OS.
+                for (const k of Object.keys(data)) {
+                    const v = data[k];
+                    if (v instanceof Date) {
+                        data[k] = { seconds: Math.floor(v.getTime() / 1000) };
+                    } else if (v && typeof v === "object" && typeof v.toDate === "function") {
+                        data[k] = { seconds: Math.floor(v.toDate().getTime() / 1000) };
+                    } else if (v && typeof v === "object" && v.seconds !== undefined) {
+                        data[k] = { seconds: v.seconds };
+                    }
+                }
+                results.push(data);
+            });
+
+            // Sort in-memory asc by createdAt
+            results.sort((a, b) => {
+                const tA = (a.createdAt && typeof a.createdAt === 'object') ? (a.createdAt.seconds || 0) : 0;
+                const tB = (b.createdAt && typeof b.createdAt === 'object') ? (b.createdAt.seconds || 0) : 0;
+                return tA - tB;
+            });
+
+            res.json(results);
+        } catch (err: any) {
+            console.error("[Node Fallback] GET messages Error:", err);
+            await fallbackToPython(req, res, err);
+        }
+    });
+
+    app.post("/v1/firebase/workstreams/:convoId/messages", async (req, res) => {
+        try {
+            const { convoId } = req.params;
+            const payload = req.body || {};
+            const role = payload.role || "user";
+            const content = payload.content || "";
+            const thoughts = payload.thoughts;
+            const msgId = payload.id || `py-msg-${Date.now()}`;
+
+            const now = new Date();
+            const msgData: any = {
+                conversationId: convoId,
+                role,
+                content,
+                createdAt: now
+            };
+            if (thoughts) {
+                msgData.thoughts = thoughts;
+            }
+
+            await adminDb.collection("conversations").doc(convoId).collection("messages").doc(msgId).set(msgData);
+
+            const docSnap = await adminDb.collection("conversations").doc(convoId).collection("messages").doc(msgId).get();
+            const retData = docSnap.data() || {};
+            retData.id = msgId;
+
+            for (const k of Object.keys(retData)) {
+                const v = retData[k];
+                if (v instanceof Date) {
+                    retData[k] = { seconds: Math.floor(v.getTime() / 1000) };
+                } else if (v && typeof v === "object" && typeof v.toDate === "function") {
+                    retData[k] = { seconds: Math.floor(v.toDate().getTime() / 1000) };
+                } else if (v && typeof v === "object" && v.seconds !== undefined) {
+                    retData[k] = { seconds: v.seconds };
+                }
+            }
+            res.json(retData);
+        } catch (err: any) {
+            console.error("[Node Fallback] POST messages Error:", err);
+            await fallbackToPython(req, res, err);
+        }
+    });
+
+    // Proxy all other REST API /v1 endpoints to the FastAPI python uvicorn server (port 8001)
+    app.all("/v1/*", async (req, res) => {
+        try {
+            const targetUrl = `http://localhost:8001${req.originalUrl}`;
+            const headers: Record<string, string> = {
+                "Content-Type": "application/json"
+            };
+
+            // Copy incoming headers
+            for (const [key, value] of Object.entries(req.headers)) {
+                if (typeof value === "string") {
+                    const lowerKey = key.toLowerCase();
+                    // Skip sensitive or custom hop headers that might confuse uvicorn/http-parser
+                    if (!["host", "content-encoding", "content-length", "connection"].includes(lowerKey)) {
+                        headers[key] = value;
+                    }
+                }
+            }
+
+            // Add Gemini API Key header if present in environment
+            if (process.env.GEMINI_API_KEY) {
+                headers["X-Gemini-API-Key"] = process.env.GEMINI_API_KEY;
+            }
+
+            const options: RequestInit = {
+                method: req.method,
+                headers: headers
+            };
+
+            if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method) && req.body) {
+                options.body = typeof req.body === "object" ? JSON.stringify(req.body) : req.body;
+            }
+
+            const response = await fetch(targetUrl, options);
+
+            // Send response headers
+            res.status(response.status);
+            response.headers.forEach((val, key) => {
+                const lowerKey = key.toLowerCase();
+                if (!["content-encoding", "transfer-encoding", "connection"].includes(lowerKey)) {
+                    res.setHeader(key, val);
+                }
+            });
+
+            const buffer = await response.arrayBuffer();
+            res.send(Buffer.from(buffer));
+        } catch (err: any) {
+            console.error(`Error proxying to local brain (${req.method} ${req.originalUrl}):`, err);
+            res.status(500).json({ error: err.message || "Failed to contact local brain." });
+        }
+    });
+
+    app.post("/api/process-screenshot", async (req, res) => {
+        try {
+            const { image, query } = req.body;
+            if (!image) return res.status(400).json({ error: "Missing image" });
+
+            const prompt = `You are the TITAN_OS Vision Kernel. Analyze this screenshot of the OS.
 Normalized coordinates: Use percentages (0-100) for x and y.
 Current Query: ${query || "Analyze system state."}
 
@@ -6354,84 +6347,84 @@ Return a JSON-like structured response:
   "entities": [{"name": "...", "x": 0-100, "y": 0-100}]
 }`;
 
-      const imagePart = {
-        inlineData: {
-          mimeType: "image/png",
-          data: image.split(',')[1],
-        },
-      };
+            const imagePart = {
+                inlineData: {
+                    mimeType: "image/png",
+                    data: image.split(',')[1],
+                },
+            };
 
-      const textPart = {
-        text: prompt,
-      };
+            const textPart = {
+                text: prompt,
+            };
 
-      const result = await generateContentWithFallback({
-        model: "gemini-3.5-flash",
-        contents: { parts: [textPart, imagePart] },
-      });
+            const result = await generateContentWithFallback({
+                model: "gemini-3.5-flash",
+                contents: { parts: [textPart, imagePart] },
+            });
 
-      const responseText = result.text || "";
-      res.json({ report: responseText });
-    } catch (error: any) {
-      console.error("Vision Processing Error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+            const responseText = result.text || "";
+            res.json({ report: responseText });
+        } catch (error: any) {
+            console.error("Vision Processing Error:", error);
+            res.status(500).json({ error: error.message });
+        }
+    });
 
-  app.post("/api/mac/agent/reason", express.json({ limit: "50mb" }), async (req, res) => {
-    try {
-      const { image, query, lastCommandResult } = req.body;
-      if (!image) return res.status(400).json({ error: "Missing image data" });
+    app.post("/api/mac/agent/reason", express.json({ limit: "50mb" }), async (req, res) => {
+        try {
+            const { image, query, lastCommandResult } = req.body;
+            if (!image) return res.status(400).json({ error: "Missing image data" });
 
-      let base64Data = image;
-      if (image.includes(",")) {
-        base64Data = image.split(",")[1];
-      }
+            let base64Data = image;
+            if (image.includes(",")) {
+                base64Data = image.split(",")[1];
+            }
 
-      let lastCommandPrompt = "";
-      if (lastCommandResult) {
-        lastCommandPrompt = `\n\nLAST SEQUENTIAL COMMAND RUN RESULT (STDOUT/STDERR COMBINED):
+            let lastCommandPrompt = "";
+            if (lastCommandResult) {
+                lastCommandPrompt = `\n\nLAST SEQUENTIAL COMMAND RUN RESULT (STDOUT/STDERR COMBINED):
 Exit Code: ${lastCommandResult.exitCode}
 Output:
 ${lastCommandResult.output}\n`;
-      }
+            }
 
-      // Query latest real-time macOS companion diagnostics and permissions from Firestore
-      let companionStatusText = "No companion device diagnostics received yet. The macOS companion is likely OFFLINE.";
-      let hasAccessibility = false;
-      let hasScreenshots = false;
-      let isConnected = false;
-      let installedAppsList: string[] = ["Safari", "Music", "Notes", "Terminal", "Calculator", "Finder", "Spotify"];
-      let osVersion = "macOS (Unknown)";
-      let modelIdentifier = "Mac Device";
-      
-      try {
-        const db = await getServerFirestore();
-        const diagDoc = await db.collection("system_state").doc("hardware_diagnostics").get();
-        if (diagDoc.exists) {
-          const dData = diagDoc.data() || {};
-          const lastReportTime = dData.timestamp ? new Date(dData.timestamp).getTime() : 0;
-          // Stale check: 2 minutes
-          const isRecent = (Date.now() - lastReportTime) < 120000;
-          isConnected = isRecent;
-          hasAccessibility = !!dData.accessibility;
-          hasScreenshots = !!dData.screenshots;
-          if (Array.isArray(dData.installedApps) && dData.installedApps.length > 0) {
-            installedAppsList = dData.installedApps;
-          }
-          if (dData.osVersion) osVersion = dData.osVersion;
-          if (dData.modelIdentifier) modelIdentifier = dData.modelIdentifier;
-          
-          companionStatusText = `macOS Companion status: ${isRecent ? "ONLINE" : "OFFLINE / DISCONNECTED"}.\n` +
-                                `Physical Hardware: ${modelIdentifier}, OS: ${osVersion}.\n` +
-                                `System Permissions: Accessibility=${hasAccessibility ? "GRANTED" : "DENIED"}, ScreenCapture=${hasScreenshots ? "GRANTED" : "DENIED"}.\n` +
-                                `Installed Applications List: ${installedAppsList.join(", ")}.`;
-        }
-      } catch (err: any) {
-        console.warn("[MacAgent] Could not read hardware diagnostics for agent reasoning:", err.message);
-      }
+            // Query latest real-time macOS companion diagnostics and permissions from Firestore
+            let companionStatusText = "No companion device diagnostics received yet. The macOS companion is likely OFFLINE.";
+            let hasAccessibility = false;
+            let hasScreenshots = false;
+            let isConnected = false;
+            let installedAppsList: string[] = ["Safari", "Music", "Notes", "Terminal", "Calculator", "Finder", "Spotify"];
+            let osVersion = "macOS (Unknown)";
+            let modelIdentifier = "Mac Device";
 
-      const prompt = `You are a professional macOS Computer Use agent. You see a screenshot of the user's active screen.${lastCommandPrompt}
+            try {
+                const db = await getServerFirestore();
+                const diagDoc = await db.collection("system_state").doc("hardware_diagnostics").get();
+                if (diagDoc.exists) {
+                    const dData = diagDoc.data() || {};
+                    const lastReportTime = dData.timestamp ? new Date(dData.timestamp).getTime() : 0;
+                    // Stale check: 2 minutes
+                    const isRecent = (Date.now() - lastReportTime) < 120000;
+                    isConnected = isRecent;
+                    hasAccessibility = !!dData.accessibility;
+                    hasScreenshots = !!dData.screenshots;
+                    if (Array.isArray(dData.installedApps) && dData.installedApps.length > 0) {
+                        installedAppsList = dData.installedApps;
+                    }
+                    if (dData.osVersion) osVersion = dData.osVersion;
+                    if (dData.modelIdentifier) modelIdentifier = dData.modelIdentifier;
+
+                    companionStatusText = `macOS Companion status: ${isRecent ? "ONLINE" : "OFFLINE / DISCONNECTED"}.\n` +
+                        `Physical Hardware: ${modelIdentifier}, OS: ${osVersion}.\n` +
+                        `System Permissions: Accessibility=${hasAccessibility ? "GRANTED" : "DENIED"}, ScreenCapture=${hasScreenshots ? "GRANTED" : "DENIED"}.\n` +
+                        `Installed Applications List: ${installedAppsList.join(", ")}.`;
+                }
+            } catch (err: any) {
+                console.warn("[MacAgent] Could not read hardware diagnostics for agent reasoning:", err.message);
+            }
+
+            const prompt = `You are a professional macOS Computer Use agent. You see a screenshot of the user's active screen.${lastCommandPrompt}
 The current objective is: "${query || "Analyze and assist the user with their environment."}"
 
 REAL-TIME SYSTEM DIAGNOSTICS & HARDWARE CONTEXT:
@@ -6439,133 +6432,153 @@ REAL-TIME SYSTEM DIAGNOSTICS & HARDWARE CONTEXT:
 ${companionStatusText}
 -----------------------------------------------
 
+CRITICAL NAVIGATION & COORDINATE SYSTEM SCHEMATICS:
+1. COORDINATE SCALE: The entire display is mapped to a normalized 0-1000 coordinate system:
+   - [0, 0] represents the absolute Top-Left corner of the screen.
+   - [1000, 1000] represents the absolute Bottom-Right corner of the screen.
+   - X coordinate goes horizontally from Left (0) to Right (1000).
+   - Y coordinate goes vertically from Top (0) to Bottom (1000).
+2. VISUAL LANDMARKS FOR macOS:
+   - macOS Menu Bar is always at the top of the screen: y is typically in range [0, 45].
+   - macOS Dock is usually centered at the bottom of the screen: y is typically in range [920, 1000].
+   - Spotlight Search Bar is centered near the upper-middle of the screen: x is around 500, y is around 300.
+3. DETAILED ACTION PIPELINE:
+   - 'click': Send this action to click elements (icons, buttons, input bars).
+   - 'hover': Send this to move without clicking.
+   - 'typeText': Types a string of characters into the CURRENTLY FOCUSED input field.
+   - 'keyCombo': Presses hardware modifiers and keys (e.g., "cmd+space", "cmd+n", "enter", "tab", "cmd+a").
+   - 'launchApp': Instantly activates or starts any app listed in the "Installed Applications List".
+   - 'runCommand': Executes a background shell command.
+   - 'finish': Declare that the user's objective is completely met and you are finished.
+
 CRITICAL CREDIBILITY, REASONING & FOCUS MANDATE:
-1. APPLICATION AWARENESS: Before attempting to open, click, or launch an app, verify if it exists in the "Installed Applications List" above. If it does not exist, do NOT try to click a non-existent app icon or launch it. Speak honestly or find a substitute (e.g. use Safari if Chrome is missing).
-2. HARDWARE PERMISSIONS: If Accessibility or ScreenCapture is DENIED, you cannot control the screen or click elements properly. You must immediately do a "hover" action at [500, 500], and explain clearly to the user that you need them to grant "Accessibility" and "Screen Recording" permissions in System Settings, rather than claiming success or clicking blindly.
-3. NEVER HALLUCINATE OR CLAIM PREMATURE SUCCESS: Do not assume that launching an app automatically inputs text, creates a document, or plays a track. Every physical interaction must be performed step-by-step:
-   - For example, if asked to create a note in the "Notes" application and write "hello":
-     a. Launch the Notes app using the 'launchApp' action. Do NOT claim the note is created or type anything in this step.
-     b. In the next iteration, look at the screen. Verify the Notes window is fully visible.
-     c. Trigger a New Note (either click the compose pencil-and-paper button in the Notes window, or send a 'keyCombo' action of 'cmd+n').
-     d. Wait for the next iteration to see the blank text area.
-     e. Click inside the text area to focus it.
-     f. Send 'typeText' with the value "hello".
-     g. Visually confirm the text is written in the next iteration before declaring success.
-4. FOCUS PRESERVATION: Keep the virtual cursor and actions strictly centered on the active app's window frame. Avoid clicking outside the active window to prevent losing system focus.
-5. Keep actions precise and sequential. If you are finished or have accomplished the task, hover at [500, 500] and explain that you have successfully completed the objective.`;
+1. FOCUS FIRST, TYPE SECOND (MANDATORY): You cannot type text into a field without focusing it first! You MUST perform this as two separate, sequential actions:
+   - Step 1: Issue a 'click' action precisely inside the target text field or input bar. Wait for the next iteration.
+   - Step 2: Once you see that the cursor is active or the text field is focused, issue a 'typeText' action with the payload.
+   - Try to avoid doing both in a single turn. Always focus first, then type!
+2. MULTI-STEP RELIABILITY (NO HALLUCINATIONS): Do not skip steps! For example, if asked to open Safari and search for "Unison":
+   - Turn 1: Open Safari (use 'launchApp' or click Safari icon in the Dock/Launcher).
+   - Turn 2: Look at the screenshot. Verify Safari is visible. Click precisely on the address/search bar (usually at x=500, y=75-80).
+   - Turn 3: Once focused, send 'typeText' with value "Unison\\n" (or use 'keyCombo' with "enter" right after typing).
+   - Turn 4: Verify that the search results page is loaded before declaring success.
+3. KEYBOARD SHORTCUTS ARE ULTRA-ROBUST: When clicking is difficult or elements are tiny, prefer macOS system hotkeys:
+   - To open any application instantly: Send 'keyCombo': "cmd+space" to summon Spotlight, wait for next turn, type the application name (e.g., "Notes"), and then press 'enter'.
+   - To create a new document/tab: "cmd+n" (new document) or "cmd+t" (new Safari tab).
+   - To select all and delete: "cmd+a", then backspace or type over.
+4. HARDWARE PERMISSIONS: If Accessibility or ScreenCapture is DENIED, you cannot control the screen. Immediately send a 'hover' action at [500, 500], and explain clearly to the user that they must toggle and grant Accessibility and Screen Recording permissions in System Settings under "Privacy & Security".`;
 
-      const imagePart = {
-        inlineData: {
-          mimeType: "image/png",
-          data: base64Data,
-        },
-      };
+            const imagePart = {
+                inlineData: {
+                    mimeType: "image/png",
+                    data: base64Data,
+                },
+            };
 
-      const textPart = {
-        text: prompt,
-      };
+            const textPart = {
+                text: prompt,
+            };
 
-      console.log(`[MacAgent] Computer Use reasoning requested. Query: "${query || "default"}"`);
+            console.log(`[MacAgent] Computer Use reasoning requested. Query: "${query || "default"}"`);
 
-      const result = await generateContentWithFallback({
-        model: "gemini-2.5-flash",
-        contents: { parts: [textPart, imagePart] },
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "OBJECT",
-            properties: {
-              action: {
-                type: "STRING",
-                description: "The action type to perform. Must be one of: 'click', 'hover', 'typeText', 'keyCombo', 'launchApp', 'runCommand'."
-              },
-              x: {
-                type: "NUMBER",
-                description: "The normalized X coordinate in the range [0, 1000] from left to right."
-              },
-              y: {
-                type: "NUMBER",
-                description: "The normalized Y coordinate in the range [0, 1000] from top to bottom."
-              },
-              text: {
-                type: "STRING",
-                description: "The text to type, shortcut key combination, app name to launch, or terminal command to run sequentially."
-              },
-              explanation: {
-                type: "STRING",
-                description: "A brief, concise, professional reason or explanation for taking this action."
-              }
-            },
-            required: ["action", "x", "y", "explanation"]
-          }
+            const result = await generateContentWithFallback({
+                model: "gemini-2.5-flash",
+                contents: { parts: [textPart, imagePart] },
+                config: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            action: {
+                                type: "STRING",
+                                description: "The action type to perform. Must be one of: 'click', 'hover', 'typeText', 'keyCombo', 'launchApp', 'runCommand', 'finish'."
+                            },
+                            x: {
+                                type: "NUMBER",
+                                description: "The normalized X coordinate in the range [0, 1000] from left to right."
+                            },
+                            y: {
+                                type: "NUMBER",
+                                description: "The normalized Y coordinate in the range [0, 1000] from top to bottom."
+                            },
+                            text: {
+                                type: "STRING",
+                                description: "The text to type, shortcut key combination, app name to launch, or terminal command to run sequentially."
+                            },
+                            explanation: {
+                                type: "STRING",
+                                description: "A brief, concise, professional reason or explanation for taking this action."
+                            }
+                        },
+                        required: ["action", "x", "y", "explanation"]
+                    }
+                }
+            });
+
+            const responseText = result.text?.trim() || "{}";
+            console.log(`[MacAgent] Received response: ${responseText}`);
+
+            try {
+                const parsed = JSON.parse(responseText);
+                res.json(parsed);
+            } catch (parseError) {
+                console.warn("[MacAgent] JSON parsing failed, attempting fallback clean", responseText);
+                const cleanJsonStr = responseText.replace(/```json\s?|```/g, "").trim();
+                try {
+                    const parsedFallback = JSON.parse(cleanJsonStr);
+                    res.json(parsedFallback);
+                } catch {
+                    res.status(500).json({
+                        error: "Model did not return valid JSON.",
+                        raw: responseText
+                    });
+                }
+            }
+        } catch (error: any) {
+            console.error("[MacAgent] Reasoning Endpoint Error:", error);
+            res.status(500).json({ error: error.message || "Failed to process computer use reasoning." });
         }
-      });
-
-      const responseText = result.text?.trim() || "{}";
-      console.log(`[MacAgent] Received response: ${responseText}`);
-
-      try {
-        const parsed = JSON.parse(responseText);
-        res.json(parsed);
-      } catch (parseError) {
-        console.warn("[MacAgent] JSON parsing failed, attempting fallback clean", responseText);
-        const cleanJsonStr = responseText.replace(/```json\s?|```/g, "").trim();
-        try {
-          const parsedFallback = JSON.parse(cleanJsonStr);
-          res.json(parsedFallback);
-        } catch {
-          res.status(500).json({
-            error: "Model did not return valid JSON.",
-            raw: responseText
-          });
-        }
-      }
-    } catch (error: any) {
-      console.error("[MacAgent] Reasoning Endpoint Error:", error);
-      res.status(500).json({ error: error.message || "Failed to process computer use reasoning." });
-    }
-  });
-
-  // Vite middleware for development (mount Vite dev server when not running the bundled CJS file or if NODE_ENV is development)
-  const isDev = !process.argv.some(arg => arg.includes('server.cjs')) || process.env.NODE_ENV !== "production";
-  if (isDev) {
-    console.log("[Server] Mounting Vite developer middleware in custom mode");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "custom",
     });
-    app.use(vite.middlewares);
 
-    // Fallback HTML routing for development
-    app.get('*', async (req, res, next) => {
-      // Skip API, WebSocket, and system routes
-      if (req.path.startsWith('/api') || req.path.startsWith('/ws') || req.path.startsWith('/v1') || req.path.includes('.')) {
-        return next();
-      }
-      try {
-        const url = req.originalUrl;
-        let template = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8');
-        template = await vite.transformIndexHtml(url, template);
-        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
-      } catch (e) {
-        vite.ssrFixStacktrace(e as Error);
-        next(e);
-      }
-    });
-  } else {
-    console.log("[Server] Serving production assets with wildcard index.html fallback");
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      // Skip API and websocket routes so we don't accidentally serve index.html for dead API requests
-      if (req.path.startsWith('/api') || req.path.startsWith('/ws') || req.path.startsWith('/v1')) {
-        return res.status(404).json({ error: "Endpoint not found" });
-      }
-      const indexPath = path.join(distPath, 'index.html');
-      if (fs.existsSync(indexPath)) {
-        res.sendFile(indexPath);
-      } else {
-        res.status(200).send(`
+    // Vite middleware for development (mount Vite dev server when not running the bundled CJS file or if NODE_ENV is development)
+    const isDev = !process.argv.some(arg => arg.includes('server.cjs')) || process.env.NODE_ENV !== "production";
+    if (isDev) {
+        console.log("[Server] Mounting Vite developer middleware in custom mode");
+        const vite = await createViteServer({
+            server: { middlewareMode: true },
+            appType: "custom",
+        });
+        app.use(vite.middlewares);
+
+        // Fallback HTML routing for development
+        app.get('*', async (req, res, next) => {
+            // Skip API, WebSocket, and system routes
+            if (req.path.startsWith('/api') || req.path.startsWith('/ws') || req.path.startsWith('/v1') || req.path.includes('.')) {
+                return next();
+            }
+            try {
+                const url = req.originalUrl;
+                let template = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8');
+                template = await vite.transformIndexHtml(url, template);
+                res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+            } catch (e) {
+                vite.ssrFixStacktrace(e as Error);
+                next(e);
+            }
+        });
+    } else {
+        console.log("[Server] Serving production assets with wildcard index.html fallback");
+        const distPath = path.join(process.cwd(), 'dist');
+        app.use(express.static(distPath));
+        app.get('*', (req, res) => {
+            // Skip API and websocket routes so we don't accidentally serve index.html for dead API requests
+            if (req.path.startsWith('/api') || req.path.startsWith('/ws') || req.path.startsWith('/v1')) {
+                return res.status(404).json({ error: "Endpoint not found" });
+            }
+            const indexPath = path.join(distPath, 'index.html');
+            if (fs.existsSync(indexPath)) {
+                res.sendFile(indexPath);
+            } else {
+                res.status(200).send(`
           <!DOCTYPE html>
           <html>
             <head>
@@ -6640,13 +6653,13 @@ CRITICAL CREDIBILITY, REASONING & FOCUS MANDATE:
             </body>
           </html>
         `);
-      }
-    });
-  }
+            }
+        });
+    }
 
-  server.listen(PORT, "0.0.0.0", () => {
-    console.log(`Unison OS running on http://localhost:${PORT}`);
-  });
+    server.listen(PORT, "0.0.0.0", () => {
+        console.log(`Unison OS running on http://localhost:${PORT}`);
+    });
 }
 
 startServer();
