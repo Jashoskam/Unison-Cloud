@@ -3719,10 +3719,12 @@ export default function App() {
       }
 
       if (matchedCmd) {
-        // Broadcast over WebSocket to all client browsers
+        // Broadcast over WebSocket to all client browsers with unique ID to prevent loops
         const wsEvent = {
+          id: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           type: "DEVICE_CONTROL_COMMAND",
-          command: matchedCmd
+          command: matchedCmd,
+          timestamp: Date.now()
         };
         wss.clients.forEach(c => {
           if (c.readyState === WebSocket.OPEN) {
@@ -3832,13 +3834,15 @@ export default function App() {
         } else if (matchedNode.type === "mqtt") {
           executionDetail = `MQTT protocol command published to hivemq broker over websocket. Topic: '${matchedNode.topic}'. `;
           
-          // Broadcast to connected WebSocket browsers to publish it in real-time
+          // Broadcast to connected WebSocket browsers to publish it in real-time with unique ID to prevent loops
           const wsPubEvent = {
+            id: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             type: "MQTT_PUBLISH_COMMAND",
             nodeId: matchedNode.id,
             broker: matchedNode.broker,
             topic: matchedNode.topic,
-            payload: matchedNode.payload
+            payload: matchedNode.payload,
+            timestamp: Date.now()
           };
           wss.clients.forEach(c => {
             if (c.readyState === WebSocket.OPEN) {
@@ -3849,13 +3853,15 @@ export default function App() {
         } else if (matchedNode.type === "ble") {
           executionDetail = `Web Bluetooth GATT characteristic write command routed. Service UUID: '${matchedNode.serviceUuid}', Characteristic: '${matchedNode.characteristicUuid}'. `;
           
-          // Broadcast BLE write to all WebSocket clients so the browser triggers Mac/iOS native BLE writing!
+          // Broadcast BLE write to all WebSocket clients so the browser triggers Mac/iOS native BLE writing with unique ID to prevent loops
           const wsBleEvent = {
+            id: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             type: "BLE_WRITE_COMMAND",
             nodeId: matchedNode.id,
             serviceUuid: matchedNode.serviceUuid,
             characteristicUuid: matchedNode.characteristicUuid,
-            writeBytes: matchedNode.writeBytes
+            writeBytes: matchedNode.writeBytes,
+            timestamp: Date.now()
           };
           wss.clients.forEach(c => {
             if (c.readyState === WebSocket.OPEN) {
