@@ -2814,17 +2814,64 @@ export default function App() {
         parts: [{ text: m.content }]
       }));
       
-      // 3. Determine Server toolMode and system instructions
+      // 3. Query the latest real-time macOS companion diagnostics and permissions from Firestore
+      let companionStatusText = "No companion device diagnostics received yet. The macOS companion is likely OFFLINE.";
+      let hasAccessibility = false;
+      let hasScreenshots = false;
+      let isConnected = false;
+      let installedAppsList: string[] = ["Safari", "Music", "Notes", "Terminal", "Calculator", "Finder", "Spotify"];
+      let osVersion = "macOS (Unknown)";
+      let modelIdentifier = "Mac Device";
+      
+      try {
+        const diagDoc = await adminDb.collection("system_state").doc("hardware_diagnostics").get();
+        if (diagDoc.exists) {
+          const dData = diagDoc.data();
+          const lastReportTime = dData.timestamp ? new Date(dData.timestamp).getTime() : 0;
+          // Stale check: let's say 2 minutes
+          const isRecent = (Date.now() - lastReportTime) < 120000;
+          isConnected = isRecent;
+          hasAccessibility = !!dData.accessibility;
+          hasScreenshots = !!dData.screenshots;
+          if (Array.isArray(dData.installedApps) && dData.installedApps.length > 0) {
+            installedAppsList = dData.installedApps;
+          }
+          if (dData.osVersion) osVersion = dData.osVersion;
+          if (dData.modelIdentifier) modelIdentifier = dData.modelIdentifier;
+          
+          companionStatusText = `macOS Companion status: ${isRecent ? "ONLINE" : "OFFLINE / DISCONNECTED"}.\n` +
+                                `Physical Hardware: ${modelIdentifier}, OS: ${osVersion}.\n` +
+                                `System Permissions: Accessibility=${hasAccessibility ? "GRANTED" : "DENIED"}, ScreenCapture=${hasScreenshots ? "GRANTED" : "DENIED"}.\n` +
+                                `Installed Applications List: ${installedAppsList.join(", ")}.`;
+        }
+      } catch (err: any) {
+        console.warn("[COMPANION] Could not read hardware diagnostics for Gemini system prompt:", err.message);
+      }
+
+      // Determine Server toolMode and system instructions
       const toolMode = determineAutoToolModeOnServer(content);
-      let systemInstruction = "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.\n\nSYSTEM_ACTION RULE: If the user asks you to open or launch any macOS application (e.g. Music, Spotify, Safari, Notes, Terminal, Calculator, Finder, etc.), you MUST append the exact tag: `[SYSTEM_ACTION: launchApp=\"AppName\"]` to the end of your response, where AppName is the standard application name. For example, if asked to open music app or spotify, you can append `[SYSTEM_ACTION: launchApp=\"Music\"]` or `[SYSTEM_ACTION: launchApp=\"Spotify\"]`. Do not make up apps, only launch real ones.";
+      
+      let baseInstruction = "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.\n\n" +
+                            "CRITICAL CREDIBILITY & HONESTY MANDATE:\n" +
+                            "1. You are running on a server connected to a local physical macOS companion app via Firestore. Here is the CURRENT REAL-TIME STATUS of the user's physical machine:\n" +
+                            "-------------------------------\n" +
+                            companionStatusText + "\n" +
+                            "-------------------------------\n" +
+                            "2. NEVER fake or simulate executing local physical system actions (like creating notes, writing text, clicking icons, or analyzing screen captures) if they are physically impossible. If the macOS companion is OFFLINE, you MUST tell the user honestly that they need to open the Unison Desktop app on their Mac first.\n" +
+                            "3. If System Permissions are DENIED (Accessibility or ScreenCapture), you MUST honestly explain that you cannot perform the computer-use action or analyze the screen because the companion lacks permissions. Instruct the user to click 'Allow' in the macOS System Settings or via the companion UI.\n" +
+                            "4. If the companion is ONLINE and permissions are GRANTED, you may initiate system actions using the tags below.\n" +
+                            "5. APPLICATION AWARENESS: Before agreeing to open, launch, or interact with any application, verify if it is in the 'Installed Applications List' above. If it is NOT in the list, you MUST honestly tell the user: 'That application is not detected in your macOS Applications folder.' Offer to launch a substitute (e.g. Safari instead of Chrome) or try anyway, rather than falsely promising a successful launch.\n\n" +
+                            "SYSTEM_ACTION RULE: If the companion is ONLINE and the user asks you to open or launch an application, you MUST append the exact tag: `[SYSTEM_ACTION: launchApp=\"AppName\"]` to the end of your response, where AppName is the standard name from the Installed Applications List (e.g. 'Spotify', 'Safari', 'Notes', 'Terminal', 'Music', 'Calculator', 'Finder', 'System Settings'). Only append this if the companion is ONLINE. Do not make up apps, only launch real ones.";
+
+      let systemInstruction = baseInstruction;
       let tools: any[] | undefined = undefined;
       let toolConfig: any | undefined = undefined;
 
       if (toolMode === 'research') {
-        systemInstruction = "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.\n\nCRITICAL RESEARCH MODE ACTIVATED: The user expects an exceptionally detailed, highly structured, multi-section research report. Synthesize your answer step-by-step using actual facts from Google Search Grounding. Structure the reply with clear headings: 'Executive Summary', 'Detailed Fact Finding & Analysis', 'Critical Recommendations', and 'Next Steps/Follow-ups'. \n\nCRITICAL MULTI-SOURCE HYPERLINKING RULE: You MUST cite EVERY single line, statement, fact, or bullet point that is derived from search results individually at the end of that specific sentence with its standard citation token (e.g. '[1]' or '[2]'). Do NOT leave lines/points containing grounded search facts without their respective citation tag at the absolute end of that line or sentence. At the absolute end, you MUST append a valid web reference block using the exact syntax: [SOURCES: [{\"title\": \"Source Page Title\", \"siteName\": \"domain.com\", \"url\": \"https://domain.com/page\", \"snippet\": \"relevant quote\", \"linesUsed\": [\"Exact sentence in your response that used it\"]}]] and provide high-quality follow-up questions in the exact format: [FOLLOW_UPS: [\"question 1\", \"question 2\", \"question 3\"]].";
+        systemInstruction = baseInstruction + "\n\nCRITICAL RESEARCH MODE ACTIVATED: The user expects an exceptionally detailed, highly structured, multi-section research report. Synthesize your answer step-by-step using actual facts from Google Search Grounding. Structure the reply with clear headings: 'Executive Summary', 'Detailed Fact Finding & Analysis', 'Critical Recommendations', and 'Next Steps/Follow-ups'. \n\nCRITICAL MULTI-SOURCE HYPERLINKING RULE: You MUST cite EVERY single line, statement, fact, or bullet point that is derived from search results individually at the end of that specific sentence with its standard citation token (e.g. '[1]' or '[2]'). Do NOT leave lines/points containing grounded search facts without their respective citation tag at the absolute end of that line or sentence. At the absolute end, you MUST append a valid web reference block using the exact syntax: [SOURCES: [{\"title\": \"Source Page Title\", \"siteName\": \"domain.com\", \"url\": \"https://domain.com/page\", \"snippet\": \"relevant quote\", \"linesUsed\": [\"Exact sentence in your response that used it\"]}]] and provide high-quality follow-up questions in the exact format: [FOLLOW_UPS: [\"question 1\", \"question 2\", \"question 3\"]].";
         tools = [{ googleSearch: {} }];
       } else if (toolMode === 'search') {
-        systemInstruction = "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.\n\nCRITICAL SEARCH MODE ACTIVATED: The user expects high-quality Google Search grounded information. Always use standard citations immediately after periods (e.g., [1], [2]). \n\nCRITICAL MULTI-SOURCE HYPERLINKING RULE: You MUST cite EVERY single statement, fact, bullet point, or individual line that is derived from search results at the end of that specific line/sentence with its respective citation token (e.g. '[1]' or '[2]'). Do NOT leave lines/points containing grounded search facts without their respective citation tag. At the absolute end of your response, you MUST provide 3 interactive follow-up questions using the exact tag syntax: [FOLLOW_UPS: [\"Follow-up Q1\", \"Follow-up Q2\", \"Follow-up Q3\"]]. If you cited any websites, append a valid [SOURCES: ...] tag matching the format of research mode.";
+        systemInstruction = baseInstruction + "\n\nCRITICAL SEARCH MODE ACTIVATED: The user expects high-quality Google Search grounded information. Always use standard citations immediately after periods (e.g., [1], [2]). \n\nCRITICAL MULTI-SOURCE HYPERLINKING RULE: You MUST cite EVERY single statement, fact, bullet point, or individual line that is derived from search results at the end of that specific line/sentence with its respective citation token (e.g. '[1]' or '[2]'). Do NOT leave lines/points containing grounded search facts without their respective citation tag. At the absolute end of your response, you MUST provide 3 interactive follow-up questions using the exact tag syntax: [FOLLOW_UPS: [\"Follow-up Q1\", \"Follow-up Q2\", \"Follow-up Q3\"]]. If you cited any websites, append a valid [SOURCES: ...] tag matching the format of research mode.";
         tools = [{ googleSearch: {} }];
       }
 
@@ -3046,6 +3093,46 @@ export default function App() {
       console.log("[COMPANION] Live permissions stream closed.");
       if (unsub) unsub();
     });
+  });
+
+  app.get("/api/companion/diagnostics", async (req, res) => {
+    try {
+      const db = await getServerFirestore();
+      const docRef = db.collection("system_state").doc("hardware_diagnostics");
+      const docSnap = await docRef.get();
+      if (docSnap.exists) {
+        res.json(docSnap.data());
+      } else {
+        res.json({
+          accessibility: false,
+          screenshots: false,
+          osVersion: "macOS (Pending Connection)",
+          cpuCores: 0,
+          physicalMemoryGB: 0.0,
+          uptimeSeconds: 0.0,
+          isSandboxed: false,
+          bundleId: "com.unison.unison-os",
+          timestamp: new Date().toISOString(),
+          modelIdentifier: "Mac Device"
+        });
+      }
+    } catch (err: any) {
+      console.error("[COMPANION] Error fetching hardware diagnostics:", err.message);
+      res.json({ accessibility: false, screenshots: false, error: err.message });
+    }
+  });
+
+  app.post("/api/companion/diagnostics", express.json(), async (req, res) => {
+    try {
+      const report = req.body;
+      const db = await getServerFirestore();
+      const docRef = db.collection("system_state").doc("hardware_diagnostics");
+      await docRef.set(report, { merge: true });
+      res.json({ success: true, report });
+    } catch (err: any) {
+      console.error("[COMPANION] Error saving hardware diagnostics via POST:", err.message);
+      res.status(500).json({ error: err.message });
+    }
   });
   // --- END COMPANION INTERCEPT ROUTING ---
 
@@ -6249,24 +6336,62 @@ Output:
 ${lastCommandResult.output}\n`;
       }
 
+      // Query latest real-time macOS companion diagnostics and permissions from Firestore
+      let companionStatusText = "No companion device diagnostics received yet. The macOS companion is likely OFFLINE.";
+      let hasAccessibility = false;
+      let hasScreenshots = false;
+      let isConnected = false;
+      let installedAppsList: string[] = ["Safari", "Music", "Notes", "Terminal", "Calculator", "Finder", "Spotify"];
+      let osVersion = "macOS (Unknown)";
+      let modelIdentifier = "Mac Device";
+      
+      try {
+        const db = await getServerFirestore();
+        const diagDoc = await db.collection("system_state").doc("hardware_diagnostics").get();
+        if (diagDoc.exists) {
+          const dData = diagDoc.data() || {};
+          const lastReportTime = dData.timestamp ? new Date(dData.timestamp).getTime() : 0;
+          // Stale check: 2 minutes
+          const isRecent = (Date.now() - lastReportTime) < 120000;
+          isConnected = isRecent;
+          hasAccessibility = !!dData.accessibility;
+          hasScreenshots = !!dData.screenshots;
+          if (Array.isArray(dData.installedApps) && dData.installedApps.length > 0) {
+            installedAppsList = dData.installedApps;
+          }
+          if (dData.osVersion) osVersion = dData.osVersion;
+          if (dData.modelIdentifier) modelIdentifier = dData.modelIdentifier;
+          
+          companionStatusText = `macOS Companion status: ${isRecent ? "ONLINE" : "OFFLINE / DISCONNECTED"}.\n` +
+                                `Physical Hardware: ${modelIdentifier}, OS: ${osVersion}.\n` +
+                                `System Permissions: Accessibility=${hasAccessibility ? "GRANTED" : "DENIED"}, ScreenCapture=${hasScreenshots ? "GRANTED" : "DENIED"}.\n` +
+                                `Installed Applications List: ${installedAppsList.join(", ")}.`;
+        }
+      } catch (err: any) {
+        console.warn("[MacAgent] Could not read hardware diagnostics for agent reasoning:", err.message);
+      }
+
       const prompt = `You are a professional macOS Computer Use agent. You see a screenshot of the user's active screen.${lastCommandPrompt}
 The current objective is: "${query || "Analyze and assist the user with their environment."}"
 
-TASK:
-1. Examine the screenshot closely to locate UI elements (such as buttons, menus, input fields, icons).
-2. Determine the most logical next action to fulfill the objective.
-3. Provide the coordinate (x, y) where the action should take place. Coordinates MUST be normalized to the range [0, 1000], where:
-   - x: 0 is the left edge, 1000 is the right edge.
-   - y: 0 is the top edge, 1000 is the bottom edge.
-4. Specify the action type:
-   - 'click' to click an element (e.g. button, icon, tab, input field).
-   - 'hover' to hover over an element.
-   - 'typeText' to type keyboard text. If typing text, you MUST click the text box/input field first in a previous action or make sure it is already focused, and specify the text string in the 'text' property.
-   - 'keyCombo' to press a keyboard shortcut (e.g. 'cmd+space' to open Spotlight search, 'enter' to submit, 'cmd+t' for new tab, 'cmd+c' to copy, 'cmd+v' to paste, 'backspace' to delete). Specify the shortcut string in the 'text' property.
-   - 'launchApp' to directly launch any macOS application by name (e.g. 'Safari', 'Notes', 'Terminal', 'Finder'). Specify the application name in the 'text' property.
-   - 'runCommand' to execute exactly one discrete command string inside a macOS shell. Multi-command chaining (e.g. combining statements using && or ;) is strictly prohibited. Specify the exact command string in the 'text' property.
+REAL-TIME SYSTEM DIAGNOSTICS & HARDWARE CONTEXT:
+-----------------------------------------------
+${companionStatusText}
+-----------------------------------------------
 
-Keep actions precise and sequential. If you are finished or have accomplished the task, hover at [500, 500] and explain that you have successfully completed the objective.`;
+CRITICAL CREDIBILITY & INTERACTION MANDATE:
+1. APPLICATION AWARENESS: Before attempting to open, click, or launch an app, verify if it exists in the "Installed Applications List" above. If it does not exist, do NOT try to click a non-existent app icon or launch it. Speak honestly or find a substitute (e.g. use Safari if Chrome is missing).
+2. HARDWARE PERMISSIONS: If Accessibility or ScreenCapture is DENIED, you cannot control the screen or click elements properly. You must immediately do a "hover" action at [500, 500], and explain clearly to the user that you need them to grant "Accessibility" and "Screen Recording" permissions in System Settings, rather than claiming success or clicking blindly.
+3. HIGH CREDIBILITY: Never claim you completed an action (e.g. "I played the playlist") if you are still searching or if the window is not yet active. Take real, precise, sequential actions to achieve the goal:
+   - For example, to play music:
+     a. Check if 'Spotify' or 'Music' is installed.
+     b. If installed, perform 'launchApp' with 'Spotify' or 'Music'.
+     c. Wait for the app to open (perceive the new screen in the next iteration).
+     d. Locate the Search input field in the app, click it.
+     e. Type the playlist name (e.g. "focus") and press enter.
+     f. Click the Play button.
+     g. Only when music is playing, claim completion.
+4. Keep actions precise and sequential. If you are finished or have accomplished the task, hover at [500, 500] and explain that you have successfully completed the objective.`;
 
       const imagePart = {
         inlineData: {
