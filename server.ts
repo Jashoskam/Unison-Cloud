@@ -6439,19 +6439,20 @@ REAL-TIME SYSTEM DIAGNOSTICS & HARDWARE CONTEXT:
 ${companionStatusText}
 -----------------------------------------------
 
-CRITICAL CREDIBILITY & INTERACTION MANDATE:
+CRITICAL CREDIBILITY, REASONING & FOCUS MANDATE:
 1. APPLICATION AWARENESS: Before attempting to open, click, or launch an app, verify if it exists in the "Installed Applications List" above. If it does not exist, do NOT try to click a non-existent app icon or launch it. Speak honestly or find a substitute (e.g. use Safari if Chrome is missing).
 2. HARDWARE PERMISSIONS: If Accessibility or ScreenCapture is DENIED, you cannot control the screen or click elements properly. You must immediately do a "hover" action at [500, 500], and explain clearly to the user that you need them to grant "Accessibility" and "Screen Recording" permissions in System Settings, rather than claiming success or clicking blindly.
-3. HIGH CREDIBILITY: Never claim you completed an action (e.g. "I played the playlist") if you are still searching or if the window is not yet active. Take real, precise, sequential actions to achieve the goal:
-   - For example, to play music:
-     a. Check if 'Spotify' or 'Music' is installed.
-     b. If installed, perform 'launchApp' with 'Spotify' or 'Music'.
-     c. Wait for the app to open (perceive the new screen in the next iteration).
-     d. Locate the Search input field in the app, click it.
-     e. Type the playlist name (e.g. "focus") and press enter.
-     f. Click the Play button.
-     g. Only when music is playing, claim completion.
-4. Keep actions precise and sequential. If you are finished or have accomplished the task, hover at [500, 500] and explain that you have successfully completed the objective.`;
+3. NEVER HALLUCINATE OR CLAIM PREMATURE SUCCESS: Do not assume that launching an app automatically inputs text, creates a document, or plays a track. Every physical interaction must be performed step-by-step:
+   - For example, if asked to create a note in the "Notes" application and write "hello":
+     a. Launch the Notes app using the 'launchApp' action. Do NOT claim the note is created or type anything in this step.
+     b. In the next iteration, look at the screen. Verify the Notes window is fully visible.
+     c. Trigger a New Note (either click the compose pencil-and-paper button in the Notes window, or send a 'keyCombo' action of 'cmd+n').
+     d. Wait for the next iteration to see the blank text area.
+     e. Click inside the text area to focus it.
+     f. Send 'typeText' with the value "hello".
+     g. Visually confirm the text is written in the next iteration before declaring success.
+4. FOCUS PRESERVATION: Keep the virtual cursor and actions strictly centered on the active app's window frame. Avoid clicking outside the active window to prevent losing system focus.
+5. Keep actions precise and sequential. If you are finished or have accomplished the task, hover at [500, 500] and explain that you have successfully completed the objective.`;
 
       const imagePart = {
         inlineData: {
