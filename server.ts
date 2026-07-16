@@ -1096,6 +1096,7 @@ function startLocalBrainWithFallback() {
 
   const tryStart = (cmd: string) => {
     console.log(`[Brain] Attempting to spawn Titan Neural Kernel with '${cmd}'...`);
+    let hasSpawnError = false;
     const brainProcess = spawn(cmd, ["brain/central_server.py"], {
       env: { ...process.env, PYTHONUNBUFFERED: "1" }
     });
@@ -1168,6 +1169,7 @@ function startLocalBrainWithFallback() {
 
     brainProcess.on("error", (err) => {
       console.error(`[Brain] Failed to start with '${cmd}':`, err.message);
+      hasSpawnError = true;
       if (cmd === "python3") {
         console.log("[Brain] Retrying with generic 'python' command...");
         tryStart("python");
@@ -1175,7 +1177,7 @@ function startLocalBrainWithFallback() {
     });
 
     brainProcess.on("close", (code) => {
-      if (code !== 0 && !moduleErrorFound) {
+      if (code !== 0 && !moduleErrorFound && !hasSpawnError) {
         console.log(`[Brain] Titan Neural Kernel terminated. Re-spawning in 5s...`);
         setTimeout(() => tryStart(cmd), 5000);
       }
@@ -2814,7 +2816,7 @@ export default function App() {
       
       // 3. Determine Server toolMode and system instructions
       const toolMode = determineAutoToolModeOnServer(content);
-      let systemInstruction = "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.";
+      let systemInstruction = "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.\n\nSYSTEM_ACTION RULE: If the user asks you to open or launch any macOS application (e.g. Music, Spotify, Safari, Notes, Terminal, Calculator, Finder, etc.), you MUST append the exact tag: `[SYSTEM_ACTION: launchApp=\"AppName\"]` to the end of your response, where AppName is the standard application name. For example, if asked to open music app or spotify, you can append `[SYSTEM_ACTION: launchApp=\"Music\"]` or `[SYSTEM_ACTION: launchApp=\"Spotify\"]`. Do not make up apps, only launch real ones.";
       let tools: any[] | undefined = undefined;
       let toolConfig: any | undefined = undefined;
 
@@ -2948,6 +2950,101 @@ export default function App() {
         { title: "Developer Shell", icon: "terminal", viewType: "terminal", badge: "Dev" },
         { title: "Titan Vision Studio", icon: "viewfinder.circle.fill", viewType: "titan_suite", badge: "Vision" }
       ]
+    });
+  });
+
+  let firestoreAdminInstance: any = null;
+  async function getServerFirestore() {
+    if (!firestoreAdminInstance) {
+      const admin = (await import("firebase-admin")).default;
+      if (admin.apps.length === 0) {
+        try {
+          const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+          if (fs.existsSync(configPath)) {
+            const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+            admin.initializeApp({
+              projectId: config.projectId,
+              databaseURL: config.firestoreDatabaseId ? `https://${config.projectId}.firebaseio.com` : undefined
+            });
+          } else {
+            admin.initializeApp();
+          }
+          console.log("[FIREBASE] Admin SDK initialized successfully in lazy loader");
+        } catch (err: any) {
+          console.error("[FIREBASE] Error initializing Admin SDK:", err.message);
+        }
+      }
+      firestoreAdminInstance = admin.firestore();
+    }
+    return firestoreAdminInstance;
+  }
+
+  app.get("/api/companion/permissions", async (req, res) => {
+    try {
+      const db = await getServerFirestore();
+      const docRef = db.collection("system_state").doc("computer_use_permissions");
+      const docSnap = await docRef.get();
+      if (docSnap.exists) {
+        res.json(docSnap.data());
+      } else {
+        res.json({ accessibility: false, screenshots: false });
+      }
+    } catch (err: any) {
+      console.error("[COMPANION] Error fetching permissions via GET:", err.message);
+      res.json({ accessibility: false, screenshots: false });
+    }
+  });
+
+  app.post("/api/companion/permissions", express.json(), async (req, res) => {
+    const { accessibility, screenshots } = req.body;
+    try {
+      const db = await getServerFirestore();
+      const docRef = db.collection("system_state").doc("computer_use_permissions");
+      const next = {
+        accessibility: typeof accessibility === "boolean" ? accessibility : false,
+        screenshots: typeof screenshots === "boolean" ? screenshots : false
+      };
+      await docRef.set(next, { merge: true });
+      res.json(next);
+    } catch (err: any) {
+      console.error("[COMPANION] Error saving permissions via POST:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/companion/permissions/stream", async (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    if (typeof (res as any).flushHeaders === "function") {
+      (res as any).flushHeaders();
+    }
+
+    console.log("[COMPANION] Live permissions stream established.");
+
+    let unsub: (() => void) | null = null;
+    try {
+      const db = await getServerFirestore();
+      const docRef = db.collection("system_state").doc("computer_use_permissions");
+      
+      unsub = docRef.onSnapshot((docSnap: any) => {
+        const data = docSnap.exists ? docSnap.data() : { accessibility: false, screenshots: false };
+        const payload = {
+          accessibility: !!data.accessibility,
+          screenshots: !!data.screenshots
+        };
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      }, (err: any) => {
+        console.error("[COMPANION] onSnapshot error in stream:", err.message);
+      });
+    } catch (e: any) {
+      console.error("[COMPANION] Failed to setup onSnapshot permissions stream:", e.message);
+      res.write(`data: ${JSON.stringify({ accessibility: false, screenshots: false })}\n\n`);
+    }
+
+    req.on("close", () => {
+      console.log("[COMPANION] Live permissions stream closed.");
+      if (unsub) unsub();
     });
   });
   // --- END COMPANION INTERCEPT ROUTING ---
@@ -6136,7 +6233,7 @@ Return a JSON-like structured response:
 
   app.post("/api/mac/agent/reason", express.json({ limit: "50mb" }), async (req, res) => {
     try {
-      const { image, query } = req.body;
+      const { image, query, lastCommandResult } = req.body;
       if (!image) return res.status(400).json({ error: "Missing image data" });
 
       let base64Data = image;
@@ -6144,7 +6241,15 @@ Return a JSON-like structured response:
         base64Data = image.split(",")[1];
       }
 
-      const prompt = `You are a professional macOS Computer Use agent. You see a screenshot of the user's active screen.
+      let lastCommandPrompt = "";
+      if (lastCommandResult) {
+        lastCommandPrompt = `\n\nLAST SEQUENTIAL COMMAND RUN RESULT (STDOUT/STDERR COMBINED):
+Exit Code: ${lastCommandResult.exitCode}
+Output:
+${lastCommandResult.output}\n`;
+      }
+
+      const prompt = `You are a professional macOS Computer Use agent. You see a screenshot of the user's active screen.${lastCommandPrompt}
 The current objective is: "${query || "Analyze and assist the user with their environment."}"
 
 TASK:
@@ -6157,6 +6262,9 @@ TASK:
    - 'click' to click an element (e.g. button, icon, tab, input field).
    - 'hover' to hover over an element.
    - 'typeText' to type keyboard text. If typing text, you MUST click the text box/input field first in a previous action or make sure it is already focused, and specify the text string in the 'text' property.
+   - 'keyCombo' to press a keyboard shortcut (e.g. 'cmd+space' to open Spotlight search, 'enter' to submit, 'cmd+t' for new tab, 'cmd+c' to copy, 'cmd+v' to paste, 'backspace' to delete). Specify the shortcut string in the 'text' property.
+   - 'launchApp' to directly launch any macOS application by name (e.g. 'Safari', 'Notes', 'Terminal', 'Finder'). Specify the application name in the 'text' property.
+   - 'runCommand' to execute exactly one discrete command string inside a macOS shell. Multi-command chaining (e.g. combining statements using && or ;) is strictly prohibited. Specify the exact command string in the 'text' property.
 
 Keep actions precise and sequential. If you are finished or have accomplished the task, hover at [500, 500] and explain that you have successfully completed the objective.`;
 
@@ -6183,7 +6291,7 @@ Keep actions precise and sequential. If you are finished or have accomplished th
             properties: {
               action: {
                 type: "STRING",
-                description: "The action type to perform. Must be one of: 'click', 'hover', 'typeText'."
+                description: "The action type to perform. Must be one of: 'click', 'hover', 'typeText', 'keyCombo', 'launchApp', 'runCommand'."
               },
               x: {
                 type: "NUMBER",
@@ -6195,7 +6303,7 @@ Keep actions precise and sequential. If you are finished or have accomplished th
               },
               text: {
                 type: "STRING",
-                description: "The text to type. Only required if action is 'typeText'."
+                description: "The text to type, shortcut key combination, app name to launch, or terminal command to run sequentially."
               },
               explanation: {
                 type: "STRING",
