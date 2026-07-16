@@ -2770,6 +2770,31 @@ export default function App() {
     return 'convo';
   }
 
+  // Record an execution step from the background macOS agent directly to the conversation chat stream
+  app.post("/api/companion/agent/step", express.json(), async (req, res) => {
+    try {
+      if (!adminDb) throw new Error("Firebase Admin DB not ready");
+      const { conversationId, content, role } = req.body;
+      if (!conversationId || !content) {
+        return res.status(400).json({ error: "Missing required parameters (conversationId, content)" });
+      }
+      
+      const messagesCol = adminDb.collection("conversations").doc(conversationId).collection("messages");
+      const msgId = "msg_a_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
+      
+      await messagesCol.doc(msgId).set({
+        conversationId,
+        content,
+        role: role || "model",
+        createdAt: new Date()
+      });
+      
+      res.json({ success: true, id: msgId });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to log companion agent step" });
+    }
+  });
+
   // Dispatch a message, append to Firestore database, trigger Gemini, save response back to Firestore
   app.post("/api/companion/message", express.json(), async (req, res) => {
     try {
@@ -2861,7 +2886,9 @@ export default function App() {
                             "3. If System Permissions are DENIED (Accessibility or ScreenCapture), you MUST honestly explain that you cannot perform the computer-use action or analyze the screen because the companion lacks permissions. Instruct the user to click 'Allow' in the macOS System Settings or via the companion UI.\n" +
                             "4. If the companion is ONLINE and permissions are GRANTED, you may initiate system actions using the tags below.\n" +
                             "5. APPLICATION AWARENESS: Before agreeing to open, launch, or interact with any application, verify if it is in the 'Installed Applications List' above. If it is NOT in the list, you MUST honestly tell the user: 'That application is not detected in your macOS Applications folder.' Offer to launch a substitute (e.g. Safari instead of Chrome) or try anyway, rather than falsely promising a successful launch.\n\n" +
-                            "SYSTEM_ACTION RULE: If the companion is ONLINE and the user asks you to open or launch an application, you MUST append the exact tag: `[SYSTEM_ACTION: launchApp=\"AppName\"]` to the end of your response, where AppName is the standard name from the Installed Applications List (e.g. 'Spotify', 'Safari', 'Notes', 'Terminal', 'Music', 'Calculator', 'Finder', 'System Settings'). Only append this if the companion is ONLINE. Do not make up apps, only launch real ones.";
+                            "SYSTEM_ACTION RULE:\n" +
+                            "1. If the companion is ONLINE and the user asks you to open or launch an application, you MUST append the exact tag: `[SYSTEM_ACTION: launchApp=\"AppName\"]` to the end of your response, where AppName is the standard name from the Installed Applications List (e.g. 'Spotify', 'Safari', 'Notes', 'Terminal', 'Music', 'Calculator', 'Finder', 'System Settings'). Only append this if the companion is ONLINE. Do not make up apps, only launch real ones.\n" +
+                            "2. If the user asks you to perform a complex, interactive desktop task (e.g., 'open Notes and note something', 'create a note containing X', 'search for artist X in Spotify', 'type X in Terminal', or any task requiring clicking or typing), you MUST append the exact tag: `[SYSTEM_ACTION: startAgent=\"Objective\"]` to the end of your response, where Objective is a precise, clear natural language instruction for the local Computer Use agent (e.g., 'Open Notes application, click the new note button, and type...'). This will automatically trigger the local native Computer Use agent to take control of the mouse and keyboard and execute the task on their screen in real-time.";
 
       let systemInstruction = baseInstruction;
       let tools: any[] | undefined = undefined;
