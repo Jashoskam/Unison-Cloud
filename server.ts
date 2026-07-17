@@ -2875,7 +2875,7 @@ export default function App() {
 
             // Broadcast the step details over WebSockets for live UI streaming
             const wsPayload = JSON.stringify({
-                type: 'AGENT_STEP',
+                type: isFinal ? 'AGENT_COMPLETE' : 'AGENT_STEP',
                 data: {
                     conversationId,
                     content: content,
