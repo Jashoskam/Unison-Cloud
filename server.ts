@@ -2856,12 +2856,39 @@ export default function App() {
                 }
             }
 
-            await messagesCol.doc(msgId).set({
-                conversationId,
-                content: "", // Clear main chat output bubble
-                thoughts: finalThoughts, // Store detailed agent process in thoughts field
-                role: role || "model",
-                createdAt: new Date()
+            const isFinal = content.includes("Objective Achieved") || 
+                            content.includes("DEVICE_ACTION_OTHER:Objective Achieved") ||
+                            content.includes("Companion Error") ||
+                            content.includes("[Companion Error]") ||
+                            content.includes("Deactivated") ||
+                            content.includes("Computer Use Agent Deactivated");
+
+            if (isFinal) {
+                await messagesCol.doc(msgId).set({
+                    conversationId,
+                    content: "", // Clear main chat output bubble
+                    thoughts: finalThoughts, // Store detailed agent process in thoughts field
+                    role: role || "model",
+                    createdAt: new Date()
+                });
+            }
+
+            // Broadcast the step details over WebSockets for live UI streaming
+            const wsPayload = JSON.stringify({
+                type: 'AGENT_STEP',
+                data: {
+                    conversationId,
+                    content: content,
+                    thoughts: finalContent,
+                    role: role || "model",
+                    messageId: msgId,
+                    isFinal: isFinal
+                }
+            });
+            wss.clients.forEach(c => {
+                if (c.readyState === WebSocket.OPEN) {
+                    c.send(wsPayload);
+                }
             });
 
             res.json({ success: true, id: msgId });
@@ -2932,9 +2959,9 @@ export default function App() {
                     const lastReportTime = dData.timestamp ? new Date(dData.timestamp).getTime() : 0;
                     // Stale check: relaxed to 30 minutes
                     const isRecent = (Date.now() - lastReportTime) < 1800000;
-                    isConnected = true; // Always force connected to prevent Gemini refusals
-                    hasAccessibility = true; // Always force granted to prevent Gemini refusals
-                    hasScreenshots = true; // Always force granted to prevent Gemini refusals
+                    isConnected = isRecent; // Dynamically resolve online status based on 30-minute window
+                    hasAccessibility = isRecent; // Bypass permissions check if online
+                    hasScreenshots = isRecent; // Bypass permissions check if online
                     if (Array.isArray(dData.installedApps) && dData.installedApps.length > 0) {
                         installedAppsList = dData.installedApps;
                     }
@@ -3064,6 +3091,12 @@ export default function App() {
             } catch (geminiError: any) {
                 console.error("[COMPANION] Gemini generation failed:", geminiError);
                 geminiReply = `System error on Gemini routing layer: ${geminiError.message || String(geminiError)}`;
+            }
+
+            // If the companion device is offline, intercept and strip any system actions to decouple Web App usage gracefully
+            if (!isConnected && (geminiReply.includes("[SYSTEM_ACTION:") || geminiReply.includes("launchApp=") || geminiReply.includes("startAgent="))) {
+                geminiReply = geminiReply.replace(/\[SYSTEM_ACTION:[^\]]+\]/g, "").trim();
+                geminiReply += "\n\n*(Note: Native computer-use actions require the native macOS desktop client. Please ensure the Unison app is open on your Mac to execute this task.)*";
             }
 
             // 5. Save Gemini response
