@@ -2020,6 +2020,13 @@ export default function App() {
         });
     });
 
+    // Setup screenshots directory
+    const SCREENSHOTS_DIR = path.join(process.cwd(), "screenshots");
+    if (!fs.existsSync(SCREENSHOTS_DIR)) {
+        fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
+    }
+    app.use("/screenshots", express.static(SCREENSHOTS_DIR));
+
     // API Route for health check
     app.get("/api/health", (req, res) => {
         res.json({ status: "ok", os: "UNISON_OS_CORE" });
@@ -2798,11 +2805,36 @@ export default function App() {
     }
 
     // Record an execution step from the background macOS agent directly to the conversation chat stream
-    app.post("/api/companion/agent/step", express.json(), async (req, res) => {
+    app.post("/api/companion/agent/step", express.json({ limit: "50mb" }), async (req, res) => {
         try {
-            const { conversationId, content, role } = req.body;
+            const { conversationId, content, role, screenshot } = req.body;
             if (!conversationId || !content) {
                 return res.status(400).json({ error: "Missing required parameters (conversationId, content)" });
+            }
+
+            let finalContent = content;
+
+            if (screenshot) {
+                try {
+                    let base64Data = screenshot;
+                    if (screenshot.includes(",")) {
+                        base64Data = screenshot.split(",")[1];
+                    }
+                    const buffer = Buffer.from(base64Data, 'base64');
+                    const filename = `screenshot_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`;
+                    const filepath = path.join(process.cwd(), "screenshots", filename);
+                    
+                    fs.writeFileSync(filepath, buffer);
+                    
+                    const host = req.get('host');
+                    const protocol = req.protocol;
+                    const screenshotUrl = `${protocol}://${host}/screenshots/${filename}`;
+                    
+                    finalContent = `${content}\n\n![Screen Capture](${screenshotUrl})`;
+                    console.log(`[MacAgent] Saved step screenshot: ${screenshotUrl}`);
+                } catch (err: any) {
+                    console.error("[MacAgent] Failed to save step screenshot:", err.message);
+                }
             }
 
             const messagesCol = adminDb.collection("conversations").doc(conversationId).collection("messages");
@@ -2810,7 +2842,8 @@ export default function App() {
 
             await messagesCol.doc(msgId).set({
                 conversationId,
-                content,
+                content: "", // Clear main chat output bubble
+                thoughts: finalContent, // Store detailed agent process in thoughts field
                 role: role || "model",
                 createdAt: new Date()
             });
