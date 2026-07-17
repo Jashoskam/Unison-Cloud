@@ -2900,7 +2900,7 @@ export default function App() {
     // Dispatch a message, append to Firestore database, trigger Gemini, save response back to Firestore
     app.post("/api/companion/message", express.json(), async (req, res) => {
         try {
-            let { conversationId, uid, content, email } = req.body;
+            let { conversationId, uid, content, email, clientType } = req.body;
             if (!conversationId || !content) {
                 return res.status(400).json({ error: "Missing required parameters (conversationId, content)" });
             }
@@ -2945,9 +2945,9 @@ export default function App() {
                 "Physical Hardware: Mac Device, OS: macOS.\n" +
                 "System Permissions: Accessibility=GRANTED, ScreenCapture=GRANTED.\n" +
                 "Installed Applications List: Safari, Music, Notes, Terminal, Calculator, Finder, Spotify.";
-            let hasAccessibility = false;
-            let hasScreenshots = false;
-            let isConnected = false;
+            let hasAccessibility = clientType === "native";
+            let hasScreenshots = clientType === "native";
+            let isConnected = clientType === "native";
             let installedAppsList: string[] = ["Safari", "Music", "Notes", "Terminal", "Calculator", "Finder", "Spotify"];
             let osVersion = "macOS (Unknown)";
             let modelIdentifier = "Mac Device";
@@ -2957,18 +2957,17 @@ export default function App() {
                 if (diagDoc.exists) {
                     const dData = diagDoc.data();
                     const lastReportTime = dData.timestamp ? new Date(dData.timestamp).getTime() : 0;
-                    // Stale check: relaxed to 30 minutes
                     const isRecent = (Date.now() - lastReportTime) < 1800000;
-                    isConnected = isRecent; // Dynamically resolve online status based on 30-minute window
-                    hasAccessibility = isRecent; // Bypass permissions check if online
-                    hasScreenshots = isRecent; // Bypass permissions check if online
+                    isConnected = isRecent || clientType === "native"; // Force online if Native macOS client sends request
+                    hasAccessibility = isConnected; 
+                    hasScreenshots = isConnected; 
                     if (Array.isArray(dData.installedApps) && dData.installedApps.length > 0) {
                         installedAppsList = dData.installedApps;
                     }
                     if (dData.osVersion) osVersion = dData.osVersion;
                     if (dData.modelIdentifier) modelIdentifier = dData.modelIdentifier;
 
-                    companionStatusText = `macOS Companion status: ${isRecent ? "ONLINE" : "OFFLINE / DISCONNECTED"}.\n` +
+                    companionStatusText = `macOS Companion status: ${isConnected ? "ONLINE" : "OFFLINE / DISCONNECTED"}.\n` +
                         `Physical Hardware: ${modelIdentifier}, OS: ${osVersion}.\n` +
                         `System Permissions: Accessibility=${hasAccessibility ? "GRANTED" : "DENIED"}, ScreenCapture=${hasScreenshots ? "GRANTED" : "DENIED"}.\n` +
                         `Installed Applications List: ${installedAppsList.join(", ")}.`;
@@ -2981,6 +2980,16 @@ export default function App() {
             const toolMode = determineAutoToolModeOnServer(content);
 
             let baseInstruction = "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.\n\n" +
+                "THINKING PROCESS & FORMATTING RULES:\n" +
+                "1. You MUST enclose your thinking process inside `<thinking>` and `</thinking>` tags at the very beginning of your response.\n" +
+                "2. Inside your thinking process, you MUST log each step you perform using these action-prefixed phrases (one per line) so the client UI parses and renders them as interactive steps:\n" +
+                "   - For web searches: `I will search the web for \"query\"` or `I will search for \"query\"`\n" +
+                "   - For reading files: `I will read file \"filename\"` or `I will view file \"filename\"`\n" +
+                "   - For writing/modifying files: `I will write file \"filename\"` or `I will edit file \"filename\"`\n" +
+                "   - For terminal commands: `I will run command \"command\"` or `I will execute command \"command\"`\n" +
+                "   - For compilation/linting: `I will build and compile \"project\"` or `I will build applet`\n" +
+                "   - For general reasoning: `I will analyze workspace context` or `I will reason about...`\n" +
+                "3. Always complete the thoughts block with `</thinking>` before outputting your main content response.\n\n" +
                 "CRITICAL CREDIBILITY & HONESTY MANDATE:\n" +
                 "1. You are running on a server connected to a local physical macOS companion app via Firestore. Here is the CURRENT REAL-TIME STATUS of the user's physical machine:\n" +
                 "-------------------------------\n" +
