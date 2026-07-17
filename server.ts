@@ -7,6 +7,22 @@ import { createServer } from "http";
 import { GoogleGenAI } from "@google/genai";
 import { spawn, exec } from "child_process";
 
+// Custom Operational AppError Class
+class AppError extends Error {
+    public readonly statusCode: number;
+    public readonly isOperational: boolean;
+    public readonly errorCode?: string;
+
+    constructor(message: string, statusCode: number, isOperational = true, errorCode?: string) {
+        super(message);
+        Object.setPrototypeOf(this, new.target.prototype);
+        this.statusCode = statusCode;
+        this.isOperational = isOperational;
+        this.errorCode = errorCode;
+        Error.captureStackTrace(this, this.constructor);
+    }
+}
+
 const PORT = 3000;
 const googleGenAI = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY || "",
@@ -623,6 +639,67 @@ function saveCache() {
     }
 }
 
+// Memory Leak Defense: Periodic map garbage collection every 1 hour
+setInterval(() => {
+    try {
+        console.log("[Garbage Collection] Initiating periodic memory cleanup...");
+        const now = Date.now();
+
+        // 1. Clean sessionSteps if it gets too large
+        if (sessionSteps.size > 200) {
+            console.log(`[Garbage Collection] Cleared sessionSteps map (size was ${sessionSteps.size})`);
+            sessionSteps.clear();
+        }
+
+        // 2. Clean localDevicePairings that are stale (older than 24 hours)
+        const ONE_DAY = 24 * 60 * 60 * 1000;
+        let pairingCleanCount = 0;
+        for (const [key, value] of localDevicePairings.entries()) {
+            const updatedAt = value?.updatedAt ? new Date(value.updatedAt).getTime() : 0;
+            if (updatedAt && (now - updatedAt) > ONE_DAY) {
+                localDevicePairings.delete(key);
+                pairingCleanCount++;
+            }
+        }
+        if (pairingCleanCount > 0) {
+            console.log(`[Garbage Collection] Cleaned ${pairingCleanCount} stale device pairings.`);
+        }
+
+        // 3. Clean aiCache: keep only items from the last 7 days, limit to 500 entries
+        const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+        let aiCacheCleanCount = 0;
+        const cacheKeys = Object.keys(aiCache);
+        
+        for (const key of cacheKeys) {
+            const entry = aiCache[key];
+            if (entry && entry.timestamp && (now - entry.timestamp) > SEVEN_DAYS) {
+                delete aiCache[key];
+                aiCacheCleanCount++;
+            }
+        }
+        
+        // If still too large, keep only the 500 newest entries
+        const remainingKeys = Object.keys(aiCache);
+        if (remainingKeys.length > 500) {
+            const sortedKeys = remainingKeys.sort((a, b) => {
+                return (aiCache[b]?.timestamp || 0) - (aiCache[a]?.timestamp || 0);
+            });
+            const keysToDelete = sortedKeys.slice(500);
+            for (const key of keysToDelete) {
+                delete aiCache[key];
+                aiCacheCleanCount++;
+            }
+        }
+
+        if (aiCacheCleanCount > 0) {
+            console.log(`[Garbage Collection] Cleaned ${aiCacheCleanCount} entries from aiCache.`);
+            saveCache();
+        }
+    } catch (err) {
+        console.error("[Garbage Collection] Error during execution:", err);
+    }
+}, 60 * 60 * 1000); // Every 1 hour
+
 function computePayloadHash(payload: any): string {
     const str = JSON.stringify(payload);
     let hash = 0;
@@ -711,6 +788,24 @@ function sanitizeContents(contents: any[]): any[] {
         combined.shift();
     }
     return combined;
+}
+
+function sanitizeMessageContentForGemini(text: string): string {
+    if (!text) return "";
+    let sanitized = text;
+
+    // 1. Strip internal <thinking>...</thinking> and <thought>...</thought> blocks
+    sanitized = sanitized.replace(/<thinking>[\s\S]*?<\/thinking>/g, "");
+    sanitized = sanitized.replace(/<thought>[\s\S]*?<\/thought>/g, "");
+
+    // 2. Strip [SYSTEM_ACTION: ...] tags
+    sanitized = sanitized.replace(/\[SYSTEM_ACTION:[\s\S]*?\]/g, "");
+
+    // 3. Strip raw base64 frame dumps (data URL or long alphanumeric sequence)
+    sanitized = sanitized.replace(/data:image\/[a-zA-Z]+;base64,[a-zA-Z0-9+/=]+/g, "[image_frame_data]");
+    sanitized = sanitized.replace(/(?:[a-zA-Z0-9+/]{4}){25,}(?:[a-zA-Z0-9+/]{2}==|[a-zA-Z0-9+/]{3}=)?/g, "[base64_data]");
+
+    return sanitized.trim();
 }
 
 function sanitizeThinkingLevel(level: any): string | undefined {
@@ -1507,6 +1602,22 @@ async function startServer() {
                     return;
                 }
 
+                // Handle system-wide device control command broadcasts (Web & Native Companion nodes)
+                if (payload.type === 'DEVICE_CONTROL_COMMAND') {
+                    console.log(`[DEVICE CONTROL] Broadcasting command: ${payload.command} with ID: ${payload.id}`);
+                    const cmdBroadcast = JSON.stringify({
+                        type: 'DEVICE_CONTROL_COMMAND',
+                        command: payload.command,
+                        id: payload.id || `cmd-${Date.now()}`
+                    });
+                    wss.clients.forEach(c => {
+                        if (c.readyState === WebSocket.OPEN) {
+                            c.send(cmdBroadcast);
+                        }
+                    });
+                    return;
+                }
+
                 // Centralized Server-Side Runtime Execution for Agents Studio
                 if (payload.type === 'START_SERVER_SIMULATION') {
                     const { startNodeId, nodes: clientNodes, edges: clientEdges } = payload;
@@ -2019,13 +2130,6 @@ export default function App() {
             }
         });
     });
-
-    // Setup screenshots directory
-    const SCREENSHOTS_DIR = path.join(process.cwd(), "screenshots");
-    if (!fs.existsSync(SCREENSHOTS_DIR)) {
-        fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-    }
-    app.use("/screenshots", express.static(SCREENSHOTS_DIR));
 
     // API Route for health check
     app.get("/api/health", (req, res) => {
@@ -2805,90 +2909,51 @@ export default function App() {
     }
 
     // Record an execution step from the background macOS agent directly to the conversation chat stream
-    app.post("/api/companion/agent/step", express.json({ limit: "50mb" }), async (req, res) => {
+    app.post("/api/companion/agent/step", express.json(), async (req, res) => {
         try {
-            const { conversationId, content, role, screenshot, messageId } = req.body;
-            if (!conversationId || !content) {
-                return res.status(400).json({ error: "Missing required parameters (conversationId, content)" });
+            const { conversationId, content, role, isFinal, thoughts } = req.body;
+            if (!conversationId) {
+                return res.status(400).json({ error: "Missing required parameters (conversationId)" });
             }
 
-            let finalContent = content;
+            const stepContent = content !== undefined ? String(content) : "";
 
-            if (screenshot) {
-                try {
-                    let base64Data = screenshot;
-                    if (screenshot.includes(",")) {
-                        base64Data = screenshot.split(",")[1];
-                    }
-                    const buffer = Buffer.from(base64Data, 'base64');
-                    const filename = `screenshot_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`;
-                    const filepath = path.join(process.cwd(), "screenshots", filename);
-                    
-                    fs.writeFileSync(filepath, buffer);
-                    
-                    const host = req.get('host');
-                    const protocol = req.protocol;
-                    const screenshotUrl = `${protocol}://${host}/screenshots/${filename}`;
-                    
-                    finalContent = `${content}\n\n![Screen Capture](${screenshotUrl})`;
-                    console.log(`[MacAgent] Saved step screenshot: ${screenshotUrl}`);
-                } catch (err: any) {
-                    console.error("[MacAgent] Failed to save step screenshot:", err.message);
+            // Stream to all connected WebSocket clients in real-time
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({
+                        type: isFinal === true ? 'AGENT_COMPLETE' : 'AGENT_STEP',
+                        conversationId,
+                        message: stepContent || "Executing workspace action...",
+                        content: stepContent,
+                        role: role || "model",
+                        isFinal: !!isFinal,
+                        thoughts: thoughts || ""
+                    }));
                 }
+            });
+
+            // 1. When isFinal is false, stream via WebSockets ONLY. Do NOT persist intermediate AGENT_STEP cards.
+            if (isFinal === false) {
+                return res.json({ success: true, streamedOnly: true });
+            }
+
+            // 2. When isFinal is true (or undefined/not provided), persist to database.
+            // If empty string content, populate content with a clean user-facing summary string while storing detailed agent logs in thoughts.
+            let finalContent = stepContent;
+            if (!finalContent.trim()) {
+                finalContent = "Objective completed successfully.";
             }
 
             const messagesCol = adminDb.collection("conversations").doc(conversationId).collection("messages");
-            const msgId = messageId || ("msg_a_" + Date.now() + "_" + Math.floor(Math.random() * 1000));
+            const msgId = "msg_a_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
 
-            let finalThoughts = finalContent;
-            if (messageId) {
-                try {
-                    const docSnap = await messagesCol.doc(messageId).get();
-                    if (docSnap.exists) {
-                        const data = docSnap.data();
-                        const existingThoughts = data?.thoughts || "";
-                        if (existingThoughts) {
-                            finalThoughts = `${existingThoughts}\n\n${finalContent}`;
-                        }
-                    }
-                } catch (readErr) {
-                    console.error("[MacAgent] Failed to read existing thoughts for append:", readErr);
-                }
-            }
-
-            const isFinal = content.includes("Objective Achieved") || 
-                            content.includes("DEVICE_ACTION_OTHER:Objective Achieved") ||
-                            content.includes("Companion Error") ||
-                            content.includes("[Companion Error]") ||
-                            content.includes("Deactivated") ||
-                            content.includes("Computer Use Agent Deactivated");
-
-            if (isFinal) {
-                await messagesCol.doc(msgId).set({
-                    conversationId,
-                    content: "", // Clear main chat output bubble
-                    thoughts: finalThoughts, // Store detailed agent process in thoughts field
-                    role: role || "model",
-                    createdAt: new Date()
-                });
-            }
-
-            // Broadcast the step details over WebSockets for live UI streaming
-            const wsPayload = JSON.stringify({
-                type: isFinal ? 'AGENT_COMPLETE' : 'AGENT_STEP',
-                data: {
-                    conversationId,
-                    content: content,
-                    thoughts: finalContent,
-                    role: role || "model",
-                    messageId: msgId,
-                    isFinal: isFinal
-                }
-            });
-            wss.clients.forEach(c => {
-                if (c.readyState === WebSocket.OPEN) {
-                    c.send(wsPayload);
-                }
+            await messagesCol.doc(msgId).set({
+                conversationId,
+                content: finalContent,
+                role: role || "model",
+                thoughts: thoughts || null,
+                createdAt: new Date()
             });
 
             res.json({ success: true, id: msgId });
@@ -2900,7 +2965,7 @@ export default function App() {
     // Dispatch a message, append to Firestore database, trigger Gemini, save response back to Firestore
     app.post("/api/companion/message", express.json(), async (req, res) => {
         try {
-            let { conversationId, uid, content, email, clientType } = req.body;
+            let { conversationId, uid, content, email } = req.body;
             if (!conversationId || !content) {
                 return res.status(400).json({ error: "Missing required parameters (conversationId, content)" });
             }
@@ -2937,17 +3002,14 @@ export default function App() {
 
             const contents = recentMessages.map((m: any) => ({
                 role: m.role === "model" ? "model" : "user",
-                parts: [{ text: m.content }]
+                parts: [{ text: sanitizeMessageContentForGemini(m.content || "") }]
             }));
 
             // 3. Query the latest real-time macOS companion diagnostics and permissions from Firestore
-            let companionStatusText = "macOS Companion status: ONLINE.\n" +
-                "Physical Hardware: Mac Device, OS: macOS.\n" +
-                "System Permissions: Accessibility=GRANTED, ScreenCapture=GRANTED.\n" +
-                "Installed Applications List: Safari, Music, Notes, Terminal, Calculator, Finder, Spotify.";
-            let hasAccessibility = clientType === "native";
-            let hasScreenshots = clientType === "native";
-            let isConnected = clientType === "native";
+            let companionStatusText = "No companion device diagnostics received yet. The macOS companion is likely OFFLINE.";
+            let hasAccessibility = false;
+            let hasScreenshots = false;
+            let isConnected = false;
             let installedAppsList: string[] = ["Safari", "Music", "Notes", "Terminal", "Calculator", "Finder", "Spotify"];
             let osVersion = "macOS (Unknown)";
             let modelIdentifier = "Mac Device";
@@ -2957,17 +3019,18 @@ export default function App() {
                 if (diagDoc.exists) {
                     const dData = diagDoc.data();
                     const lastReportTime = dData.timestamp ? new Date(dData.timestamp).getTime() : 0;
-                    const isRecent = (Date.now() - lastReportTime) < 1800000;
-                    isConnected = isRecent || clientType === "native"; // Force online if Native macOS client sends request
-                    hasAccessibility = isConnected; 
-                    hasScreenshots = isConnected; 
+                    // Stale check: let's say 2 minutes
+                    const isRecent = (Date.now() - lastReportTime) < 120000;
+                    isConnected = isRecent;
+                    hasAccessibility = !!dData.accessibility;
+                    hasScreenshots = !!dData.screenshots;
                     if (Array.isArray(dData.installedApps) && dData.installedApps.length > 0) {
                         installedAppsList = dData.installedApps;
                     }
                     if (dData.osVersion) osVersion = dData.osVersion;
                     if (dData.modelIdentifier) modelIdentifier = dData.modelIdentifier;
 
-                    companionStatusText = `macOS Companion status: ${isConnected ? "ONLINE" : "OFFLINE / DISCONNECTED"}.\n` +
+                    companionStatusText = `macOS Companion status: ${isRecent ? "ONLINE" : "OFFLINE / DISCONNECTED"}.\n` +
                         `Physical Hardware: ${modelIdentifier}, OS: ${osVersion}.\n` +
                         `System Permissions: Accessibility=${hasAccessibility ? "GRANTED" : "DENIED"}, ScreenCapture=${hasScreenshots ? "GRANTED" : "DENIED"}.\n` +
                         `Installed Applications List: ${installedAppsList.join(", ")}.`;
@@ -2980,16 +3043,10 @@ export default function App() {
             const toolMode = determineAutoToolModeOnServer(content);
 
             let baseInstruction = "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.\n\n" +
-                "THINKING PROCESS & FORMATTING RULES:\n" +
-                "1. You MUST enclose your thinking process inside `<thinking>` and `</thinking>` tags at the very beginning of your response.\n" +
-                "2. Inside your thinking process, you MUST log each step you perform using these action-prefixed phrases (one per line) so the client UI parses and renders them as interactive steps:\n" +
-                "   - For web searches: `I will search the web for \"query\"` or `I will search for \"query\"`\n" +
-                "   - For reading files: `I will read file \"filename\"` or `I will view file \"filename\"`\n" +
-                "   - For writing/modifying files: `I will write file \"filename\"` or `I will edit file \"filename\"`\n" +
-                "   - For terminal commands: `I will run command \"command\"` or `I will execute command \"command\"`\n" +
-                "   - For compilation/linting: `I will build and compile \"project\"` or `I will build applet`\n" +
-                "   - For general reasoning: `I will analyze workspace context` or `I will reason about...`\n" +
-                "3. Always complete the thoughts block with `</thinking>` before outputting your main content response.\n\n" +
+                "CRITICAL HIGH-FIDELITY COMPLETENESS MANDATE (NO ABBREVIATIONS, NO PLACEHOLDERS):\n" +
+                "- When asked to write code, generate files, build projects, draft documentation (such as Word files/PDFs), or generate spreadsheets, you are STRICTLY FORBIDDEN from abbreviating, truncating, or summarizing any content.\n" +
+                "- NEVER use placeholders like \"// ... rest of code ...\", \"// TODO\", \"// Implement other methods\", \"Insert content here\", or similar comments. Every single file, class, method, function, spreadsheet row, document section, and presentation slide MUST be written with 100% complete, exhaustive, operational, production-quality, and fully-featured logic.\n" +
+                "- When initializing or creating projects with the INIT_PROJECT block or writing scripts, always produce detailed, fully-realized multi-file architectures with rich logic, beautiful terminal/GUI outputs, complete helper classes, and full operational capabilities. Make every project, script, and file feel incredibly detailed, amazing, polished, and fully fleshed out!\n\n" +
                 "CRITICAL CREDIBILITY & HONESTY MANDATE:\n" +
                 "1. You are running on a server connected to a local physical macOS companion app via Firestore. Here is the CURRENT REAL-TIME STATUS of the user's physical machine:\n" +
                 "-------------------------------\n" +
@@ -3100,12 +3157,6 @@ export default function App() {
             } catch (geminiError: any) {
                 console.error("[COMPANION] Gemini generation failed:", geminiError);
                 geminiReply = `System error on Gemini routing layer: ${geminiError.message || String(geminiError)}`;
-            }
-
-            // If the companion device is offline, intercept and strip any system actions to decouple Web App usage gracefully
-            if (!isConnected && (geminiReply.includes("[SYSTEM_ACTION:") || geminiReply.includes("launchApp=") || geminiReply.includes("startAgent="))) {
-                geminiReply = geminiReply.replace(/\[SYSTEM_ACTION:[^\]]+\]/g, "").trim();
-                geminiReply += "\n\n*(Note: Native computer-use actions require the native macOS desktop client. Please ensure the Unison app is open on your Mac to execute this task.)*";
             }
 
             // 5. Save Gemini response
@@ -3424,8 +3475,23 @@ export default function App() {
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
 
+        const sanitizedEnv = { ...process.env };
+        delete sanitizedEnv.GEMINI_API_KEY;
+        delete sanitizedEnv.SUPABASE_KEY;
+        delete sanitizedEnv.NEXT_PUBLIC_SUPABASE_URL;
+        delete sanitizedEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+        for (const k of Object.keys(sanitizedEnv)) {
+            const upperK = k.toUpperCase();
+            if (upperK.includes("KEY") || upperK.includes("SECRET") || upperK.includes("PASSWORD") || upperK.includes("TOKEN") || upperK.includes("CREDENTIAL")) {
+                delete sanitizedEnv[k];
+            }
+        }
+
         const startTime = Date.now();
-        const child = spawn(cmd, args, { timeout: 15000 });
+        const child = spawn(cmd, args, { 
+            timeout: 15000,
+            env: sanitizedEnv
+        });
 
         child.stdout.on('data', (data) => {
             res.write(`data: ${JSON.stringify({ type: 'stdout', text: data.toString() })}\n\n`);
@@ -3500,8 +3566,23 @@ export default function App() {
             return res.status(500).json({ error: `Sandbox file access denied: ${writeErr.message}` });
         }
 
+        const sanitizedEnv = { ...process.env };
+        delete sanitizedEnv.GEMINI_API_KEY;
+        delete sanitizedEnv.SUPABASE_KEY;
+        delete sanitizedEnv.NEXT_PUBLIC_SUPABASE_URL;
+        delete sanitizedEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+        for (const k of Object.keys(sanitizedEnv)) {
+            const upperK = k.toUpperCase();
+            if (upperK.includes("KEY") || upperK.includes("SECRET") || upperK.includes("PASSWORD") || upperK.includes("TOKEN") || upperK.includes("CREDENTIAL")) {
+                delete sanitizedEnv[k];
+            }
+        }
+
         const startTime = Date.now();
-        exec(runCmd, { timeout: 12000 }, (err: any, stdout, stderr) => {
+        exec(runCmd, { 
+            timeout: 12000,
+            env: sanitizedEnv
+        }, (err: any, stdout, stderr) => {
             // Cleanup file in background
             try {
                 if (fs.existsSync(filePath)) {
@@ -6776,6 +6857,31 @@ CRITICAL CREDIBILITY, REASONING & FOCUS MANDATE:
             }
         });
     }
+
+    // Enterprise-grade Express error handling middleware
+    app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+        const statusCode = err.statusCode || 500;
+        const isOperational = err.isOperational !== undefined ? err.isOperational : false;
+        const errorCode = err.errorCode || "INTERNAL_SERVER_ERROR";
+
+        console.error(`[Error Middleware] [${req.method} ${req.path}] error:`, err);
+
+        // Don't leak internal stack traces in production (process.env.NODE_ENV === "production")
+        const isProd = process.env.NODE_ENV === "production";
+        const response: any = {
+            error: {
+                message: isOperational || !isProd ? err.message : "An internal server error occurred.",
+                errorCode,
+                statusCode
+            }
+        };
+
+        if (!isProd) {
+            response.error.stack = err.stack;
+        }
+
+        res.status(statusCode).json(response);
+    });
 
     server.listen(PORT, "0.0.0.0", () => {
         console.log(`Unison OS running on http://localhost:${PORT}`);
