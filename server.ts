@@ -2915,7 +2915,7 @@ export default function App() {
     // Record an execution step from the background macOS agent directly to the conversation chat stream
     app.post("/api/companion/agent/step", express.json(), async (req, res) => {
         try {
-            const { conversationId, content, role, isFinal, thoughts } = req.body;
+            const { conversationId, content, role, isFinal, thoughts, messageId } = req.body;
             if (!conversationId) {
                 return res.status(400).json({ error: "Missing required parameters (conversationId)" });
             }
@@ -2928,6 +2928,7 @@ export default function App() {
                     client.send(JSON.stringify({
                         type: isFinal === true ? 'AGENT_COMPLETE' : 'AGENT_STEP',
                         conversationId,
+                        messageId: messageId || null,
                         message: stepContent || "Executing workspace action...",
                         content: stepContent,
                         role: role || "model",
@@ -2950,15 +2951,19 @@ export default function App() {
             }
 
             const messagesCol = adminDb.collection("conversations").doc(conversationId).collection("messages");
-            const msgId = "msg_a_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
+            const msgId = messageId || ("msg_a_" + Date.now() + "_" + Math.floor(Math.random() * 1000));
 
-            await messagesCol.doc(msgId).set({
+            const updateData: any = {
                 conversationId,
                 content: finalContent,
                 role: role || "model",
-                thoughts: thoughts || null,
-                createdAt: new Date()
-            });
+                thoughts: thoughts || null
+            };
+            if (!messageId) {
+                updateData.createdAt = new Date();
+            }
+
+            await messagesCol.doc(msgId).set(updateData, { merge: true });
 
             res.json({ success: true, id: msgId });
         } catch (error: any) {
@@ -3010,9 +3015,9 @@ export default function App() {
             }));
 
             // 3. Query the latest real-time macOS companion diagnostics and permissions from Firestore
-            let isConnected = clientType === "native";
-            let hasAccessibility = clientType === "native";
-            let hasScreenshots = clientType === "native";
+            let isConnected = clientType === "native" || process.env.FORCE_PERMISSIONS_GRANTED === "true";
+            let hasAccessibility = clientType === "native" || process.env.FORCE_PERMISSIONS_GRANTED === "true";
+            let hasScreenshots = clientType === "native" || process.env.FORCE_PERMISSIONS_GRANTED === "true";
             let companionStatusText = isConnected ? 
                 "macOS Companion status: ONLINE.\nPhysical Hardware: Mac Device, OS: macOS.\nSystem Permissions: Accessibility=GRANTED, ScreenCapture=GRANTED.\nInstalled Applications List: Safari, Music, Notes, Terminal, Calculator, Finder, Spotify." : 
                 "No companion device diagnostics received yet. The macOS companion is likely OFFLINE.";
@@ -3024,6 +3029,7 @@ export default function App() {
                 const diagDoc = await adminDb.collection("system_state").doc("hardware_diagnostics").get();
                 if (diagDoc.exists) {
                     const dData = diagDoc.data();
+                    const lastReportTime = dData.timestamp ? new Date(dData.timestamp).getTime() : 0;
                     const isRecent = (Date.now() - lastReportTime) < 3600000 || process.env.FORCE_PERMISSIONS_GRANTED === "true";
                     isConnected = isRecent || clientType === "native" || process.env.FORCE_PERMISSIONS_GRANTED === "true";
                     hasAccessibility = isConnected || !!dData.accessibility;
@@ -3047,6 +3053,9 @@ export default function App() {
             const toolMode = determineAutoToolModeOnServer(content);
 
             let baseInstruction = "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.\n\n" +
+                "CRITICAL THINKING / CHAIN OF THOUGHT MANDATE:\n" +
+                "- You MUST wrap all of your internal thoughts, reflections, step-by-step reasoning, tool choices, plans, and instructions inside <thought>...</thought> tags. For example: '<thought>I will analyze the user prompt and decide to launch Notes...</thought>'.\n" +
+                "- Keep these thoughts entirely distinct from user-facing text responses. The raw thoughts will be parsed and filtered server-side.\n\n" +
                 "CRITICAL HIGH-FIDELITY COMPLETENESS MANDATE (NO ABBREVIATIONS, NO PLACEHOLDERS):\n" +
                 "- When asked to write code, generate files, build projects, draft documentation (such as Word files/PDFs), or generate spreadsheets, you are STRICTLY FORBIDDEN from abbreviating, truncating, or summarizing any content.\n" +
                 "- NEVER use placeholders like \"// ... rest of code ...\", \"// TODO\", \"// Implement other methods\", \"Insert content here\", or similar comments. Every single file, class, method, function, spreadsheet row, document section, and presentation slide MUST be written with 100% complete, exhaustive, operational, production-quality, and fully-featured logic.\n" +
@@ -3163,12 +3172,21 @@ export default function App() {
                 geminiReply = `System error on Gemini routing layer: ${geminiError.message || String(geminiError)}`;
             }
 
-            // 5. Save Gemini response
+            // 5. Parse thought blocks and strip them from final content
+            let userFacingContent = geminiReply;
+            let thoughts = "";
+            const match = userFacingContent.match(/<thought>([\s\S]*?)<\/thought>/i);
+            if (match) {
+                thoughts = match[1];
+                userFacingContent = userFacingContent.replace(/<thought>[\s\S]*?<\/thought>/gi, '').trim();
+            }
+
             const modelMsgId = "msg_m_" + Date.now();
             await messagesCol.doc(modelMsgId).set({
                 conversationId,
-                content: geminiReply,
+                content: userFacingContent,
                 role: "model",
+                thoughts: thoughts || null,
                 createdAt: new Date(),
                 userId: "unison_core"
             });
@@ -3179,7 +3197,7 @@ export default function App() {
                 updatedAt: new Date()
             }, { merge: true });
 
-            res.json({ success: true, response: geminiReply });
+            res.json({ success: true, response: userFacingContent });
         } catch (err: any) {
             console.error("[COMPANION] post-message error:", err);
             res.status(500).json({ error: err.message });
