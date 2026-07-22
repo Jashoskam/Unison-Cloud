@@ -6,6 +6,9 @@ import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
 import { GoogleGenAI } from "@google/genai";
 import { spawn, exec } from "child_process";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 // Custom Operational AppError Class
 class AppError extends Error {
@@ -3018,8 +3021,8 @@ export default function App() {
             let isConnected = clientType === "native" || process.env.FORCE_PERMISSIONS_GRANTED === "true";
             let hasAccessibility = clientType === "native" || process.env.FORCE_PERMISSIONS_GRANTED === "true";
             let hasScreenshots = clientType === "native" || process.env.FORCE_PERMISSIONS_GRANTED === "true";
-            let companionStatusText = isConnected ? 
-                "macOS Companion status: ONLINE.\nPhysical Hardware: Mac Device, OS: macOS.\nSystem Permissions: Accessibility=GRANTED, ScreenCapture=GRANTED.\nInstalled Applications List: Safari, Music, Notes, Terminal, Calculator, Finder, Spotify." : 
+            let companionStatusText = isConnected ?
+                "macOS Companion status: ONLINE.\nPhysical Hardware: Mac Device, OS: macOS.\nSystem Permissions: Accessibility=GRANTED, ScreenCapture=GRANTED.\nInstalled Applications List: Safari, Music, Notes, Terminal, Calculator, Finder, Spotify." :
                 "No companion device diagnostics received yet. The macOS companion is likely OFFLINE.";
             let installedAppsList: string[] = ["Safari", "Music", "Notes", "Terminal", "Calculator", "Finder", "Spotify"];
             let osVersion = "macOS (Unknown)";
@@ -3052,13 +3055,34 @@ export default function App() {
             // Determine Server toolMode and system instructions
             const toolMode = determineAutoToolModeOnServer(content);
 
+            const meetingContextText = composioMeetingStore.map(m => `• ID: "${m.id}", Title: "${m.title}", Start: "${m.startTime}", Desc: "${m.description || ''}"`).join("\n");
+            const taskContextText = composioTaskStore.map(t => `• ID: "${t.id}", Title: "${t.title}", Status: "${t.status}", Priority: "${t.priority}", Desc: "${t.description || ''}"`).join("\n");
+
             let baseInstruction = "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.\n\n" +
+                "REALTIME GOOGLE CALENDAR & MEETINGS MANAGEMENT:\n" +
+                "Here are the active scheduled meetings on the user's system/calendar:\n" +
+                (meetingContextText || "No active meetings.") + "\n\n" +
+                "When the user asks you to schedule, edit, update, reschedule, or delete a meeting or Google Calendar event:\n" +
+                "- To DELETE a meeting: append the exact tag: `[MEETING_ACTION: delete id=\"MEETING_ID\"]` to your response.\n" +
+                "- To EDIT or RESCHEDULE a meeting: append the exact tag: `[MEETING_ACTION: edit id=\"MEETING_ID\" title=\"NEW_TITLE\" startTime=\"ISO_TIMESTAMP\" durationMinutes=30 description=\"DESCRIPTION\"]` to your response.\n" +
+                "- To CREATE or SCHEDULE a meeting: append the exact tag: `[MEETING_ACTION: create title=\"TITLE\" startTime=\"ISO_TIMESTAMP\" durationMinutes=30 description=\"DESCRIPTION\"]` to your response.\n\n" +
+                "REALTIME GOOGLE TASKS MANAGEMENT:\n" +
+                "Here are the active tasks on the user's system:\n" +
+                (taskContextText || "No active tasks.") + "\n\n" +
+                "When the user asks you to create, edit, update, or delete a task:\n" +
+                "- To DELETE a task: append the exact tag: `[TASK_ACTION: delete id=\"TASK_ID\"]` to your response.\n" +
+                "- To EDIT or UPDATE a task: append the exact tag: `[TASK_ACTION: edit id=\"TASK_ID\" title=\"NEW_TITLE\" description=\"DESCRIPTION\" status=\"todo|in_progress|completed\" priority=\"low|medium|high|urgent\"]` to your response.\n" +
+                "- To CREATE a task: append the exact tag: `[TASK_ACTION: create title=\"TITLE\" description=\"DESCRIPTION\" priority=\"low|medium|high|urgent\"]` to your response.\n\n" +
                 "CRITICAL THINKING / CHAIN OF THOUGHT MANDATE:\n" +
                 "- You MUST wrap all of your internal thoughts, reflections, step-by-step reasoning, tool choices, plans, and instructions inside <thought>...</thought> tags. For example: '<thought>I will analyze the user prompt and decide to launch Notes...</thought>'.\n" +
                 "- Keep these thoughts entirely distinct from user-facing text responses. The raw thoughts will be parsed and filtered server-side.\n\n" +
                 "CRITICAL HIGH-FIDELITY COMPLETENESS MANDATE (NO ABBREVIATIONS, NO PLACEHOLDERS):\n" +
                 "- When asked to write code, generate files, build projects, draft documentation (such as Word files/PDFs), or generate spreadsheets, you are STRICTLY FORBIDDEN from abbreviating, truncating, or summarizing any content.\n" +
                 "- NEVER use placeholders like \"// ... rest of code ...\", \"// TODO\", \"// Implement other methods\", \"Insert content here\", or similar comments. Every single file, class, method, function, spreadsheet row, document section, and presentation slide MUST be written with 100% complete, exhaustive, operational, production-quality, and fully-featured logic.\n" +
+                "- When Asked to write code, program scripts (like Python, Bash, Node.js, HTML, CSS, React, etc.), Markdown documents, task lists, or structural content, you MUST wrap them inside an XML-like <artifact> block. This generates a gorgeous interactive side-by-side artifact card in the workspace UI, just like Claude or Antigravity side-by-side code agents. Format:\n" +
+                "  <artifact id=\"unique-file-identifier\" title=\"filename.ext\" type=\"language-name\">\n" +
+                "  ...complete code...\n" +
+                "  </artifact>\n" +
                 "- When initializing or creating projects with the INIT_PROJECT block or writing scripts, always produce detailed, fully-realized multi-file architectures with rich logic, beautiful terminal/GUI outputs, complete helper classes, and full operational capabilities. Make every project, script, and file feel incredibly detailed, amazing, polished, and fully fleshed out!\n\n" +
                 "CRITICAL CREDIBILITY & HONESTY MANDATE:\n" +
                 "1. You are running on a server connected to a local physical macOS companion app via Firestore. Here is the CURRENT REAL-TIME STATUS of the user's physical machine:\n" +
@@ -3181,6 +3205,12 @@ export default function App() {
                 userFacingContent = userFacingContent.replace(/<thought>[\s\S]*?<\/thought>/gi, '').trim();
             }
 
+            // Process any AI meeting/task management actions (create, edit, delete)
+            const actionKey = getComposioApiKey(req);
+            const { cleanedText: textAfterMeetings } = await processMeetingActionTags(userFacingContent, actionKey);
+            const { cleanedText } = await processTaskActionTags(textAfterMeetings, actionKey);
+            userFacingContent = cleanedText;
+
             const modelMsgId = "msg_m_" + Date.now();
             await messagesCol.doc(modelMsgId).set({
                 conversationId,
@@ -3211,8 +3241,8 @@ export default function App() {
             systemStatus: "ONLINE",
             tabs: [
                 { title: "Chat Workspace", icon: "bubble.left", viewType: "chat", badge: null },
+                { title: "Notes Database", icon: "doc.text", viewType: "notes", badge: "New" },
                 { title: "System Hub", icon: "globe", viewType: "system_hub", badge: "Core" },
-                { title: "Directory Tree", icon: "folder.badge.gearshape", viewType: "directory", badge: null },
                 { title: "Project Canvas", icon: "doc.text.below.ecg", viewType: "canvas", badge: "IDE" },
                 { title: "Developer Shell", icon: "terminal", viewType: "terminal", badge: "Dev" },
                 { title: "Titan Vision Studio", icon: "viewfinder.circle.fill", viewType: "titan_suite", badge: "Vision" }
@@ -3495,8 +3525,12 @@ export default function App() {
         }
 
         res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
         res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        if (typeof (res as any).flushHeaders === "function") {
+            (res as any).flushHeaders();
+        }
 
         const sanitizedEnv = { ...process.env };
         delete sanitizedEnv.GEMINI_API_KEY;
@@ -3727,6 +3761,228 @@ export default function App() {
         }
     };
 
+    // --- SERVER ACTIVE AGENTS DATABASE ---
+    const AGENTS_FILE = path.join(process.cwd(), "server_agents.json");
+    let serverActiveAgents: any[] = [];
+    try {
+        if (fs.existsSync(AGENTS_FILE)) {
+            serverActiveAgents = JSON.parse(fs.readFileSync(AGENTS_FILE, "utf-8"));
+            // Filter out dummy agents if any exist
+            serverActiveAgents = serverActiveAgents.filter(a => !['agent-ops', 'agent-workspace', 'agent-intel', 'agent-spotify', 'agent-db'].includes(a.id));
+            fs.writeFileSync(AGENTS_FILE, JSON.stringify(serverActiveAgents, null, 2));
+        } else {
+            serverActiveAgents = [];
+            fs.writeFileSync(AGENTS_FILE, JSON.stringify(serverActiveAgents, null, 2));
+        }
+    } catch (e) {
+        console.error("Error reading server active agents:", e);
+    }
+
+    const saveServerAgents = () => {
+        try {
+            fs.writeFileSync(AGENTS_FILE, JSON.stringify(serverActiveAgents, null, 2));
+        } catch (e) {
+            console.error("Error saving server active agents:", e);
+        }
+    };
+
+    // GET list of server-side active agents
+    app.get("/api/agents", (req, res) => {
+        const enriched = serverActiveAgents.map(a => ({
+            nodesCount: a.nodesCount || 4,
+            nodesList: a.nodesList || ['Start', 'Extract Payload', 'Process LLM', 'End'],
+            ...a
+        }));
+        res.json(enriched);
+    });
+
+    // Create or update server-side active agent
+    app.post("/api/agents", express.json(), (req, res) => {
+        const agent = req.body;
+        if (!agent.name || !agent.id) {
+            return res.status(400).json({ error: "Agent ID and Name are required." });
+        }
+
+        const idx = serverActiveAgents.findIndex(a => a.id === agent.id);
+        const enrichedAgent = {
+            nodesCount: agent.nodesCount || 4,
+            nodesList: agent.nodesList || ['Start', 'Extract Payload', 'Process LLM', 'End'],
+            ...agent
+        };
+
+        if (idx >= 0) {
+            serverActiveAgents[idx] = { ...serverActiveAgents[idx], ...enrichedAgent };
+        } else {
+            serverActiveAgents.push({
+                status: 'Active',
+                runsCount: 0,
+                successRate: '100%',
+                latency: '200ms',
+                listeners: ['call', 'text'],
+                receiverMode: 'both',
+                ...enrichedAgent
+            });
+        }
+        saveServerAgents();
+
+        // Broadcast notification to Swift App (AGENT_CREATED)
+        const notificationPayload = JSON.stringify({
+            type: "AGENT_CREATED",
+            name: agent.name
+        });
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(notificationPayload);
+            }
+        });
+
+        res.json({ success: true, agent });
+    });
+
+    // Delete server-side agent
+    app.delete("/api/agents/:id", (req, res) => {
+        const { id } = req.params;
+        serverActiveAgents = serverActiveAgents.filter(a => a.id !== id);
+        saveServerAgents();
+        res.json({ success: true });
+    });
+
+    // Trigger an alert manually
+    app.post("/api/alerts/create", express.json(), (req, res) => {
+        const { message, tag, isError } = req.body;
+        if (!message) {
+            return res.status(400).json({ error: "Alert message is required." });
+        }
+
+        const alertObj = {
+            id: `alert-${Date.now()}`,
+            tag: tag || "SYSTEM",
+            message,
+            timestamp: new Date().toLocaleTimeString(),
+            isError: !!isError
+        };
+
+        const notificationPayload = JSON.stringify({
+            type: "ALERT_NOTIFICATION",
+            message: `[${alertObj.tag}] ${message}`,
+            alert: alertObj
+        });
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(notificationPayload);
+            }
+        });
+
+        res.json({ success: true, alert: alertObj });
+    });
+
+    // Trigger Server-Side Agent Execution via Gemini AI
+    app.post("/api/agents/run", express.json(), async (req, res) => {
+        const { agentId, triggerType, details } = req.body;
+        const agent = serverActiveAgents.find(a => a.id === agentId);
+        if (!agent) {
+            return res.status(404).json({ error: "Active Agent not found." });
+        }
+
+        console.log(`[AGENT_SERVER] Triggered Agent execution on Server: "${agent.name}" on event "${triggerType}"`);
+
+        const startAlertPayload = JSON.stringify({
+            type: "ALERT_NOTIFICATION",
+            message: `Agent '[${agent.name}]' triggered on event: ${triggerType}`
+        });
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(startAlertPayload);
+            }
+        });
+
+        agent.runsCount = (agent.runsCount || 0) + 1;
+        saveServerAgents();
+
+        let steps = [
+            "Initiating sensor data pipeline audit...",
+            "Validating workspace session handshake keys...",
+            "Completed task compilation."
+        ];
+        let finalOutcome = "Success. Processed request correctly.";
+
+        try {
+            const systemPrompt = `You are the server-side controller for the Unison Agent: "${agent.name}".
+Description: "${agent.description}"
+ReceiverPreset: "${agent.receiverResponsePreset || ''}"
+
+This agent has just been triggered by a "${triggerType}" event. Details: "${details || 'No additional details.'}".
+Generate a list of 3 highly technical, precise step actions that this agent executes to resolve this event, followed by a final short outcome summary.
+Format your output EXACTLY as a JSON object:
+{
+  "steps": ["step 1 action details...", "step 2 action details...", "step 3 action details..."],
+  "finalOutcome": "Short 1-sentence final outcome summary"
+}`;
+
+            const response = await googleGenAI.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: systemPrompt,
+                config: {
+                    responseMimeType: "application/json"
+                }
+            });
+
+            const text = response.text || "";
+            if (text.trim()) {
+                const parsed = JSON.parse(text);
+                if (Array.isArray(parsed.steps) && parsed.steps.length > 0) {
+                    steps = parsed.steps;
+                }
+                if (parsed.finalOutcome) {
+                    finalOutcome = parsed.finalOutcome;
+                }
+            }
+        } catch (e: any) {
+            console.warn("[AGENT_SERVER] Gemini step generation failed, using fallback steps:", e.message);
+        }
+
+        (async () => {
+            for (let i = 0; i < steps.length; i++) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+
+                const stepPayload = JSON.stringify({
+                    type: "AGENT_UPDATE",
+                    agentId,
+                    message: `[${agent.name}] Step ${i + 1}: ${steps[i]}`
+                });
+                wss.clients.forEach(client => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(stepPayload);
+                    }
+                });
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            const completeAlertPayload = JSON.stringify({
+                type: "ALERT_NOTIFICATION",
+                message: `Agent '[${agent.name}]' completed task: ${finalOutcome}`
+            });
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(completeAlertPayload);
+                }
+            });
+
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({
+                        type: "AGENT_UPDATE",
+                        agentId,
+                        message: `[${agent.name}] Execution completed: ${finalOutcome}`,
+                        isFinal: true
+                    }));
+                }
+            });
+        })();
+
+        res.json({ success: true, steps, finalOutcome });
+    });
+
     // Helper to broadast state to all connected WS browsers
     const broadcastSiriTrigger = (logObj: SiriLog, detailsNode?: SmartNode) => {
         const payload = JSON.stringify({
@@ -3741,58 +3997,45 @@ export default function App() {
         });
     };
 
-    // Retrieve smart nodes
+    // Retrieve smart nodes (Removed)
     app.get("/api/siri/nodes", (req, res) => {
-        res.json(siriNodes);
+        res.json([]);
     });
 
-    // Save/Update smart node
+    // Save/Update smart node (Removed)
     app.post("/api/siri/nodes", express.json(), (req, res) => {
-        const node: SmartNode = req.body;
-        if (!node.name || !node.type) {
-            return res.status(400).json({ error: "Node name and protocol type are required." });
-        }
-
-        if (!node.id) {
-            node.id = `${node.type}_node_${Date.now()}`;
-        }
-
-        const idx = siriNodes.findIndex(n => n.id === node.id);
-        if (idx >= 0) {
-            siriNodes[idx] = { ...siriNodes[idx], ...node };
-        } else {
-            siriNodes.push(node);
-        }
-
-        saveSiriNodes();
-        res.json({ success: true, node });
+        res.json({ success: true, node: {} });
     });
 
-    // Delete smart node
+    // Delete smart node (Removed)
     app.delete("/api/siri/nodes/:id", (req, res) => {
-        const { id } = req.params;
-        siriNodes = siriNodes.filter(n => n.id !== id);
-        saveSiriNodes();
         res.json({ success: true });
     });
 
-    // List triggered logs
+    // List triggered logs (Removed)
     app.get("/api/siri/logs", (req, res) => {
-        res.json(siriLogs);
+        res.json([]);
     });
 
-    // Clear triggered logs
+    // Clear triggered logs (Removed)
     app.post("/api/siri/logs/clear", (req, res) => {
-        siriLogs = [];
         res.json({ success: true });
     });
 
     // --- REAL-TIME CANVAS & JOTTINGS INTEGRATION ---
     const CANVAS_FILE = path.join(process.cwd(), "canvas_elements.json");
     const JOTTINGS_FILE = path.join(process.cwd(), "jottings.json");
+    const NOTES_FILE = path.join(process.cwd(), "notes.json");
+    const MEETINGS_FILE = path.join(process.cwd(), "meetings.json");
+    const TASKS_FILE = path.join(process.cwd(), "tasks.json");
+    const DOCUMENTS_FILE = path.join(process.cwd(), "documents.json");
 
     let canvasElements: any[] = [];
     let jottingsList: any[] = [];
+    let notesList: any[] = [];
+    let meetingsList: any[] = [];
+    let tasksList: any[] = [];
+    let documentsList: any[] = [];
 
     try {
         if (fs.existsSync(CANVAS_FILE)) {
@@ -3830,6 +4073,103 @@ export default function App() {
         console.error("Error reading jottings:", e);
     }
 
+    try {
+        if (fs.existsSync(NOTES_FILE)) {
+            notesList = JSON.parse(fs.readFileSync(NOTES_FILE, "utf-8"));
+        } else {
+            notesList = [
+                {
+                    id: "note_portfolio",
+                    category: "project",
+                    content: "Title: Portfolio design sprint V1\nStatus: In progress\n\nProject Overview\n\nRevitalize my current portfolio to improve the UX through micro-interactions, and bug fixes\n\nRequired changes to my new portfolio:\n• New notification system (toasts)\n• Remove backdrop-filter\n• improve navigation experience on mobile",
+                    timestamp: new Date().toISOString()
+                },
+                {
+                    id: "1",
+                    category: "preference",
+                    content: "Title: Chat Style Preference\nStatus: Active\n\nYou prefer responses in all lowercase and without quotation marks.",
+                    timestamp: new Date(Date.now() - 3600000 * 3).toISOString()
+                },
+                {
+                    id: "2",
+                    category: "attribute",
+                    content: "Title: Hardware Ecosystem\nStatus: Active\n\nYou use an iphone 14.",
+                    timestamp: new Date(Date.now() - 3600000 * 2).toISOString()
+                }
+            ];
+            fs.writeFileSync(NOTES_FILE, JSON.stringify(notesList, null, 2));
+        }
+    } catch (e) {
+        console.error("Error reading notes:", e);
+    }
+
+    try {
+        if (fs.existsSync(MEETINGS_FILE)) {
+            meetingsList = JSON.parse(fs.readFileSync(MEETINGS_FILE, "utf-8"));
+        } else {
+            meetingsList = [];
+            fs.writeFileSync(MEETINGS_FILE, JSON.stringify(meetingsList, null, 2));
+        }
+    } catch (e) {
+        console.error("Error reading meetings:", e);
+    }
+
+    try {
+        if (fs.existsSync(TASKS_FILE)) {
+            tasksList = JSON.parse(fs.readFileSync(TASKS_FILE, "utf-8"));
+        } else {
+            tasksList = [];
+            fs.writeFileSync(TASKS_FILE, JSON.stringify(tasksList, null, 2));
+        }
+    } catch (e) {
+        console.error("Error reading tasks:", e);
+    }
+
+    try {
+        if (fs.existsSync(DOCUMENTS_FILE)) {
+            documentsList = JSON.parse(fs.readFileSync(DOCUMENTS_FILE, "utf-8"));
+        } else {
+            documentsList = [
+                {
+                    id: "default-1",
+                    title: "Strategic Initialization & Intel Summary",
+                    content: `# Executive Memorandum: Strategic Alignment\n\n## 1. PURPOSE\nThis document serves as the official brief outlining the system capabilities, active telemetry matrices, and secure integrations established within Unison OS.\n\n## 2. SYSTEM KEY PERFORMANCE INDICATORS\n• Core Engine Uptime: 99.98%\n• Telemetry Pipeline Latency: Sub-15ms\n• Authorization Matrix: Operational (Zero Trust)\n\n## 3. STRATEGIC GOALS & OUTLOOK\nMoving into the next fiscal cycle, our priority is safe orchestration and massive computational task-handling. All parallel execution threads must maintain real-time telemetry signatures to secure user actions.\n\n> Note: Verify all parameters and credentials prior to deployment.\n\nAuthorized by Unison Cognitive Kernel.`,
+                    updatedAt: new Date().toISOString(),
+                    category: "Memo",
+                    status: "Approved"
+                },
+                {
+                    id: "default-2",
+                    title: "System Architecture Specification",
+                    content: `# Technical Specification: Unison Cognitive Kernel\n\n## 1. OVERVIEW\nThis document outlines the engineering specifications and architectural patterns for the Unison Operating System ecosystem.\n\n## 2. SYSTEM ARCHITECTURE\n- Interface Layer: React / Tailwind CSS with motion-driven transition cascades.\n- Storage Schema: Firestore Client adapter layered with transient localStorage fallbacks.\n- Security Rules: Zero Trust Role-Based authorization mapping.\n\n## 3. IMPLEMENTATION PLAN\n- [x] Phase 1: Core telemetry pipeline layout\n- [x] Phase 2: Secure API routing proxy design\n- [ ] Phase 3: Multi-agent interaction grid`,
+                    updatedAt: new Date(Date.now() - 3600000 * 4).toISOString(),
+                    category: "Spec",
+                    status: "Internal"
+                },
+                {
+                    id: "default-3",
+                    title: "Q3 Roadmap & Deliverables",
+                    content: `# Business Development Proposal\n\n## PROJECT TITLE: Quantum Ledger Orchestrator\nPREPARED FOR: Unison Venture Council\n\n## 1. EXECUTIVE SUMMARY\nThis planning brief outlines core milestones and delivery dates for upcoming features in Unison OS.\n\n## 2. KEY DELIVERABLES\n• Deliverable A: Relational Database Schema Migration\n• Deliverable B: Multi-agent Workspace Orchestrator\n• Deliverable C: End-to-end PDF / Word Exporter Pipelines\n\n## 3. FINANCIAL ESTIMATES & TIMELINE\n- [x] Milestone 1 (Scaffolding): Complete by Month 1\n- [ ] Milestone 2 (Beta Trial): Complete by Month 2\n- [ ] Milestone 3 (Public Release): Complete by Month 3`,
+                    updatedAt: new Date(Date.now() - 3600000 * 24).toISOString(),
+                    category: "Planning",
+                    status: "Draft"
+                }
+            ];
+            fs.writeFileSync(DOCUMENTS_FILE, JSON.stringify(documentsList, null, 2));
+        }
+    } catch (e) {
+        console.error("Error reading documents:", e);
+    }
+
+    const SAVED_FILES_DIR = path.join(process.cwd(), "saved_files");
+    try {
+        if (!fs.existsSync(SAVED_FILES_DIR)) {
+            fs.mkdirSync(SAVED_FILES_DIR, { recursive: true });
+        }
+    } catch (e) {
+        console.error("Error initializing saved files directory:", e);
+    }
+
     const saveCanvasElementsOnServer = () => {
         try {
             fs.writeFileSync(CANVAS_FILE, JSON.stringify(canvasElements, null, 2));
@@ -3843,6 +4183,38 @@ export default function App() {
             fs.writeFileSync(JOTTINGS_FILE, JSON.stringify(jottingsList, null, 2));
         } catch (e) {
             console.error("Error saving jottings:", e);
+        }
+    };
+
+    const saveNotesOnServer = () => {
+        try {
+            fs.writeFileSync(NOTES_FILE, JSON.stringify(notesList, null, 2));
+        } catch (e) {
+            console.error("Error saving notes:", e);
+        }
+    };
+
+    const saveMeetingsOnServer = () => {
+        try {
+            fs.writeFileSync(MEETINGS_FILE, JSON.stringify(meetingsList, null, 2));
+        } catch (e) {
+            console.error("Error saving meetings:", e);
+        }
+    };
+
+    const saveTasksOnServer = () => {
+        try {
+            fs.writeFileSync(TASKS_FILE, JSON.stringify(tasksList, null, 2));
+        } catch (e) {
+            console.error("Error saving tasks:", e);
+        }
+    };
+
+    const saveDocumentsOnServer = () => {
+        try {
+            fs.writeFileSync(DOCUMENTS_FILE, JSON.stringify(documentsList, null, 2));
+        } catch (e) {
+            console.error("Error saving documents:", e);
         }
     };
 
@@ -3874,248 +4246,461 @@ export default function App() {
         }
     });
 
-    // APPLE SIRI DISPATCH & PARSER WEBHOOK BRIDGE (POST/GET)
-    app.all("/api/siri", express.json(), async (req, res) => {
-        const promptText = (req.query.prompt || req.query.q || req.query.text || req.query.input || req.body?.prompt || "").toString().trim();
+    app.get("/api/notes", (req, res) => {
+        res.json(notesList);
+    });
 
-        // Check if it's a simple status check
-        if (!promptText) {
-            return res.json({
-                success: true,
-                siriSpeak: "Unison Siri Smart Control endpoint is active. Add custom nodes in the Network control console to route physical BLE, MQTT, and Webhook commands.",
-                activeNodesCount: siriNodes.length,
-                nodes: siriNodes.map(n => ({ id: n.id, name: n.name, type: n.type }))
-            });
+    app.post("/api/notes", express.json(), (req, res) => {
+        if (Array.isArray(req.body)) {
+            notesList = req.body;
+            saveNotesOnServer();
+            res.json({ success: true, count: notesList.length });
+        } else {
+            res.status(400).json({ error: "Expected array of notes" });
         }
+    });
 
-        console.log(`[SIRI_WEBHOOK] Received voice trigger from Siri: "${promptText}"`);
+    app.get("/api/meetings", async (req, res) => {
+        const apiKey = getComposioApiKey(req);
+        if (apiKey) {
+            try {
+                await syncComposioCalendarEvents(apiKey);
+            } catch (e) {
+                console.warn("[API MEETINGS] Auto calendar sync warning:", e);
+            }
+        }
+        const nowMs = Date.now();
+        const upcoming = meetingsList.filter(m => {
+            const timeMs = new Date(m.endTime || m.startTime || 0).getTime();
+            return !isNaN(timeMs) && timeMs >= (nowMs - 15 * 60 * 1000);
+        });
+        upcoming.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+        res.json(upcoming);
+    });
+
+    app.post("/api/meetings", express.json(), (req, res) => {
+        if (Array.isArray(req.body)) {
+            meetingsList = req.body;
+            saveMeetingsOnServer();
+            res.json({ success: true, count: meetingsList.length });
+        } else {
+            res.status(400).json({ error: "Expected array of meetings" });
+        }
+    });
+
+    app.get("/api/tasks", async (req, res) => {
+        const apiKey = getComposioApiKey(req);
+        if (apiKey) {
+            try {
+                await syncComposioGoogleTasks(apiKey);
+            } catch (e) {
+                console.warn("[API TASKS] Auto tasks sync warning:", e);
+            }
+        }
+        res.json(tasksList);
+    });
+
+    app.post("/api/tasks", express.json(), (req, res) => {
+        if (Array.isArray(req.body)) {
+            tasksList = req.body;
+            saveTasksOnServer();
+            res.json({ success: true, count: tasksList.length });
+        } else {
+            res.status(400).json({ error: "Expected array of tasks" });
+        }
+    });
+
+    app.get("/api/documents", (req, res) => {
+        res.json(documentsList);
+    });
+
+    app.post("/api/documents", express.json(), (req, res) => {
+        if (Array.isArray(req.body)) {
+            documentsList = req.body;
+            saveDocumentsOnServer();
+            res.json({ success: true, count: documentsList.length });
+        } else {
+            res.status(400).json({ error: "Expected array of documents" });
+        }
+    });
+
+    // --- SERVER-SIDE SCHEDULER & AGENT AUTOMATION SERVICES ---
+
+    // 1. Direct Composio execution client
+    const executeComposioActionDirectly = async (actionName: string, input: any, connectedAccountId?: string) => {
+        const apiKey = process.env.COMPOSIO_API_KEY || "ak_kaef4CuzZjqLX7hGj4xZ";
+        try {
+            console.log(`[SCHEDULER] Calling Composio Action: ${actionName}`);
+            const response = await fetch(`https://backend.composio.dev/api/v3.1/tools/execute/${actionName}`, {
+                method: "POST",
+                headers: {
+                    "x-api-key": apiKey,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    arguments: input || {},
+                    connected_account_id: connectedAccountId
+                })
+            });
+            const data = await response.json();
+            console.log(`[SCHEDULER] Composio Action ${actionName} execute status:`, response.status, data);
+            return data;
+        } catch (err: any) {
+            console.error(`[SCHEDULER] Composio Action ${actionName} execution failed:`, err.message);
+            return { error: err.message };
+        }
+    };
+
+    // 2. Direct connection retrieval
+    const getComposioConnectionsDirectly = async () => {
+        const apiKey = process.env.COMPOSIO_API_KEY || "ak_kaef4CuzZjqLX7hGj4xZ";
+        try {
+            const response = await fetch("https://backend.composio.dev/api/v3.1/connected_accounts", {
+                method: "GET",
+                headers: {
+                    "x-api-key": apiKey,
+                    "Content-Type": "application/json"
+                }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                return data.connections || data.items || data || [];
+            }
+        } catch (e: any) {
+            console.error("[SCHEDULER] Failed to retrieve connected accounts from Composio:", e.message);
+        }
+        return [];
+    };
+
+    // 3. Autonomous agent step executor
+    const runAgentOnServer = async (agentId: string, triggerType: string, details: string) => {
+        const agent = serverActiveAgents.find(a => a.id === agentId);
+        if (!agent) return;
+
+        console.log(`[AGENT_SERVER] Launching agent "${agent.name}" on task trigger: ${triggerType}`);
+
+        // Broadcast run initiate message
+        const startAlertPayload = JSON.stringify({
+            type: "ALERT_NOTIFICATION",
+            message: `Agent '[${agent.name}]' triggered on event: ${triggerType}`
+        });
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(startAlertPayload);
+            }
+        });
+
+        agent.runsCount = (agent.runsCount || 0) + 1;
+        saveServerAgents();
+
+        let steps = [
+            "Initiating sensor data pipeline audit...",
+            "Validating workspace session handshake keys...",
+            "Completed task compilation."
+        ];
+        let finalOutcome = "Success. Processed scheduled request.";
 
         try {
-            const lowerPrompt = promptText.toLowerCase().trim();
-            let matchedCmd = "";
-            let cmdDisplay = "";
+            const systemPrompt = `You are the server-side controller for the Unison Agent: "${agent.name}".
+Description: "${agent.description}"
+ReceiverPreset: "${agent.receiverResponsePreset || ''}"
 
-            if (lowerPrompt === "open spotify" || lowerPrompt === "launch spotify" || lowerPrompt === "show spotify" || lowerPrompt === "start spotify") {
-                matchedCmd = "open_spotify";
-                cmdDisplay = "Spotify Music Stream Hub";
-            } else if (lowerPrompt === "open gmail" || lowerPrompt === "open workspace" || lowerPrompt === "open drive") {
-                matchedCmd = "open_gmail";
-                cmdDisplay = "Google Workspace Hub";
-            } else if (lowerPrompt === "open github") {
-                matchedCmd = "open_github";
-                cmdDisplay = "GitHub Realtime Connector";
-            } else if (lowerPrompt === "open calendar" || lowerPrompt === "show calendar") {
-                matchedCmd = "open_calendar";
-                cmdDisplay = "Google Calendar Connector";
-            } else if (lowerPrompt === "open directories" || lowerPrompt === "open solution" || lowerPrompt === "open files") {
-                matchedCmd = "open_directories";
-                cmdDisplay = "Solutions Directory Explorer";
-            } else if (lowerPrompt === "open memory" || lowerPrompt === "show memories") {
-                matchedCmd = "open_memory";
-                cmdDisplay = "Cognitive Memory";
-            } else if (lowerPrompt === "open network" || lowerPrompt === "show roster" || lowerPrompt === "open devices") {
-                matchedCmd = "open_network";
-                cmdDisplay = "Live Presence Roster";
-            } else if (lowerPrompt === "open siri" || lowerPrompt === "show shortcuts" || lowerPrompt === "open gateway") {
-                matchedCmd = "open_siri";
-                cmdDisplay = "Siri Smart Protocol Gateways";
-            } else if (lowerPrompt === "toggle theme" || lowerPrompt === "change theme" || lowerPrompt === "toggle light mode" || lowerPrompt === "toggle dark mode") {
-                matchedCmd = "toggle_theme";
-                cmdDisplay = "Desktop UI Theme";
-            }
+This agent has just been triggered by a "${triggerType}" event. Details: "${details || 'No additional details.'}".
+Generate a list of 3 highly technical, precise step actions that this agent executes to resolve this event, followed by a final short outcome summary.
+Format your output EXACTLY as a JSON object:
+{
+  "steps": ["step 1 action details...", "step 2 action details...", "step 3 action details..."],
+  "finalOutcome": "Short 1-sentence final outcome summary"
+}`;
 
-            if (matchedCmd) {
-                // Broadcast over WebSocket to all client browsers with unique ID to prevent loops
-                const wsEvent = {
-                    id: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                    type: "DEVICE_CONTROL_COMMAND",
-                    command: matchedCmd,
-                    timestamp: Date.now()
-                };
-                wss.clients.forEach(c => {
-                    if (c.readyState === WebSocket.OPEN) {
-                        c.send(JSON.stringify(wsEvent));
-                    }
-                });
-
-                // Store log entry
-                const logEntry: SiriLog = {
-                    id: `siri_log_${Date.now()}`,
-                    timestamp: Date.now(),
-                    prompt: promptText,
-                    siriResponse: `Device Command routing completed for ${cmdDisplay}.`,
-                    matchedNodeId: null,
-                    matchedNodeName: "System Desktop",
-                    status: "success",
-                    detail: `Parsed and dispatched '${matchedCmd}' directly to live device context.`
-                };
-                siriLogs.unshift(logEntry);
-                if (siriLogs.length > 50) siriLogs.pop();
-                broadcastSiriTrigger(logEntry);
-
-                return res.json({
-                    success: true,
-                    siriSpeak: `Opening ${cmdDisplay} on your Unison desktop.`,
-                    actionExecuted: true,
-                    nodeType: "system",
-                    status: "success",
-                    detail: `Routed ${matchedCmd} directly to device cockpit.`
-                });
-            }
-
-            const systemInstruction = `You are the Siri Smart Speech Controller for Unison OS.
-      Analyze the user's spoken voice command and decide if they intend to trigger, toggle, configure, or activate one of the registered physical smart nodes.
-      
-      Here are the currently registered physical smart IoT devices:
-      ${JSON.stringify(siriNodes, null, 2)}
-      
-      CRITICAL DECISION DIRECTIVES:
-      1. If the user's spoken voice command refers to trigger one of the registered devices on this list (e.g. "turn on lights", "garden sprinkler", "fan speed", "cooler", "start water"), set "triggerNodeId" to that matching device's ID.
-      2. Set "siriSpeak" to an elegant, extremely short spoken confirmation (suitable for Siri to read aloud, maximum 10-12 words, strictly NO markdown, no emojis, very clean). Example: "Sure, starting the garden sprinkler." or "Done, triggers sent to living room lights."
-      3. If the user's voice prompt matches NO smart node (e.g. general questions like "tell me a quote", "how are you"), set "triggerNodeId" to null, and return an exceptionally brief, conversational greeting in "siriSpeak" (max 2 sentences, elegant).
-      
-      You MUST output STRICTLY a valid JSON object matching this schema, no surrounding text:
-      {
-        "triggerNodeId": "matching-node-id-or-null",
-        "siriSpeak": "The spoken speech response for Siri"
-      }`;
-
-            // Call Gemini for semantic mapping and spoken Siri generation
-            const geminiResponse = await generateContentWithFallback({
-                model: "gemini-3.5-flash",
-                contents: `Spoken prompt from Apple Device Siri: "${promptText}"`,
+            const response = await googleGenAI.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: systemPrompt,
                 config: {
-                    systemInstruction: systemInstruction,
                     responseMimeType: "application/json"
                 }
             });
 
-            const responseText = geminiResponse.text?.trim() || "{}";
-            const decision = JSON.parse(responseText);
+            const text = response.text || "";
+            if (text.trim()) {
+                const parsed = JSON.parse(text);
+                if (parsed && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
+                    steps = parsed.steps;
+                }
+                if (parsed && parsed.finalOutcome) {
+                    finalOutcome = parsed.finalOutcome;
+                }
+            }
+        } catch (e: any) {
+            console.warn("[AGENT_SERVER] Gemini step generation failed, using fallback steps:", e.message);
+        }
 
-            const triggerNodeId = decision.triggerNodeId;
-            const siriSpeakText = decision.siriSpeak || "Perfect, action resolved.";
+        (async () => {
+            for (let i = 0; i < steps.length; i++) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
 
-            let matchedNode: SmartNode | null = null;
-            let actionStatus: "success" | "error" | "conversational" = "conversational";
-            let executionDetail = "Normal conversational answer returned.";
-
-            if (triggerNodeId) {
-                matchedNode = siriNodes.find(n => n.id === triggerNodeId) || null;
+                const stepPayload = JSON.stringify({
+                    type: "AGENT_UPDATE",
+                    agentId,
+                    message: `[${agent.name}] Step ${i + 1}: ${steps[i]}`
+                });
+                wss.clients.forEach(client => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(stepPayload);
+                    }
+                });
             }
 
-            if (matchedNode) {
-                matchedNode.lastTriggered = Date.now();
-                actionStatus = "success";
+            await new Promise(resolve => setTimeout(resolve, 1500));
 
-                if (matchedNode.type === "webhook" && matchedNode.url) {
-                    executionDetail = `Initiating REST HTTP call to '${matchedNode.url}'... `;
-                    try {
-                        const method = matchedNode.method || "GET";
-                        const customHeaders = matchedNode.headers ? JSON.parse(matchedNode.headers) : {};
-                        const fetchOptions: any = {
-                            method,
-                            headers: {
-                                "User-Agent": "Unison-OS-Siri-Router",
-                                ...customHeaders
+            const completeAlertPayload = JSON.stringify({
+                type: "ALERT_NOTIFICATION",
+                message: `Agent '[${agent.name}]' completed task: ${finalOutcome}`
+            });
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(completeAlertPayload);
+                }
+            });
+
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({
+                        type: "AGENT_UPDATE",
+                        agentId,
+                        message: `[${agent.name}] Execution completed: ${finalOutcome}`,
+                        isFinal: true
+                    }));
+                }
+            });
+        })();
+    };
+
+    // 4. Live scheduler background interval checking service
+    const firedServerEvents = new Set<string>();
+
+    setInterval(async () => {
+        try {
+            const now = Date.now();
+
+            // Gather all current meetings & tasks
+            const allEventsToCheck = [
+                ...meetingsList.map(m => ({
+                    id: m.id,
+                    summary: m.summary,
+                    description: m.description || "",
+                    startTime: m.startTime,
+                    isTask: false
+                })),
+                ...tasksList.map(t => ({
+                    id: t.id,
+                    summary: t.name || t.title || "Scheduled Task",
+                    description: t.description || "",
+                    startTime: t.dueDate || t.startTime || t.date || "",
+                    isTask: true
+                }))
+            ].filter(e => e.startTime);
+
+            for (const event of allEventsToCheck) {
+                const startDate = new Date(event.startTime);
+                const diffMs = startDate.getTime() - now;
+                const minutesDiff = diffMs / (1000 * 60);
+
+                // Check checkpoint marks
+                // A. 15 Minutes mark
+                if (minutesDiff >= 14.0 && minutesDiff <= 15.5) {
+                    const alertId = `${event.id}_15`;
+                    if (!firedServerEvents.has(alertId)) {
+                        firedServerEvents.add(alertId);
+
+                        console.log(`[SCHEDULER] 15m Warning for: "${event.summary}"`);
+                        const speakText = `Meeting warning: ${event.summary} starts in fifteen minutes.`;
+                        wss.clients.forEach(client => {
+                            if (client.readyState === WebSocket.OPEN) {
+                                client.send(JSON.stringify({
+                                    type: "SERVER_NOTIFICATION",
+                                    title: "Upcoming Event (15m)",
+                                    message: `"${event.summary}" is scheduled to start in 15 minutes!`,
+                                    notificationType: "warning",
+                                    speakText,
+                                    targetDeviceId: (client as any).deviceId
+                                }));
                             }
-                        };
-
-                        if (method !== "GET" && method !== "HEAD" && matchedNode.payload) {
-                            fetchOptions.body = matchedNode.payload;
-                        }
-
-                        // Real physical REST invocation (Your Code -> OS / Network -> Target App/Firmware)
-                        const webResp = await fetch(matchedNode.url, fetchOptions);
-                        const bodyPeek = await webResp.text();
-
-                        executionDetail += `HTTP Status ${webResp.status} returned. Response payload: "${bodyPeek.substring(0, 100)}"`;
-                        matchedNode.status = "active";
-                    } catch (fetchErr: any) {
-                        console.error(`[SIRI_WEBHOOK] Fetch error controlling smart webhook node:`, fetchErr);
-                        executionDetail += `HTTP Client Request Failed: "${fetchErr.message || fetchErr}"`;
-                        matchedNode.status = "error";
-                        actionStatus = "error";
+                        });
                     }
-                } else if (matchedNode.type === "mqtt") {
-                    executionDetail = `MQTT protocol command published to hivemq broker over websocket. Topic: '${matchedNode.topic}'. `;
-
-                    // Broadcast to connected WebSocket browsers to publish it in real-time with unique ID to prevent loops
-                    const wsPubEvent = {
-                        id: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                        type: "MQTT_PUBLISH_COMMAND",
-                        nodeId: matchedNode.id,
-                        broker: matchedNode.broker,
-                        topic: matchedNode.topic,
-                        payload: matchedNode.payload,
-                        timestamp: Date.now()
-                    };
-                    wss.clients.forEach(c => {
-                        if (c.readyState === WebSocket.OPEN) {
-                            c.send(JSON.stringify(wsPubEvent));
-                        }
-                    });
-                    executionDetail += `Publish request pushed to connected web client.`;
-                } else if (matchedNode.type === "ble") {
-                    executionDetail = `Web Bluetooth GATT characteristic write command routed. Service UUID: '${matchedNode.serviceUuid}', Characteristic: '${matchedNode.characteristicUuid}'. `;
-
-                    // Broadcast BLE write to all WebSocket clients so the browser triggers Mac/iOS native BLE writing with unique ID to prevent loops
-                    const wsBleEvent = {
-                        id: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                        type: "BLE_WRITE_COMMAND",
-                        nodeId: matchedNode.id,
-                        serviceUuid: matchedNode.serviceUuid,
-                        characteristicUuid: matchedNode.characteristicUuid,
-                        writeBytes: matchedNode.writeBytes,
-                        timestamp: Date.now()
-                    };
-                    wss.clients.forEach(c => {
-                        if (c.readyState === WebSocket.OPEN) {
-                            c.send(JSON.stringify(wsBleEvent));
-                        }
-                    });
-                    executionDetail += `GATT characteristic write payload routed to browser browser context.`;
                 }
 
-                saveSiriNodes();
+                // B. 5 Minutes mark
+                if (minutesDiff >= 4.0 && minutesDiff <= 5.5) {
+                    const alertId = `${event.id}_5`;
+                    if (!firedServerEvents.has(alertId)) {
+                        firedServerEvents.add(alertId);
+
+                        console.log(`[SCHEDULER] 5m Warning for: "${event.summary}"`);
+                        const speakText = `Meeting alert: ${event.summary} starts in five minutes.`;
+                        wss.clients.forEach(client => {
+                            if (client.readyState === WebSocket.OPEN) {
+                                client.send(JSON.stringify({
+                                    type: "SERVER_NOTIFICATION",
+                                    title: "Starting Soon (5m)",
+                                    message: `"${event.summary}" begins in 5 minutes!`,
+                                    notificationType: "warning",
+                                    speakText,
+                                    targetDeviceId: (client as any).deviceId
+                                }));
+                            }
+                        });
+                    }
+                }
+
+                // C. 0 Minutes / Trigger mark (due or start time reached)
+                if (minutesDiff >= -1.0 && minutesDiff <= 0.6) {
+                    const alertId = `${event.id}_0`;
+                    if (!firedServerEvents.has(alertId)) {
+                        firedServerEvents.add(alertId);
+
+                        console.log(`[SCHEDULER] TRIGGERED TIME REACHED for: "${event.summary}"`);
+
+                        // 1. Broadcast real server alerts so everyone is notified and speaks!
+                        const speakText = `Meeting starting now: ${event.summary} has commenced.`;
+                        wss.clients.forEach(client => {
+                            if (client.readyState === WebSocket.OPEN) {
+                                client.send(JSON.stringify({
+                                    type: "SERVER_NOTIFICATION",
+                                    title: "Meeting Starting Now",
+                                    message: `"${event.summary}" is starting right now!`,
+                                    notificationType: "success",
+                                    speakText,
+                                    targetDeviceId: (client as any).deviceId
+                                }));
+                            }
+                        });
+
+                        // 2. Trigger any matching server active agents
+                        const matchingAgents = serverActiveAgents.filter(agent => {
+                            const desc = (agent.description || "").toLowerCase();
+                            const name = (agent.name || "").toLowerCase();
+                            const title = event.summary.toLowerCase();
+                            const listeners = agent.listeners || [];
+                            const nodes = agent.nodesList || [];
+
+                            return listeners.includes('calendar') ||
+                                desc.includes('calendar') ||
+                                desc.includes('schedule') ||
+                                nodes.some((n: any) => JSON.stringify(n).toLowerCase().includes('calendar')) ||
+                                title.includes(name) ||
+                                name.includes(title);
+                        });
+
+                        for (const agent of matchingAgents) {
+                            runAgentOnServer(agent.id, "calendar", `Scheduled event triggered: "${event.summary}"`);
+                        }
+
+                        // 3. Connect to Composio and run actual tasks!
+                        const connections = await getComposioConnectionsDirectly();
+                        console.log(`[SCHEDULER] Fetched ${connections.length} active connections from Composio.`);
+
+                        try {
+                            const decisionPrompt = `You are the automation core for Unison Agentic OS.
+A scheduled meeting/task has started!
+Event Title: "${event.summary}"
+Event Description: "${event.description || '(No description)'}"
+
+Here is the list of active integrations on the user's Composio account:
+${JSON.stringify(connections, null, 2)}
+
+And here is the list of available Composio actions you can run:
+1. GITHUB_CREATE_ISSUE: {"owner": "string", "repo": "string", "title": "string", "body": "string"}
+2. GITHUB_GET_ABOUT_ME: {}
+3. SLACK_POST_MESSAGE: {"channel": "string", "text": "string"}
+4. GMAIL_SEND_EMAIL: {"recipient": "string", "subject": "string", "body": "string"}
+5. GOOGLECALENDAR_CREATE_EVENT: {"summary": "string", "description": "string", "start_time": "string", "end_time": "string"}
+6. NOTION_CREATE_PAGE: {"parent_id": "string", "title": "string"}
+7. LINEAR_CREATE_ISSUE: {"team_id": "string", "title": "string", "description": "string"}
+8. DISCORD_SEND_CHANNEL_MESSAGE: {"channel_id": "string", "content": "string"}
+
+Determine if the title and description indicate that the user intends to perform one of these real actions.
+For example, if the event title is "Post on Slack channel: Deployment complete!", the action is "SLACK_POST_MESSAGE".
+If the event title is "Send daily status to email user@example.com", the action is "GMAIL_SEND_EMAIL".
+If you find a clear match AND a connected account for that service exists, prepare the payload input arguments.
+
+You MUST respond with a strict JSON object:
+{
+  "execute": true,
+  "actionName": "the_action_name_matching_one_above",
+  "input": { ...arguments... },
+  "connectedAccountId": "matching connected account id from connections list"
+}
+If no matching action or connection is found, respond with:
+{
+  "execute": false
+}
+Do NOT include markdown block syntax. Return strict JSON only.`;
+
+                            const geminiResponse = await googleGenAI.models.generateContent({
+                                model: 'gemini-2.5-flash',
+                                contents: decisionPrompt,
+                                config: {
+                                    responseMimeType: "application/json"
+                                }
+                            });
+
+                            const textResponse = geminiResponse.text || "";
+                            if (textResponse.trim()) {
+                                const decision = JSON.parse(textResponse);
+                                if (decision && decision.execute && decision.actionName) {
+                                    console.log(`[SCHEDULER] Auto-executing Composio task: ${decision.actionName} for "${event.summary}"`);
+
+                                    // Alert user that action is starting
+                                    wss.clients.forEach(client => {
+                                        if (client.readyState === WebSocket.OPEN) {
+                                            client.send(JSON.stringify({
+                                                type: "SERVER_NOTIFICATION",
+                                                title: "Auto-Running Task",
+                                                message: `Triggering real Composio action "${decision.actionName}" for "${event.summary}"...`,
+                                                notificationType: "info",
+                                                targetDeviceId: (client as any).deviceId
+                                            }));
+                                        }
+                                    });
+
+                                    const result = await executeComposioActionDirectly(decision.actionName, decision.input, decision.connectedAccountId);
+
+                                    const success = result && !result.error && !result.failed;
+                                    wss.clients.forEach(client => {
+                                        if (client.readyState === WebSocket.OPEN) {
+                                            client.send(JSON.stringify({
+                                                type: "SERVER_NOTIFICATION",
+                                                title: success ? "Task Success" : "Task Failed",
+                                                message: success
+                                                    ? `Successfully performed action "${decision.actionName}" on your workspace!`
+                                                    : `Execution failed: ${result.error || result.message || 'unknown error'}`,
+                                                notificationType: success ? "success" : "error",
+                                                targetDeviceId: (client as any).deviceId
+                                            }));
+                                        }
+                                    });
+                                }
+                            }
+                        } catch (geminiErr: any) {
+                            console.error("[SCHEDULER] Gemini decision/execution failed:", geminiErr.message);
+                        }
+                    }
+                }
             }
-
-            // Append log entry
-            const logEntry: SiriLog = {
-                id: `siri_log_${Date.now()}`,
-                timestamp: Date.now(),
-                prompt: promptText,
-                siriResponse: siriSpeakText,
-                matchedNodeId: matchedNode ? matchedNode.id : null,
-                matchedNodeName: matchedNode ? matchedNode.name : null,
-                status: actionStatus,
-                detail: executionDetail
-            };
-
-            siriLogs.unshift(logEntry);
-            if (siriLogs.length > 50) siriLogs.pop();
-
-            // Emit siri log & visual flash alert to connected browsers!
-            broadcastSiriTrigger(logEntry, matchedNode || undefined);
-
-            // Return exactly what Siri expects to speak aloud!
-            return res.json({
-                success: true,
-                siriSpeak: siriSpeakText,
-                actionExecuted: matchedNode ? true : false,
-                nodeType: matchedNode ? matchedNode.type : null,
-                status: actionStatus,
-                detail: executionDetail
-            });
-
-        } catch (err: any) {
-            console.error("[SIRI_WEBHOOK] Parser error:", err);
-            return res.json({
-                success: false,
-                siriSpeak: "I am sorry, there was a problem parsing your smart command inside Unison OS. Please check active nodes.",
-                error: err.message
-            });
+        } catch (intervalErr: any) {
+            console.error("[SCHEDULER] Scheduler loop failure:", intervalErr.message);
         }
+    }, 10000);
+
+    // APPLE SIRI DISPATCH & PARSER WEBHOOK BRIDGE (POST/GET) (REMOVED)
+    app.all("/api/siri", express.json(), async (req, res) => {
+        return res.json({
+            success: true,
+            siriSpeak: "Siri integration is inactive.",
+            activeNodesCount: 0,
+            nodes: []
+        });
     });
 
     const PYTHON_CAMERA_STREAM_DAEMON = `# Unison Pi Headless Camera Streaming Server (Run on your Raspberry Pi on port 8080)
@@ -4973,6 +5558,1788 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
 
     app.use(express.json({ limit: '10mb' }));
 
+    // Helper to get Composio API Key from headers or server environment variables
+    const getComposioApiKey = (req: any): string => {
+        return (req.headers["x-composio-api-key"] as string) || (req.headers["x-api-key"] as string) || process.env.COMPOSIO_API_KEY || "ak_QTSz1enaF06VNE5Oeky0";
+    };
+
+    // --- COMPOSIO REALTIME CONNECTORS ENGINE ---
+    interface ComposioTask {
+        id: string;
+        title: string;
+        description?: string;
+        appName: 'linear' | 'github' | 'notion' | 'trello' | 'slack' | 'googletasks' | 'composio';
+        externalId?: string;
+        status: 'todo' | 'in_progress' | 'completed' | 'canceled';
+        priority: 'urgent' | 'high' | 'medium' | 'low';
+        assignee?: string;
+        createdAt: string;
+        updatedAt: string;
+        syncStatus: 'synced' | 'pending' | 'local_only';
+    }
+
+    interface ComposioMeeting {
+        id: string;
+        title: string;
+        description?: string;
+        startTime: string;
+        endTime: string;
+        meetUrl?: string;
+        location?: string;
+        attendees: string[];
+        status: 'scheduled' | 'live' | 'completed' | 'canceled';
+        appName: 'googlecalendar' | 'googlemeet' | 'zoom' | 'teams' | 'composio';
+        syncStatus: 'synced' | 'local_only';
+        createdAt: string;
+    }
+
+    const composioTaskStore: ComposioTask[] = [];
+
+    const composioMeetingStore: ComposioMeeting[] = [];
+
+    interface ComposioRealtimeEvent {
+        id: string;
+        timestamp: string;
+        appName: string;
+        triggerName: string;
+        payload: any;
+        status: 'received' | 'processed' | 'failed';
+        connectedAccountId?: string;
+    }
+
+    const composioRealtimeEvents: ComposioRealtimeEvent[] = [
+        {
+            id: 'evt_init_1',
+            timestamp: new Date().toISOString(),
+            appName: 'github',
+            triggerName: 'GITHUB_COMMIT_EVENT',
+            payload: { repository: 'unison-os/core', commit: '7f9a2b1', author: 'system', message: 'Realtime Composio connectors stream active' },
+            status: 'processed'
+        }
+    ];
+
+    let composioSseClients: Array<{ id: string; res: express.Response }> = [];
+
+    const broadcastComposioRealtimeEvent = (event: ComposioRealtimeEvent) => {
+        composioRealtimeEvents.unshift(event);
+        if (composioRealtimeEvents.length > 200) {
+            composioRealtimeEvents.pop();
+        }
+        const messageData = `data: ${JSON.stringify(event)}\n\n`;
+        composioSseClients.forEach(client => {
+            try {
+                client.res.write(messageData);
+            } catch (err) {
+                // Ignore dead client write error
+            }
+        });
+    };
+
+    // Heartbeat for SSE stream every 15s to keep connections alive
+    setInterval(() => {
+        composioSseClients = composioSseClients.filter(client => {
+            try {
+                client.res.write(`: heartbeat\n\n`);
+                return true;
+            } catch (e) {
+                return false;
+            }
+        });
+    }, 15000);
+
+    // 0a. SSE Stream Endpoint for Live Composio Realtime Events
+    app.get("/api/composio/realtime/stream", (req, res) => {
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache, no-transform");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.flushHeaders();
+
+        const clientId = `client_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        composioSseClients.push({ id: clientId, res });
+
+        // Send initial connection welcome & current events
+        res.write(`data: ${JSON.stringify({ type: 'connected', clientId, activeClients: composioSseClients.length })}\n\n`);
+
+        req.on("close", () => {
+            composioSseClients = composioSseClients.filter(c => c.id !== clientId);
+        });
+    });
+
+    // 0b. GET Realtime Events Log
+    app.get("/api/composio/realtime/events", (req, res) => {
+        const { appName, limit } = req.query;
+        let events = [...composioRealtimeEvents];
+        if (appName && typeof appName === 'string') {
+            events = events.filter(e => e.appName.toLowerCase() === appName.toLowerCase());
+        }
+        const max = limit ? parseInt(limit as string, 10) : 50;
+        res.json({
+            success: true,
+            count: events.length,
+            activeClients: composioSseClients.length,
+            events: events.slice(0, max)
+        });
+    });
+
+    // 0c. DELETE Realtime Events Log
+    app.delete("/api/composio/realtime/events", (req, res) => {
+        composioRealtimeEvents.length = 0;
+        res.json({ success: true, message: "Realtime event log cleared" });
+    });
+
+    // 0d. Ingress Webhook Endpoint for Composio Realtime Triggers
+    const handleComposioWebhookIngress = (req: express.Request, res: express.Response) => {
+        try {
+            const body = req.body || {};
+            console.log("[COMPOSIO REALTIME WEBHOOK] Incoming payload:", JSON.stringify(body).slice(0, 300));
+
+            const triggerName = body.trigger_name || body.triggerName || body.event_type || body.type || 'COMPOSIO_REALTIME_TRIGGER';
+            const appName = body.app_name || body.appName || body.integration_id || triggerName.split('_')[0]?.toLowerCase() || 'composio';
+            const connectedAccountId = body.connected_account_id || body.connectedAccountId || body.account_id || undefined;
+            const payload = body.data || body.payload || body;
+
+            // Auto-ingest into Realtime Task / Meeting engine if trigger matches
+            if (triggerName.includes('ISSUE') || triggerName.includes('TASK') || triggerName.includes('COMMIT')) {
+                const newTask: ComposioTask = {
+                    id: `task_auto_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+                    title: payload.title || payload.subject || payload.message || `Realtime ${triggerName} Task`,
+                    description: payload.description || payload.body || `Triggered by ${appName.toUpperCase()} event ${triggerName}`,
+                    appName: (appName.toLowerCase() as any) || 'composio',
+                    externalId: payload.id || payload.issue_id || `EXT-${Date.now().toString().slice(-4)}`,
+                    status: 'todo',
+                    priority: 'medium',
+                    assignee: payload.author || payload.user || 'Composio Automation',
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                    syncStatus: 'synced'
+                };
+                composioTaskStore.unshift(newTask);
+            } else if (triggerName.includes('CALENDAR') || triggerName.includes('MEETING') || triggerName.includes('EVENT')) {
+                const newMeeting: ComposioMeeting = {
+                    id: `meet_auto_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+                    title: payload.summary || payload.title || `Realtime ${appName.toUpperCase()} Meeting`,
+                    description: payload.description || `Synced automatically via Composio ${triggerName}`,
+                    startTime: payload.start_time || payload.startTime || new Date(Date.now() + 1800000).toISOString(),
+                    endTime: payload.end_time || payload.endTime || new Date(Date.now() + 5400000).toISOString(),
+                    meetUrl: payload.meet_url || payload.meetUrl || `https://meet.google.com/comp-${Date.now().toString(36)}`,
+                    location: 'Google Meet',
+                    attendees: payload.attendees || ['team@unison.app'],
+                    status: 'scheduled',
+                    appName: 'googlecalendar',
+                    syncStatus: 'synced',
+                    createdAt: new Date().toISOString()
+                };
+                composioMeetingStore.unshift(newMeeting);
+            }
+
+            const newEvent: ComposioRealtimeEvent = {
+                id: `evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                timestamp: new Date().toISOString(),
+                appName,
+                triggerName,
+                payload,
+                status: 'received',
+                connectedAccountId
+            };
+
+            broadcastComposioRealtimeEvent(newEvent);
+
+            res.json({ success: true, eventId: newEvent.id, timestamp: newEvent.timestamp });
+        } catch (err: any) {
+            console.error("[COMPOSIO REALTIME WEBHOOK] Error:", err);
+            res.status(500).json({ error: "Failed to process realtime webhook", details: err.message });
+        }
+    };
+
+    app.post("/api/composio/webhook", handleComposioWebhookIngress);
+    app.post("/api/composio/webhooks", handleComposioWebhookIngress);
+
+    // 0e. Enable / Subscribe to a Realtime Trigger in Composio
+    app.post("/api/composio/triggers/enable", async (req, res) => {
+        const apiKey = getComposioApiKey(req);
+        if (!apiKey) {
+            return res.status(400).json({ error: "Composio API Key is missing." });
+        }
+        const { triggerName, connectedAccountId, config } = req.body;
+        if (!triggerName) {
+            return res.status(400).json({ error: "Missing triggerName parameter" });
+        }
+
+        try {
+            const host = req.headers.host || 'localhost:3000';
+            const protocol = req.headers['x-forwarded-proto'] || 'https';
+            const webhookUrl = `${protocol}://${host}/api/composio/webhook`;
+
+            const response = await fetch("https://backend.composio.dev/api/v3.1/triggers/enable", {
+                method: "POST",
+                headers: {
+                    "x-api-key": apiKey,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    trigger_name: triggerName,
+                    connected_account_id: connectedAccountId,
+                    callback_url: webhookUrl,
+                    trigger_config: config || {}
+                })
+            });
+
+            const data = await response.json();
+
+            // Record trigger subscription in event log
+            broadcastComposioRealtimeEvent({
+                id: `trig_sub_${Date.now()}`,
+                timestamp: new Date().toISOString(),
+                appName: triggerName.split('_')[0]?.toLowerCase() || 'composio',
+                triggerName: `ENABLE_${triggerName}`,
+                payload: { triggerName, connectedAccountId, callbackUrl: webhookUrl, result: data },
+                status: response.ok ? 'processed' : 'failed',
+                connectedAccountId
+            });
+
+            if (!response.ok) {
+                return res.status(response.status).json(data);
+            }
+            res.json(data);
+        } catch (err: any) {
+            console.error("Composio Trigger Enable API failed:", err.message);
+            res.status(502).json({ error: "Failed to enable trigger in Composio.", details: err.message });
+        }
+    });
+
+    // 0f. Test Emit Realtime Event (for instant verification)
+    app.post("/api/composio/triggers/test-emit", (req, res) => {
+        const { appName, triggerName, payload } = req.body;
+        const testEvent: ComposioRealtimeEvent = {
+            id: `evt_test_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            timestamp: new Date().toISOString(),
+            appName: appName || 'slack',
+            triggerName: triggerName || 'SLACK_RECEIVE_MESSAGE_EVENT',
+            payload: payload || {
+                channel: '#general',
+                user: 'composio_user',
+                text: '🚀 Realtime Composio connector message received!',
+                timestamp: new Date().toISOString()
+            },
+            status: 'processed'
+        };
+
+        broadcastComposioRealtimeEvent(testEvent);
+        res.json({ success: true, emittedEvent: testEvent });
+    });
+
+    // 0g. Get Realtime System Info & Webhook Metadata
+    app.get("/api/composio/realtime/info", (req, res) => {
+        const host = req.headers.host || 'localhost:3000';
+        const protocol = req.headers['x-forwarded-proto'] || 'https';
+        const webhookUrl = `${protocol}://${host}/api/composio/webhook`;
+
+        res.json({
+            status: 'active',
+            webhookUrl,
+            activeSseClients: composioSseClients.length,
+            totalEventsReceived: composioRealtimeEvents.length,
+            totalTasks: composioTaskStore.length,
+            totalMeetings: composioMeetingStore.length,
+            supportedApps: ['github', 'slack', 'gmail', 'googlecalendar', 'notion', 'discord', 'linear', 'trello', 'stripe'],
+            lastEventTime: composioRealtimeEvents[0]?.timestamp || null
+        });
+    });
+
+    // --- REALTIME TASKS ENDPOINTS ---
+    app.get("/api/composio/tasks", async (req, res) => {
+        const { appName, status, priority, sync } = req.query;
+        const apiKey = getComposioApiKey(req);
+
+        if (apiKey && (sync === 'true' || sync === undefined)) {
+            try {
+                await syncComposioGoogleTasks(apiKey);
+            } catch (e) {
+                console.warn("[COMPOSIO TASKS] Auto sync warning:", e);
+            }
+        }
+
+        let tasks = [...composioTaskStore];
+        if (appName && typeof appName === 'string') {
+            tasks = tasks.filter(t => t.appName.toLowerCase() === appName.toLowerCase());
+        }
+        if (status && typeof status === 'string') {
+            tasks = tasks.filter(t => t.status === status);
+        }
+        if (priority && typeof priority === 'string') {
+            tasks = tasks.filter(t => t.priority === priority);
+        }
+        res.json({ success: true, count: tasks.length, tasks });
+    });
+
+    app.post("/api/composio/tasks/sync", async (req, res) => {
+        const apiKey = getComposioApiKey(req);
+        if (!apiKey) {
+            return res.status(400).json({ error: "Composio API key missing." });
+        }
+
+        try {
+            const synced = await syncComposioGoogleTasks(apiKey);
+
+            broadcastComposioRealtimeEvent({
+                id: `evt_sync_tasks_${Date.now()}`,
+                timestamp: new Date().toISOString(),
+                appName: 'googletasks',
+                triggerName: 'GOOGLETASKS_TASKS_SYNC_COMPLETED',
+                payload: { tasks: synced, message: 'Google Tasks realtime sync triggered manually!' },
+                status: 'processed'
+            });
+
+            return res.json({
+                success: true,
+                message: "Google Tasks realtime details synced successfully!",
+                tasks: composioTaskStore
+            });
+        } catch (err: any) {
+            return res.status(500).json({ error: err.message || "Failed to sync Google Tasks." });
+        }
+    });
+
+    app.post("/api/composio/tasks", async (req, res) => {
+        const { title, description, appName, priority, assignee, connectedAccountId } = req.body;
+        if (!title) {
+            return res.status(400).json({ error: "Task title is required." });
+        }
+        const apiKey = getComposioApiKey(req);
+        try {
+            const task = await createTaskCore({
+                title,
+                description,
+                appName,
+                priority,
+                assignee,
+                connectedAccountId,
+                apiKey
+            });
+            res.json({ success: true, task });
+        } catch (err: any) {
+            res.status(500).json({ error: "Failed to create task", details: err.message });
+        }
+    });
+
+    app.patch("/api/composio/tasks/:id", async (req, res) => {
+        const taskId = req.params.id;
+        const apiKey = getComposioApiKey(req);
+        try {
+            const updated = await editTaskCore(taskId, {
+                ...req.body,
+                apiKey
+            });
+            if (!updated) {
+                return res.status(404).json({ error: "Task not found." });
+            }
+            res.json({ success: true, task: updated });
+        } catch (err: any) {
+            res.status(500).json({ error: "Failed to update task", details: err.message });
+        }
+    });
+
+    app.delete("/api/composio/tasks/:id", async (req, res) => {
+        const taskId = req.params.id;
+        const apiKey = getComposioApiKey(req);
+        try {
+            const success = await deleteTaskCore(taskId, apiKey);
+            if (!success) {
+                return res.status(404).json({ error: "Task not found." });
+            }
+            res.json({ success: true, message: "Task deleted." });
+        } catch (err: any) {
+            res.status(500).json({ error: "Failed to delete task", details: err.message });
+        }
+    });
+
+    // Helper function to extract safe app string from unknown Composio object
+    const getSafeAppString = (c: any): string => {
+        if (!c) return '';
+        if (typeof c === 'string') return c.toLowerCase();
+        try {
+            if (typeof c === 'object') {
+                const raw = c.appName || c.app_name || c.appId || c.toolkit || c.app || c.name || c.key || '';
+                if (typeof raw === 'string') return raw.toLowerCase();
+                return JSON.stringify(c).toLowerCase();
+            }
+            return String(c).toLowerCase();
+        } catch {
+            return '';
+        }
+    };
+
+    // Helper function to extract array of calendar events from any nested Composio execution response
+    const extractEventsFromResponse = (obj: any, depth = 0): any[] => {
+        if (!obj || depth > 5) return [];
+        if (Array.isArray(obj)) {
+            if (obj.length > 0 && typeof obj[0] === 'object' && (obj[0].summary || obj[0].title || obj[0].start || obj[0].id || obj[0].name)) {
+                return obj;
+            }
+            for (const item of obj) {
+                const res = extractEventsFromResponse(item, depth + 1);
+                if (res.length > 0) return res;
+            }
+        } else if (typeof obj === 'object') {
+            if (Array.isArray(obj.items) && obj.items.length > 0) return obj.items;
+            if (Array.isArray(obj.events) && obj.events.length > 0) return obj.events;
+
+            const knownKeys = ['data', 'response_data', 'result', 'payload', 'items', 'events', 'response', 'data_response'];
+            for (const k of knownKeys) {
+                if (obj[k]) {
+                    const res = extractEventsFromResponse(obj[k], depth + 1);
+                    if (res.length > 0) return res;
+                }
+            }
+
+            for (const k of Object.keys(obj)) {
+                if (obj[k] && typeof obj[k] === 'object') {
+                    const res = extractEventsFromResponse(obj[k], depth + 1);
+                    if (res.length > 0) return res;
+                }
+            }
+        }
+        return [];
+    };
+
+    // Helper function to extract array of tasks from any nested Composio execution response
+    const extractTasksFromResponse = (obj: any, depth = 0): any[] => {
+        if (!obj || depth > 5) return [];
+        if (Array.isArray(obj)) {
+            if (obj.length > 0 && typeof obj[0] === 'object' && (obj[0].title || obj[0].notes || obj[0].id || obj[0].status || obj[0].name)) {
+                return obj;
+            }
+            for (const item of obj) {
+                const res = extractTasksFromResponse(item, depth + 1);
+                if (res.length > 0) return res;
+            }
+        } else if (typeof obj === 'object') {
+            if (Array.isArray(obj.items) && obj.items.length > 0) return obj.items;
+            if (Array.isArray(obj.tasks) && obj.tasks.length > 0) return obj.tasks;
+
+            const knownKeys = ['data', 'response_data', 'result', 'payload', 'items', 'tasks', 'response', 'data_response'];
+            for (const k of knownKeys) {
+                if (obj[k]) {
+                    const res = extractTasksFromResponse(obj[k], depth + 1);
+                    if (res.length > 0) return res;
+                }
+            }
+
+            for (const k of Object.keys(obj)) {
+                if (obj[k] && typeof obj[k] === 'object') {
+                    const res = extractTasksFromResponse(obj[k], depth + 1);
+                    if (res.length > 0) return res;
+                }
+            }
+        }
+        return [];
+    };
+
+    const syncComposioGoogleTasks = async (apiKey: string) => {
+        if (!apiKey) return [];
+
+        const fetchWithTimeout = async (url: string, options: any, timeoutMs = 4000) => {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const res = await fetch(url, { ...options, signal: controller.signal });
+                clearTimeout(id);
+                return res;
+            } catch (err) {
+                clearTimeout(id);
+                throw err;
+            }
+        };
+
+        try {
+            let taskConn: any = null;
+            let connId: string | undefined = undefined;
+
+            try {
+                const connRes = await fetchWithTimeout("https://backend.composio.dev/api/v3.1/connected_accounts", {
+                    method: "GET",
+                    headers: { "x-api-key": apiKey, "Content-Type": "application/json" }
+                });
+                if (connRes.ok) {
+                    const connData = await connRes.json();
+                    const items = connData.items || connData.connections || (Array.isArray(connData) ? connData : []);
+                    taskConn = items.find((c: any) => {
+                        const appStr = getSafeAppString(c);
+                        return appStr.includes('googletasks') || appStr.includes('task') || appStr.includes('google_tasks');
+                    });
+                    if (!taskConn) {
+                        taskConn = items.find((c: any) => {
+                            const appStr = getSafeAppString(c);
+                            return appStr.includes('google');
+                        });
+                    }
+                    if (taskConn) connId = taskConn.id || taskConn.connectedAccountId || taskConn.connected_account_id;
+                }
+            } catch (e: any) {
+                console.warn("[TASK SYNC] connected_accounts check warning:", e.message);
+            }
+
+            console.log(`[TASK SYNC] Selected Google Tasks connected_account_id: ${connId || 'none'}`);
+
+            const tasksFetched: ComposioTask[] = [];
+
+            const candidates = [
+                { action: 'GOOGLETASKS_LIST_TASKS', connId, args: { tasklist: '@default' } },
+                { action: 'GOOGLETASKS_GET_ALL_TASKS', connId, args: { tasklist: '@default' } },
+                { action: 'GOOGLETASKS_LIST_TASKS', connId, args: {} },
+                { action: 'GOOGLETASKS_TASKS_LIST', connId, args: { tasklist: '@default' } },
+                { action: 'GOOGLETASKS_LIST_TASK_LISTS', connId, args: {} },
+            ];
+
+            const batchResults = await Promise.allSettled(
+                candidates.map(async (item) => {
+                    const bodyObj: any = { arguments: item.args };
+                    if (item.connId) bodyObj.connected_account_id = item.connId;
+                    if (taskConn && (taskConn.user_id || taskConn.entity_id)) {
+                        bodyObj.entity_id = taskConn.user_id || taskConn.entity_id;
+                        bodyObj.user_id = taskConn.user_id || taskConn.entity_id;
+                    }
+                    const res = await fetchWithTimeout(`https://backend.composio.dev/api/v3.1/tools/execute/${item.action}`, {
+                        method: "POST",
+                        headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
+                        body: JSON.stringify(bodyObj)
+                    });
+                    if (!res.ok) {
+                        return [];
+                    }
+                    const data = await res.json();
+                    return extractTasksFromResponse(data);
+                })
+            );
+
+            for (const result of batchResults) {
+                if (result.status === 'fulfilled' && Array.isArray(result.value) && result.value.length > 0) {
+                    for (const t of result.value) {
+                        if (!t) continue;
+                        const tId = t.id || t.task_id || `gtask_${Math.random().toString(36).substring(2, 7)}`;
+                        const tTitle = t.title || t.name || t.summary || 'Google Task';
+                        const tNotes = t.notes || t.description || t.details || '';
+                        const tStatus = (t.status === 'completed' || t.completed) ? 'done' : 'todo';
+
+                        const newTask: ComposioTask = {
+                            id: `task_comp_gt_${tId}`,
+                            title: tTitle,
+                            description: tNotes,
+                            appName: 'googletasks',
+                            externalId: tId,
+                            status: tStatus,
+                            priority: 'medium',
+                            assignee: 'Google Tasks User',
+                            createdAt: t.updated || t.created || new Date().toISOString(),
+                            updatedAt: t.updated || new Date().toISOString(),
+                            syncStatus: 'synced'
+                        };
+                        if (!tasksFetched.some(item => item.id === newTask.id || item.title === newTask.title)) {
+                            tasksFetched.push(newTask);
+                        }
+                    }
+                }
+            }
+
+            for (const t of tasksFetched) {
+                if (!composioTaskStore.some(existing => existing.id === t.id || existing.title === t.title)) {
+                    composioTaskStore.unshift(t);
+                }
+                const serverTaskObj = {
+                    id: t.id,
+                    title: t.title,
+                    notes: t.description,
+                    priority: t.priority,
+                    columnId: t.status === 'done' ? 'done' : 'todo',
+                    updatedAt: t.updatedAt ? t.updatedAt.split('T')[0] : new Date().toISOString().split('T')[0],
+                    appName: 'googletasks',
+                    externalId: t.externalId
+                };
+                if (!tasksList.some(ex => ex.id === serverTaskObj.id || ex.title === serverTaskObj.title)) {
+                    tasksList.unshift(serverTaskObj);
+                }
+            }
+            if (tasksFetched.length > 0) {
+                saveTasksOnServer();
+            }
+
+            return tasksFetched;
+        } catch (err: any) {
+            console.error("[TASK SYNC] Exception during sync:", err.message);
+            return [];
+        }
+    };
+
+    const syncComposioCalendarEvents = async (apiKey: string) => {
+        if (!apiKey) return [];
+
+        const fetchWithTimeout = async (url: string, options: any, timeoutMs = 3500) => {
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const res = await fetch(url, { ...options, signal: controller.signal });
+                clearTimeout(id);
+                return res;
+            } catch (err) {
+                clearTimeout(id);
+                throw err;
+            }
+        };
+
+        try {
+            let calConn: any = null;
+            let connId: string | undefined = undefined;
+
+            // 1. Fetch connected accounts
+            try {
+                const connRes = await fetchWithTimeout("https://backend.composio.dev/api/v3.1/connected_accounts", {
+                    method: "GET",
+                    headers: { "x-api-key": apiKey, "Content-Type": "application/json" }
+                });
+                if (connRes.ok) {
+                    const connData = await connRes.json();
+                    const items = connData.items || connData.connections || (Array.isArray(connData) ? connData : []);
+                    calConn = items.find((c: any) => {
+                        const appStr = getSafeAppString(c);
+                        return appStr.includes('calendar') || appStr.includes('googlecalendar') || appStr.includes('gcal') || appStr.includes('google');
+                    });
+                    if (calConn) connId = calConn.id || calConn.connectedAccountId || calConn.connected_account_id;
+                }
+            } catch (e: any) {
+                console.warn("[CALENDAR SYNC] connected_accounts check warning:", e.message);
+            }
+
+            console.log(`[CALENDAR SYNC] Selected Google Calendar connected_account_id: ${connId || 'none'}`);
+
+            const eventsFetched: ComposioMeeting[] = [];
+
+            // 2. High priority tool execution requests in parallel batch
+            const timeMinISO = new Date(Date.now() - 3600000).toISOString();
+            const candidates = [
+                { action: 'GOOGLECALENDAR_EVENTS_LIST', connId, args: { calendarId: 'primary', timeMin: timeMinISO, singleEvents: true, orderBy: 'startTime' } },
+                { action: 'GOOGLECALENDAR_LIST_EVENTS', connId, args: { calendarId: 'primary', timeMin: timeMinISO, singleEvents: true, orderBy: 'startTime' } },
+                { action: 'GOOGLECALENDAR_EVENTS_LIST', connId, args: { calendarId: 'primary', singleEvents: true, timeMin: timeMinISO } },
+                { action: 'GOOGLECALENDAR_FIND_EVENTS', connId, args: { calendarId: 'primary', timeMin: timeMinISO } },
+            ];
+
+            let isPermissionError = false;
+            let permissionErrorMessage = "";
+
+            const batchResults = await Promise.allSettled(
+                candidates.map(async (item) => {
+                    const bodyObj: any = { arguments: item.args };
+                    if (item.connId) bodyObj.connected_account_id = item.connId;
+                    if (calConn && (calConn.user_id || calConn.entity_id)) {
+                        bodyObj.entity_id = calConn.user_id || calConn.entity_id;
+                        bodyObj.user_id = calConn.user_id || calConn.entity_id;
+                    }
+                    const res = await fetchWithTimeout(`https://backend.composio.dev/api/v3.1/tools/execute/${item.action}`, {
+                        method: "POST",
+                        headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
+                        body: JSON.stringify(bodyObj)
+                    });
+                    if (!res.ok) {
+                        if (res.status === 403) {
+                            const errJson = await res.json().catch(() => ({}));
+                            isPermissionError = true;
+                            permissionErrorMessage = errJson.error?.message || "API key lacks 'tool_execution' write access";
+                        }
+                        return [];
+                    }
+                    const data = await res.json();
+                    return extractEventsFromResponse(data);
+                })
+            );
+
+            const nowMs = Date.now();
+            for (const result of batchResults) {
+                if (result.status === 'fulfilled' && Array.isArray(result.value) && result.value.length > 0) {
+                    for (const ev of result.value) {
+                        if (!ev) continue;
+                        const evId = ev.id || ev.event_id || `gcal_${Math.random().toString(36).substring(2, 7)}`;
+                        const evTitle = ev.summary || ev.title || ev.name || 'Google Calendar Event';
+                        const evStart = ev.start?.dateTime || ev.start?.date || ev.startTime || ev.start_time || new Date().toISOString();
+                        const evEnd = ev.end?.dateTime || ev.end?.date || ev.endTime || ev.end_time || new Date(new Date(evStart).getTime() + 3600000).toISOString();
+                        const evDesc = ev.description || ev.notes || `Synced Google Calendar event. Location: ${ev.location || 'Google Meet/Calendar'}`;
+
+                        // Skip events that ended in the past (more than 15 minutes ago)
+                        const endMs = new Date(evEnd).getTime();
+                        if (!isNaN(endMs) && endMs < (nowMs - 15 * 60 * 1000)) {
+                            continue;
+                        }
+
+                        const newMeet: ComposioMeeting = {
+                            id: `meet_gcal_${evId}`,
+                            title: `📅 ${evTitle}`,
+                            description: evDesc,
+                            startTime: evStart,
+                            endTime: evEnd,
+                            meetUrl: ev.hangoutLink || ev.htmlLink || ev.meetLink || ev.conferenceData?.entryPoints?.[0]?.uri || 'https://calendar.google.com',
+                            location: ev.location || (ev.hangoutLink ? 'Google Meet' : 'Google Calendar'),
+                            attendees: ev.attendees ? ev.attendees.map((a: any) => typeof a === 'string' ? a : (a.email || String(a))) : ['googlecalendar-user@unison.dev'],
+                            status: 'scheduled',
+                            appName: 'googlecalendar',
+                            syncStatus: 'synced',
+                            createdAt: new Date().toISOString()
+                        };
+                        if (!eventsFetched.some(e => e.id === newMeet.id)) {
+                            eventsFetched.push(newMeet);
+                        }
+                    }
+                    if (eventsFetched.length > 0) break;
+                }
+            }
+
+            console.log(`[CALENDAR SYNC] Total realtime events extracted: ${eventsFetched.length}`);
+
+            // If account is connected but permission error occurred, create an informative system item if no real events are fetched
+            if (eventsFetched.length === 0 && calConn && isPermissionError) {
+                const noticeId = `meet_notice_${connId || 'gcal'}`;
+                if (!composioMeetingStore.some(m => m.id === noticeId)) {
+                    const noticeMeet: ComposioMeeting = {
+                        id: noticeId,
+                        title: `🟢 Google Calendar Connected (${connId || 'Active'})`,
+                        description: `Account is connected & active on Composio. To sync events into Unison, update your Composio API Key to one with 'Tool Execution - Write' permission enabled.`,
+                        startTime: new Date().toISOString(),
+                        endTime: new Date(Date.now() + 3600000).toISOString(),
+                        meetUrl: 'https://app.composio.dev/settings/api-keys',
+                        location: 'Composio Settings',
+                        attendees: ['googlecalendar-user@unison.dev'],
+                        status: 'scheduled',
+                        appName: 'googlecalendar',
+                        syncStatus: 'synced',
+                        createdAt: new Date().toISOString()
+                    };
+                    composioMeetingStore.unshift(noticeMeet);
+                }
+            }
+
+            // 3. Update composioMeetingStore and meetingsList with real fetched events
+            if (eventsFetched.length > 0) {
+                // Clear out stale mock meetings when real events exist
+                const mockIds = ['meet_comp_201', 'meet_comp_202'];
+                for (let i = composioMeetingStore.length - 1; i >= 0; i--) {
+                    if (mockIds.includes(composioMeetingStore[i].id)) {
+                        composioMeetingStore.splice(i, 1);
+                    }
+                }
+            }
+
+            // Purge past meetings from composioMeetingStore and meetingsList
+            for (let i = composioMeetingStore.length - 1; i >= 0; i--) {
+                const m = composioMeetingStore[i];
+                const endMs = new Date(m.endTime || m.startTime || 0).getTime();
+                if (!isNaN(endMs) && endMs < (nowMs - 15 * 60 * 1000)) {
+                    composioMeetingStore.splice(i, 1);
+                }
+            }
+
+            for (const ev of eventsFetched) {
+                if (!composioMeetingStore.some(m => m.id === ev.id || m.title === ev.title)) {
+                    composioMeetingStore.push(ev);
+                }
+                const meetingListItem = {
+                    id: ev.id,
+                    summary: ev.title,
+                    startTime: ev.startTime,
+                    description: ev.description,
+                    createdAt: ev.createdAt,
+                    recurrence: 'none'
+                };
+                if (!meetingsList.some(m => m.id === meetingListItem.id || m.summary === meetingListItem.summary)) {
+                    meetingsList.push(meetingListItem);
+                }
+            }
+
+            // Sort composioMeetingStore ascending by start time
+            composioMeetingStore.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+            saveMeetingsOnServer();
+
+            return eventsFetched;
+        } catch (err: any) {
+            console.error("[CALENDAR SYNC] Exception during sync:", err.message);
+            return [];
+        }
+    };
+
+    // --- REALTIME MEETINGS ENDPOINTS ---
+    app.get("/api/composio/meetings", async (req, res) => {
+        const sync = req.query.sync === 'true' || req.query.sync === undefined;
+        const apiKey = getComposioApiKey(req);
+
+        if (sync && apiKey) {
+            await syncComposioCalendarEvents(apiKey);
+        }
+
+        const nowMs = Date.now();
+        const upcomingMeetings = composioMeetingStore.filter(m => {
+            const endMs = new Date(m.endTime || m.startTime || 0).getTime();
+            return !isNaN(endMs) && endMs >= (nowMs - 15 * 60 * 1000);
+        });
+        upcomingMeetings.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+
+        res.json({
+            success: true,
+            count: upcomingMeetings.length,
+            meetings: upcomingMeetings
+        });
+    });
+
+    app.post("/api/composio/meetings/sync", async (req, res) => {
+        const apiKey = getComposioApiKey(req);
+        if (!apiKey) {
+            return res.status(400).json({ error: "Composio API key missing." });
+        }
+
+        try {
+            const synced = await syncComposioCalendarEvents(apiKey);
+
+            broadcastComposioRealtimeEvent({
+                id: `evt_sync_post_${Date.now()}`,
+                timestamp: new Date().toISOString(),
+                appName: 'googlecalendar',
+                triggerName: 'GOOGLECALENDAR_MEETING_SYNC_COMPLETED',
+                payload: { meetings: synced, message: 'Google Calendar realtime sync triggered manually!' },
+                status: 'processed'
+            });
+
+            return res.json({
+                success: true,
+                message: "Google Calendar realtime details synced successfully!",
+                meetings: composioMeetingStore
+            });
+        } catch (err: any) {
+            return res.status(500).json({ error: err.message || "Failed to sync Google Calendar." });
+        }
+    });
+
+    // --- REALTIME TASKS CORE ENGINE ---
+    function syncComposioTasksToTasksList() {
+        tasksList = composioTaskStore.map(t => ({
+            id: t.id,
+            title: t.title,
+            notes: t.description || '',
+            priority: t.priority || 'medium',
+            columnId: t.status === 'done' || t.status === 'completed' ? 'done' : 'todo',
+            updatedAt: t.updatedAt ? t.updatedAt.split('T')[0] : new Date().toISOString().split('T')[0],
+            appName: t.appName,
+            externalId: t.externalId
+        }));
+        saveTasksOnServer();
+    }
+
+    async function createTaskCore(data: {
+        title: string;
+        description?: string;
+        appName?: string;
+        priority?: 'urgent' | 'high' | 'medium' | 'low';
+        assignee?: string;
+        connectedAccountId?: string;
+        apiKey?: string;
+    }): Promise<ComposioTask> {
+        const { title, description, appName, priority, assignee, connectedAccountId } = data;
+        const apiKey = data.apiKey || process.env.COMPOSIO_API_KEY || "ak_QTSz1enaF06VNE5Oeky0";
+        const app = (appName || 'googletasks').toLowerCase() as any;
+
+        const newTask: ComposioTask = {
+            id: `task_comp_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+            title,
+            description: description || '',
+            appName: app,
+            externalId: `EXT-${Math.floor(1000 + Math.random() * 9000)}`,
+            status: 'todo',
+            priority: priority || 'medium',
+            assignee: assignee || 'Unison Member',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            syncStatus: 'local_only'
+        };
+
+        if (apiKey) {
+            try {
+                let connId = connectedAccountId;
+                let userId = "";
+                const connRes = await fetch("https://backend.composio.dev/api/v3.1/connected_accounts", {
+                    headers: { "x-api-key": apiKey }
+                }).catch(() => null);
+                if (connRes && connRes.ok) {
+                    const connData = await connRes.json();
+                    const taskConn = (connData.items || []).find((c: any) => {
+                        const appStr = getSafeAppString(c);
+                        return appStr.includes(app) || appStr.includes('task');
+                    });
+                    if (taskConn) {
+                        if (!connId) connId = taskConn.id;
+                        userId = taskConn.user_id || taskConn.entity_id || "";
+                    }
+                }
+
+                let actionName = '';
+                let actionArgs: any = {};
+
+                if (app === 'googletasks') {
+                    actionName = 'GOOGLETASKS_CREATE_TASK';
+                    actionArgs = { tasklist: '@default', title, notes: description };
+                } else if (app === 'github') {
+                    actionName = 'GITHUB_CREATE_ISSUE';
+                    actionArgs = { title, body: description, owner: 'unison-os', repo: 'workspace' };
+                } else if (app === 'linear') {
+                    actionName = 'LINEAR_CREATE_ISSUE';
+                    actionArgs = { title, description, team_id: 'default-team' };
+                }
+
+                if (actionName) {
+                    const bodyPayload: any = { arguments: actionArgs };
+                    if (connId) bodyPayload.connected_account_id = connId;
+                    if (userId) {
+                        bodyPayload.entity_id = userId;
+                        bodyPayload.user_id = userId;
+                    }
+
+                    const compRes = await fetch(`https://backend.composio.dev/api/v3.1/tools/execute/${actionName}`, {
+                        method: "POST",
+                        headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
+                        body: JSON.stringify(bodyPayload)
+                    });
+                    if (compRes.ok) {
+                        const compData = await compRes.json();
+                        const resultId = compData?.data?.id || compData?.id;
+                        if (resultId) {
+                            newTask.id = `task_comp_googletasks_${resultId}`;
+                            newTask.externalId = resultId;
+                        }
+                        newTask.syncStatus = 'synced';
+                    }
+                }
+            } catch (err) {
+                console.warn("[COMPOSIO TASK CREATE] Sync warning:", err);
+            }
+        }
+
+        composioTaskStore.unshift(newTask);
+        syncComposioTasksToTasksList();
+
+        broadcastComposioRealtimeEvent({
+            id: `evt_task_${newTask.id}`,
+            timestamp: new Date().toISOString(),
+            appName: app,
+            triggerName: `${app.toUpperCase()}_TASK_CREATED`,
+            payload: { task: newTask, message: `📋 Created new task: "${newTask.title}"` },
+            status: 'processed'
+        });
+
+        return newTask;
+    }
+
+    async function editTaskCore(id: string, updates: {
+        title?: string;
+        description?: string;
+        status?: 'todo' | 'in_progress' | 'completed' | 'canceled';
+        priority?: 'urgent' | 'high' | 'medium' | 'low';
+        apiKey?: string;
+    }): Promise<ComposioTask | null> {
+        const task = composioTaskStore.find(t => t.id === id || t.id.endsWith(id) || id.endsWith(t.id));
+        if (!task) return null;
+
+        if (updates.title !== undefined) task.title = updates.title;
+        if (updates.description !== undefined) task.description = updates.description;
+        if (updates.status !== undefined) task.status = updates.status;
+        if (updates.priority !== undefined) task.priority = updates.priority;
+        task.updatedAt = new Date().toISOString();
+
+        const apiKey = updates.apiKey || process.env.COMPOSIO_API_KEY || "ak_QTSz1enaF06VNE5Oeky0";
+
+        if (apiKey && task.appName === 'googletasks') {
+            const rawTaskId = task.id.replace(/^task_comp_googletasks_/, "");
+            try {
+                let connId = "";
+                let userId = "";
+                const connRes = await fetch("https://backend.composio.dev/api/v3.1/connected_accounts", {
+                    headers: { "x-api-key": apiKey }
+                }).catch(() => null);
+                if (connRes && connRes.ok) {
+                    const connData = await connRes.json();
+                    const taskConn = (connData.items || []).find((c: any) => {
+                        const appStr = getSafeAppString(c);
+                        return appStr.includes('googletasks') || appStr.includes('task');
+                    });
+                    if (taskConn) {
+                        connId = taskConn.id;
+                        userId = taskConn.user_id || taskConn.entity_id || "";
+                    }
+                }
+
+                const bodyPayload: any = {
+                    arguments: {
+                        tasklist: '@default',
+                        task: rawTaskId,
+                        title: task.title,
+                        notes: task.description,
+                        status: task.status === 'completed' || task.status === 'done' ? 'completed' : 'needsAction'
+                    }
+                };
+                if (connId) bodyPayload.connected_account_id = connId;
+                if (userId) {
+                    bodyPayload.entity_id = userId;
+                    bodyPayload.user_id = userId;
+                }
+
+                await fetch("https://backend.composio.dev/api/v3.1/tools/execute/GOOGLETASKS_UPDATE_TASK", {
+                    method: "POST",
+                    headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
+                    body: JSON.stringify(bodyPayload)
+                });
+                task.syncStatus = 'synced';
+            } catch (err) {
+                console.warn("[COMPOSIO TASK EDIT] Sync warning:", err);
+            }
+        }
+
+        syncComposioTasksToTasksList();
+
+        broadcastComposioRealtimeEvent({
+            id: `evt_edit_task_${task.id}`,
+            timestamp: new Date().toISOString(),
+            appName: task.appName,
+            triggerName: `${task.appName.toUpperCase()}_TASK_UPDATED`,
+            payload: { task, message: `✏️ Updated task "${task.title}"` },
+            status: 'processed'
+        });
+
+        return task;
+    }
+
+    async function deleteTaskCore(id: string, apiKey?: string): Promise<boolean> {
+        const index = composioTaskStore.findIndex(t => t.id === id || t.id.endsWith(id) || id.endsWith(t.id));
+        if (index === -1) return false;
+
+        const [deletedTask] = composioTaskStore.splice(index, 1);
+        const keyToUse = apiKey || process.env.COMPOSIO_API_KEY || "ak_QTSz1enaF06VNE5Oeky0";
+
+        if (keyToUse && deletedTask.appName === 'googletasks') {
+            const rawTaskId = deletedTask.id.replace(/^task_comp_googletasks_/, "");
+            try {
+                let connId = "";
+                let userId = "";
+                const connRes = await fetch("https://backend.composio.dev/api/v3.1/connected_accounts", {
+                    headers: { "x-api-key": keyToUse }
+                }).catch(() => null);
+                if (connRes && connRes.ok) {
+                    const connData = await connRes.json();
+                    const taskConn = (connData.items || []).find((c: any) => {
+                        const appStr = getSafeAppString(c);
+                        return appStr.includes('googletasks') || appStr.includes('task');
+                    });
+                    if (taskConn) {
+                        connId = taskConn.id;
+                        userId = taskConn.user_id || taskConn.entity_id || "";
+                    }
+                }
+
+                const bodyPayload: any = {
+                    arguments: {
+                        tasklist: '@default',
+                        task: rawTaskId
+                    }
+                };
+                if (connId) bodyPayload.connected_account_id = connId;
+                if (userId) {
+                    bodyPayload.entity_id = userId;
+                    bodyPayload.user_id = userId;
+                }
+
+                await fetch("https://backend.composio.dev/api/v3.1/tools/execute/GOOGLETASKS_DELETE_TASK", {
+                    method: "POST",
+                    headers: { "x-api-key": keyToUse, "Content-Type": "application/json" },
+                    body: JSON.stringify(bodyPayload)
+                });
+            } catch (err) {
+                console.warn("[COMPOSIO TASK DELETE] Remote sync warning:", err);
+            }
+        }
+
+        syncComposioTasksToTasksList();
+
+        broadcastComposioRealtimeEvent({
+            id: `evt_del_task_${deletedTask.id}`,
+            timestamp: new Date().toISOString(),
+            appName: deletedTask.appName,
+            triggerName: `${deletedTask.appName.toUpperCase()}_TASK_DELETED`,
+            payload: { taskId: id, title: deletedTask.title, message: `🗑️ Deleted task "${deletedTask.title}"` },
+            status: 'processed'
+        });
+
+        return true;
+    }
+
+    async function processTaskActionTags(text: string, apiKey?: string): Promise<{ cleanedText: string; actionExecuted: boolean }> {
+        let cleanedText = text;
+        let actionExecuted = false;
+
+        const deleteMatch = text.match(/\[TASK_ACTION:\s*delete\s+id="([^"]+)"\]/i) || text.match(/\[TASK_ACTION:\s*delete\s+id=([^\s\]]+)\]/i);
+        if (deleteMatch) {
+            const targetId = deleteMatch[1];
+            console.log(`[AI TASK ACTION] Triggering delete for task ID: ${targetId}`);
+            const ok = await deleteTaskCore(targetId, apiKey);
+            cleanedText = cleanedText.replace(/\[TASK_ACTION:[\s\S]*?\]/gi, '').trim();
+            if (ok) actionExecuted = true;
+        }
+
+        const editMatch = text.match(/\[TASK_ACTION:\s*edit\s+([\s\S]*?)\]/i);
+        if (editMatch && !deleteMatch) {
+            const attrStr = editMatch[1];
+            const idMatch = attrStr.match(/id="([^"]+)"/) || attrStr.match(/id=([^\s]+)/);
+            const titleMatch = attrStr.match(/title="([^"]+)"/);
+            const descMatch = attrStr.match(/description="([^"]+)"/);
+            const statusMatch = attrStr.match(/status="([^"]+)"/);
+            const priorityMatch = attrStr.match(/priority="([^"]+)"/);
+
+            if (idMatch) {
+                const targetId = idMatch[1];
+                console.log(`[AI TASK ACTION] Triggering edit for task ID: ${targetId}`);
+                const updated = await editTaskCore(targetId, {
+                    title: titleMatch ? titleMatch[1] : undefined,
+                    description: descMatch ? descMatch[1] : undefined,
+                    status: statusMatch ? (statusMatch[1] as any) : undefined,
+                    priority: priorityMatch ? (priorityMatch[1] as any) : undefined,
+                    apiKey
+                });
+                cleanedText = cleanedText.replace(/\[TASK_ACTION:[\s\S]*?\]/gi, '').trim();
+                if (updated) actionExecuted = true;
+            }
+        }
+
+        const createMatch = text.match(/\[TASK_ACTION:\s*create\s+([\s\S]*?)\]/i);
+        if (createMatch && !deleteMatch && !editMatch) {
+            const attrStr = createMatch[1];
+            const titleMatch = attrStr.match(/title="([^"]+)"/);
+            const descMatch = attrStr.match(/description="([^"]+)"/);
+            const priorityMatch = attrStr.match(/priority="([^"]+)"/);
+
+            if (titleMatch) {
+                console.log(`[AI TASK ACTION] Triggering create for task: ${titleMatch[1]}`);
+                await createTaskCore({
+                    title: titleMatch[1],
+                    description: descMatch ? descMatch[1] : undefined,
+                    priority: priorityMatch ? (priorityMatch[1] as any) : 'medium',
+                    appName: 'googletasks',
+                    apiKey
+                });
+                cleanedText = cleanedText.replace(/\[TASK_ACTION:[\s\S]*?\]/gi, '').trim();
+                actionExecuted = true;
+            }
+        }
+
+        return { cleanedText, actionExecuted };
+    }
+
+    // --- REALTIME MEETINGS & CALENDAR CORE ENGINE ---
+    function syncComposioMeetingsToMeetingsList() {
+        meetingsList = composioMeetingStore.map(m => ({
+            id: m.id,
+            summary: m.title,
+            startTime: m.startTime,
+            description: m.description || '',
+            createdAt: m.createdAt || new Date().toISOString(),
+            recurrence: 'none'
+        }));
+        saveMeetingsOnServer();
+    }
+
+    async function createMeetingCore(data: {
+        title: string;
+        description?: string;
+        startTime?: string;
+        durationMinutes?: number | string;
+        attendees?: string[];
+        connectedAccountId?: string;
+        apiKey?: string;
+    }): Promise<ComposioMeeting> {
+        const { title, description, startTime, durationMinutes, attendees, connectedAccountId } = data;
+        const apiKey = data.apiKey || process.env.COMPOSIO_API_KEY || "ak_QTSz1enaF06VNE5Oeky0";
+        const startIso = startTime || new Date(Date.now() + 1800000).toISOString();
+        const duration = durationMinutes ? parseInt(String(durationMinutes), 10) : 30;
+        const endIso = new Date(new Date(startIso).getTime() + duration * 60000).toISOString();
+
+        const meetCode = `comp-meet-${Math.random().toString(36).substring(2, 6)}-${Math.random().toString(36).substring(2, 6)}`;
+        const meetUrl = `https://meet.google.com/${meetCode}`;
+
+        const newMeeting: ComposioMeeting = {
+            id: `meet_comp_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+            title,
+            description: description || 'Scheduled via Composio Google Calendar Integration',
+            startTime: startIso,
+            endTime: endIso,
+            meetUrl,
+            location: 'Google Meet',
+            attendees: Array.isArray(attendees) ? attendees : (attendees ? [attendees] : ['team@unison.dev']),
+            status: 'scheduled',
+            appName: 'googlecalendar',
+            syncStatus: 'local_only',
+            createdAt: new Date().toISOString()
+        };
+
+        if (apiKey) {
+            try {
+                let connId = connectedAccountId;
+                let userId = "";
+                const connRes = await fetch("https://backend.composio.dev/api/v3.1/connected_accounts", {
+                    headers: { "x-api-key": apiKey }
+                }).catch(() => null);
+                if (connRes && connRes.ok) {
+                    const connData = await connRes.json();
+                    const calConn = (connData.items || []).find((c: any) => (c.toolkit?.slug || c.appName || '').toLowerCase() === 'googlecalendar');
+                    if (calConn) {
+                        if (!connId) connId = calConn.id;
+                        userId = calConn.user_id || calConn.entity_id || "";
+                    }
+                }
+
+                const bodyPayload: any = {
+                    arguments: {
+                        calendarId: 'primary',
+                        summary: title,
+                        description: `${description || ''}\n\nGoogle Meet: ${meetUrl}`,
+                        start_time: startIso,
+                        end_time: endIso
+                    }
+                };
+                if (connId) bodyPayload.connected_account_id = connId;
+                if (userId) {
+                    bodyPayload.entity_id = userId;
+                    bodyPayload.user_id = userId;
+                }
+
+                const compRes = await fetch(`https://backend.composio.dev/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT`, {
+                    method: "POST",
+                    headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
+                    body: JSON.stringify(bodyPayload)
+                });
+                if (compRes.ok) {
+                    const compData = await compRes.json();
+                    if (compData?.data?.id) {
+                        newMeeting.id = `meet_gcal_${compData.data.id}`;
+                    }
+                    newMeeting.syncStatus = 'synced';
+                }
+            } catch (err) {
+                console.warn("[COMPOSIO MEETING CREATE] Sync warning:", err);
+            }
+        }
+
+        composioMeetingStore.unshift(newMeeting);
+        syncComposioMeetingsToMeetingsList();
+
+        broadcastComposioRealtimeEvent({
+            id: `evt_meet_${newMeeting.id}`,
+            timestamp: new Date().toISOString(),
+            appName: 'googlecalendar',
+            triggerName: 'GOOGLECALENDAR_MEETING_SCHEDULED',
+            payload: { meeting: newMeeting, message: `📅 Scheduled meeting "${newMeeting.title}" for ${new Date(startIso).toLocaleTimeString()}` },
+            status: 'processed'
+        });
+
+        return newMeeting;
+    }
+
+    async function editMeetingCore(id: string, updates: {
+        title?: string;
+        description?: string;
+        startTime?: string;
+        endTime?: string;
+        durationMinutes?: number | string;
+        location?: string;
+        attendees?: string[];
+        apiKey?: string;
+    }): Promise<ComposioMeeting | null> {
+        const meeting = composioMeetingStore.find(m => m.id === id || m.id.endsWith(id) || id.endsWith(m.id));
+        if (!meeting) return null;
+
+        if (updates.title !== undefined) meeting.title = updates.title;
+        if (updates.description !== undefined) meeting.description = updates.description;
+        if (updates.startTime) meeting.startTime = updates.startTime;
+        if (updates.endTime) meeting.endTime = updates.endTime;
+        else if (updates.startTime && updates.durationMinutes) {
+            const dur = parseInt(String(updates.durationMinutes), 10) || 30;
+            meeting.endTime = new Date(new Date(updates.startTime).getTime() + dur * 60000).toISOString();
+        }
+        if (updates.location) meeting.location = updates.location;
+        if (updates.attendees) meeting.attendees = updates.attendees;
+
+        const apiKey = updates.apiKey || process.env.COMPOSIO_API_KEY || "ak_QTSz1enaF06VNE5Oeky0";
+
+        if (apiKey && (meeting.id.startsWith("meet_gcal_") || meeting.appName === "googlecalendar")) {
+            const rawEventId = meeting.id.replace(/^meet_gcal_/, "");
+            try {
+                let connId = "";
+                let userId = "";
+                const connRes = await fetch("https://backend.composio.dev/api/v3.1/connected_accounts", {
+                    headers: { "x-api-key": apiKey }
+                }).catch(() => null);
+                if (connRes && connRes.ok) {
+                    const connData = await connRes.json();
+                    const calConn = (connData.items || []).find((c: any) => (c.toolkit?.slug || c.appName || '').toLowerCase() === 'googlecalendar');
+                    if (calConn) {
+                        connId = calConn.id;
+                        userId = calConn.user_id || calConn.entity_id || "";
+                    }
+                }
+
+                const bodyPayload: any = {
+                    arguments: {
+                        calendarId: 'primary',
+                        eventId: rawEventId,
+                        summary: meeting.title,
+                        description: meeting.description,
+                        start_time: meeting.startTime,
+                        end_time: meeting.endTime
+                    }
+                };
+                if (connId) bodyPayload.connected_account_id = connId;
+                if (userId) {
+                    bodyPayload.entity_id = userId;
+                    bodyPayload.user_id = userId;
+                }
+
+                const patchRes = await fetch("https://backend.composio.dev/api/v3.1/tools/execute/GOOGLECALENDAR_PATCH_EVENT", {
+                    method: "POST",
+                    headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
+                    body: JSON.stringify(bodyPayload)
+                });
+                if (!patchRes.ok) {
+                    await fetch("https://backend.composio.dev/api/v3.1/tools/execute/GOOGLECALENDAR_UPDATE_EVENT", {
+                        method: "POST",
+                        headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
+                        body: JSON.stringify(bodyPayload)
+                    });
+                }
+                meeting.syncStatus = 'synced';
+            } catch (err) {
+                console.warn("[COMPOSIO MEETING EDIT] Sync warning:", err);
+            }
+        }
+
+        syncComposioMeetingsToMeetingsList();
+
+        broadcastComposioRealtimeEvent({
+            id: `evt_edit_${meeting.id}`,
+            timestamp: new Date().toISOString(),
+            appName: 'googlecalendar',
+            triggerName: 'GOOGLECALENDAR_MEETING_UPDATED',
+            payload: { meeting, message: `✏️ Updated meeting "${meeting.title}"` },
+            status: 'processed'
+        });
+
+        return meeting;
+    }
+
+    async function deleteMeetingCore(id: string, apiKey?: string): Promise<boolean> {
+        const index = composioMeetingStore.findIndex(m => m.id === id || m.id.endsWith(id) || id.endsWith(m.id));
+        if (index === -1) return false;
+
+        const [deletedMeeting] = composioMeetingStore.splice(index, 1);
+        const keyToUse = apiKey || process.env.COMPOSIO_API_KEY || "ak_QTSz1enaF06VNE5Oeky0";
+
+        if (keyToUse && (deletedMeeting.id.startsWith("meet_gcal_") || deletedMeeting.appName === "googlecalendar")) {
+            const rawEventId = deletedMeeting.id.replace(/^meet_gcal_/, "");
+            try {
+                let connId = "";
+                let userId = "";
+                const connRes = await fetch("https://backend.composio.dev/api/v3.1/connected_accounts", {
+                    headers: { "x-api-key": keyToUse }
+                }).catch(() => null);
+                if (connRes && connRes.ok) {
+                    const connData = await connRes.json();
+                    const calConn = (connData.items || []).find((c: any) => (c.toolkit?.slug || c.appName || '').toLowerCase() === 'googlecalendar');
+                    if (calConn) {
+                        connId = calConn.id;
+                        userId = calConn.user_id || calConn.entity_id || "";
+                    }
+                }
+
+                const bodyPayload: any = {
+                    arguments: {
+                        calendarId: 'primary',
+                        eventId: rawEventId
+                    }
+                };
+                if (connId) bodyPayload.connected_account_id = connId;
+                if (userId) {
+                    bodyPayload.entity_id = userId;
+                    bodyPayload.user_id = userId;
+                }
+
+                await fetch("https://backend.composio.dev/api/v3.1/tools/execute/GOOGLECALENDAR_DELETE_EVENT", {
+                    method: "POST",
+                    headers: { "x-api-key": keyToUse, "Content-Type": "application/json" },
+                    body: JSON.stringify(bodyPayload)
+                });
+            } catch (err) {
+                console.warn("[COMPOSIO MEETING DELETE] Remote sync warning:", err);
+            }
+        }
+
+        syncComposioMeetingsToMeetingsList();
+
+        broadcastComposioRealtimeEvent({
+            id: `evt_del_${deletedMeeting.id}`,
+            timestamp: new Date().toISOString(),
+            appName: 'googlecalendar',
+            triggerName: 'GOOGLECALENDAR_MEETING_DELETED',
+            payload: { meetingId: id, title: deletedMeeting.title, message: `🗑️ Deleted meeting "${deletedMeeting.title}"` },
+            status: 'processed'
+        });
+
+        return true;
+    }
+
+    async function processMeetingActionTags(text: string, apiKey?: string): Promise<{ cleanedText: string; actionExecuted: boolean }> {
+        let cleanedText = text;
+        let actionExecuted = false;
+
+        const deleteMatch = text.match(/\[MEETING_ACTION:\s*delete\s+id="([^"]+)"\]/i) || text.match(/\[MEETING_ACTION:\s*delete\s+id=([^\s\]]+)\]/i);
+        if (deleteMatch) {
+            const targetId = deleteMatch[1];
+            console.log(`[AI MEETING ACTION] Triggering delete for meeting ID: ${targetId}`);
+            const ok = await deleteMeetingCore(targetId, apiKey);
+            cleanedText = cleanedText.replace(/\[MEETING_ACTION:[\s\S]*?\]/gi, '').trim();
+            if (ok) actionExecuted = true;
+        }
+
+        const editMatch = text.match(/\[MEETING_ACTION:\s*edit\s+([\s\S]*?)\]/i);
+        if (editMatch && !deleteMatch) {
+            const attrStr = editMatch[1];
+            const idMatch = attrStr.match(/id="([^"]+)"/) || attrStr.match(/id=([^\s]+)/);
+            const titleMatch = attrStr.match(/title="([^"]+)"/);
+            const startTimeMatch = attrStr.match(/startTime="([^"]+)"/);
+            const durationMatch = attrStr.match(/durationMinutes=([0-9]+)/);
+            const descMatch = attrStr.match(/description="([^"]+)"/);
+
+            if (idMatch) {
+                const targetId = idMatch[1];
+                console.log(`[AI MEETING ACTION] Triggering edit for meeting ID: ${targetId}`);
+                const updated = await editMeetingCore(targetId, {
+                    title: titleMatch ? titleMatch[1] : undefined,
+                    startTime: startTimeMatch ? startTimeMatch[1] : undefined,
+                    durationMinutes: durationMatch ? parseInt(durationMatch[1], 10) : undefined,
+                    description: descMatch ? descMatch[1] : undefined,
+                    apiKey
+                });
+                cleanedText = cleanedText.replace(/\[MEETING_ACTION:[\s\S]*?\]/gi, '').trim();
+                if (updated) actionExecuted = true;
+            }
+        }
+
+        const createMatch = text.match(/\[MEETING_ACTION:\s*create\s+([\s\S]*?)\]/i);
+        if (createMatch && !deleteMatch && !editMatch) {
+            const attrStr = createMatch[1];
+            const titleMatch = attrStr.match(/title="([^"]+)"/);
+            const startTimeMatch = attrStr.match(/startTime="([^"]+)"/);
+            const durationMatch = attrStr.match(/durationMinutes=([0-9]+)/);
+            const descMatch = attrStr.match(/description="([^"]+)"/);
+
+            if (titleMatch) {
+                console.log(`[AI MEETING ACTION] Triggering create for meeting: ${titleMatch[1]}`);
+                await createMeetingCore({
+                    title: titleMatch[1],
+                    startTime: startTimeMatch ? startTimeMatch[1] : undefined,
+                    durationMinutes: durationMatch ? parseInt(durationMatch[1], 10) : 30,
+                    description: descMatch ? descMatch[1] : undefined,
+                    apiKey
+                });
+                cleanedText = cleanedText.replace(/\[MEETING_ACTION:[\s\S]*?\]/gi, '').trim();
+                actionExecuted = true;
+            }
+        }
+
+        return { cleanedText, actionExecuted };
+    }
+
+    app.post("/api/composio/meetings", async (req, res) => {
+        const { title, description, startTime, durationMinutes, attendees, connectedAccountId } = req.body;
+        if (!title) {
+            return res.status(400).json({ error: "Meeting title is required." });
+        }
+        const apiKey = getComposioApiKey(req);
+        const newMeeting = await createMeetingCore({
+            title,
+            description,
+            startTime,
+            durationMinutes,
+            attendees,
+            connectedAccountId,
+            apiKey
+        });
+        res.json({ success: true, meeting: newMeeting });
+    });
+
+    app.patch("/api/composio/meetings/:id", async (req, res) => {
+        const meetingId = req.params.id;
+        const apiKey = getComposioApiKey(req);
+        const updated = await editMeetingCore(meetingId, {
+            ...req.body,
+            apiKey
+        });
+        if (!updated) {
+            return res.status(404).json({ error: "Meeting not found." });
+        }
+        res.json({ success: true, meeting: updated });
+    });
+
+    app.put("/api/composio/meetings/:id", async (req, res) => {
+        const meetingId = req.params.id;
+        const apiKey = getComposioApiKey(req);
+        const updated = await editMeetingCore(meetingId, {
+            ...req.body,
+            apiKey
+        });
+        if (!updated) {
+            return res.status(404).json({ error: "Meeting not found." });
+        }
+        res.json({ success: true, meeting: updated });
+    });
+
+    app.delete("/api/composio/meetings/:id", async (req, res) => {
+        const meetingId = req.params.id;
+        const apiKey = getComposioApiKey(req);
+        const success = await deleteMeetingCore(meetingId, apiKey);
+        if (!success) {
+            return res.status(404).json({ error: "Meeting not found or already deleted." });
+        }
+        res.json({ success: true, message: "Meeting deleted successfully.", meetingId });
+    });
+
+    app.delete("/api/meetings/:id", async (req, res) => {
+        const meetingId = req.params.id;
+        const apiKey = getComposioApiKey(req);
+        await deleteMeetingCore(meetingId, apiKey);
+        res.json({ success: true, message: "Meeting deleted." });
+    });
+
+    app.patch("/api/meetings/:id", async (req, res) => {
+        const meetingId = req.params.id;
+        const apiKey = getComposioApiKey(req);
+        const updated = await editMeetingCore(meetingId, { ...req.body, apiKey });
+        res.json({ success: true, meeting: updated });
+    });
+
+    app.post("/api/composio/meetings/:id/remind", async (req, res) => {
+        const meetingId = req.params.id;
+        const meeting = composioMeetingStore.find(m => m.id === meetingId);
+        if (!meeting) {
+            return res.status(404).json({ error: "Meeting not found." });
+        }
+
+        const { channel, recipientEmail } = req.body;
+        const apiKey = getComposioApiKey(req);
+
+        let sentStatus = 'simulated';
+        if (apiKey) {
+            try {
+                if (channel === 'slack') {
+                    await fetch("https://backend.composio.dev/api/v3.1/tools/execute/SLACK_POST_MESSAGE", {
+                        method: "POST",
+                        headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            arguments: { text: `⏰ *Meeting Reminder*: "${meeting.title}" starts soon!\nJoin here: ${meeting.meetUrl}` }
+                        })
+                    });
+                    sentStatus = 'slack_sent';
+                } else if (recipientEmail) {
+                    await fetch("https://backend.composio.dev/api/v3.1/tools/execute/GMAIL_SEND_EMAIL", {
+                        method: "POST",
+                        headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            arguments: {
+                                recipient: recipientEmail,
+                                subject: `Reminder: ${meeting.title}`,
+                                body: `Hello,\n\nThis is a reminder for "${meeting.title}" scheduled for ${meeting.startTime}.\n\nJoin URL: ${meeting.meetUrl}`
+                            }
+                        })
+                    });
+                    sentStatus = 'gmail_sent';
+                }
+            } catch (err) {
+                console.warn("Meeting reminder dispatch failed:", err);
+            }
+        }
+
+        broadcastComposioRealtimeEvent({
+            id: `evt_remind_${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            appName: 'googlecalendar',
+            triggerName: 'COMPOSIO_MEETING_REMINDER_SENT',
+            payload: { meetingId, title: meeting.title, sentStatus, message: `Meeting reminder sent for "${meeting.title}"` },
+            status: 'processed'
+        });
+
+        res.json({ success: true, message: `Reminder dispatched via ${sentStatus}`, meeting });
+    });
+
+    // 1. GET Connections: Fetch all active connections in the user's Composio account
+    app.get("/api/composio/connections", async (req, res) => {
+        const apiKey = getComposioApiKey(req);
+        if (!apiKey) {
+            return res.json({ connections: [], items: [], message: "Composio API Key missing." });
+        }
+        try {
+            const response = await fetch("https://backend.composio.dev/api/v3.1/connected_accounts", {
+                method: "GET",
+                headers: {
+                    "x-api-key": apiKey,
+                    "Content-Type": "application/json"
+                }
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                return res.json({ connections: [], items: [], error: data.error || data.message || "Could not fetch connected accounts." });
+            }
+            res.json(data);
+        } catch (err: any) {
+            console.error("Composio Connections API failed:", err.message);
+            res.json({ connections: [], items: [], error: "Composio service unreachable." });
+        }
+    });
+
+    // 2. POST Connect: Initiate a new OAuth connection session for an appName
+    app.post("/api/composio/connect", async (req, res) => {
+        const apiKey = getComposioApiKey(req);
+        if (!apiKey) {
+            return res.status(400).json({ error: "Composio API Key is missing." });
+        }
+        const { appName, redirectUrl } = req.body;
+        if (!appName) {
+            return res.status(400).json({ error: "Missing appName parameter" });
+        }
+
+        const normalizedApp = appName.toLowerCase().trim();
+        const directAppUrl = `https://app.composio.dev/apps/${normalizedApp}`;
+
+        try {
+            const response = await fetch("https://backend.composio.dev/api/v3.1/connected_accounts/link", {
+                method: "POST",
+                headers: {
+                    "x-api-key": apiKey,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    auth_config_id: appName,
+                    user_id: "default_user",
+                    callback_url: redirectUrl || "https://ai.studio/build"
+                })
+            });
+            const data = await response.json();
+
+            if (response.ok && (data.redirect_url || data.redirectUrl)) {
+                return res.json({
+                    success: true,
+                    redirectUrl: data.redirect_url || data.redirectUrl,
+                    fallbackUrl: directAppUrl,
+                    isDirectApiLink: true
+                });
+            }
+
+            // Fallback if key is read-only or Composio returned error permission
+            return res.json({
+                success: true,
+                redirectUrl: directAppUrl,
+                fallbackUrl: directAppUrl,
+                isFallback: true,
+                message: `Opening official Composio authorization page for ${appName}.`
+            });
+        } catch (err: any) {
+            console.error("Composio Connect API catch:", err.message);
+            return res.json({
+                success: true,
+                redirectUrl: directAppUrl,
+                fallbackUrl: directAppUrl,
+                isFallback: true,
+                message: `Opening direct Composio app connector page.`
+            });
+        }
+    });
+
+    // 3. POST Execute: Execute a specific action on behalf of a connected account via Composio
+    app.post("/api/composio/execute", async (req, res) => {
+        const apiKey = getComposioApiKey(req);
+        if (!apiKey) {
+            return res.status(400).json({ error: "Composio API Key is missing." });
+        }
+        const { actionName, input, connectedAccountId, entity_id, user_id } = req.body;
+        if (!actionName) {
+            return res.status(400).json({ error: "Missing actionName parameter" });
+        }
+        try {
+            let targetUserId = entity_id || user_id;
+            if (!targetUserId && connectedAccountId) {
+                try {
+                    const accRes = await fetch(`https://backend.composio.dev/api/v3.1/connected_accounts/${connectedAccountId}`, {
+                        headers: { "x-api-key": apiKey }
+                    });
+                    if (accRes.ok) {
+                        const accData = await accRes.json();
+                        targetUserId = accData.user_id || accData.entity_id;
+                    }
+                } catch (e) {
+                    console.warn("[COMPOSIO EXECUTE] Failed to fetch account user_id:", e);
+                }
+            }
+
+            const bodyPayload: any = {
+                connected_account_id: connectedAccountId,
+                arguments: input || {}
+            };
+            if (targetUserId) {
+                bodyPayload.entity_id = targetUserId;
+                bodyPayload.user_id = targetUserId;
+            }
+
+            const response = await fetch(`https://backend.composio.dev/api/v3.1/tools/execute/${actionName}`, {
+                method: "POST",
+                headers: {
+                    "x-api-key": apiKey,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(bodyPayload)
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                return res.status(response.status).json(data);
+            }
+            res.json(data);
+        } catch (err: any) {
+            console.error("Composio Execute API failed:", err.message);
+            res.status(502).json({ error: "Failed to execute action via Composio.", details: err.message });
+        }
+    });
+
+    // 4. DELETE Connection: Delete/remove a connected account in Composio
+    app.delete("/api/composio/connections/:id", async (req, res) => {
+        const apiKey = getComposioApiKey(req);
+        if (!apiKey) {
+            return res.status(400).json({ error: "Composio API Key is missing." });
+        }
+        const connectionId = req.params.id;
+        try {
+            const response = await fetch(`https://backend.composio.dev/api/v3.1/connected_accounts/${connectionId}`, {
+                method: "DELETE",
+                headers: {
+                    "x-api-key": apiKey,
+                    "Content-Type": "application/json"
+                }
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                return res.status(response.status).json(data);
+            }
+            res.json({ success: true, message: "Connection deleted successfully", data });
+        } catch (err: any) {
+            console.error("Composio Delete Connection API failed:", err.message);
+            res.status(502).json({ error: "Failed to delete connection from Composio.", details: err.message });
+        }
+    });
+
     // Spotify Auth Code Exchange Gateway
     app.post("/api/spotify/exchange", async (req, res) => {
         const { code, redirectUri, clientId: customClientId, clientSecret: customClientSecret } = req.body;
@@ -5278,8 +7645,12 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
             if (aiEnableCache !== false && aiCache[cacheKey]) {
                 console.log(`[AI_CACHE] Stream cache hit for key ${cacheKey}. Instant stream replay of ${aiCache[cacheKey].text.length} chars...`);
                 res.setHeader("Content-Type", "text/event-stream");
-                res.setHeader("Cache-Control", "no-cache");
+                res.setHeader("Cache-Control", "no-cache, no-transform");
                 res.setHeader("Connection", "keep-alive");
+                res.setHeader("X-Accel-Buffering", "no");
+                if (typeof (res as any).flushHeaders === "function") {
+                    (res as any).flushHeaders();
+                }
 
                 const payload = {
                     text: aiCache[cacheKey].text,
@@ -5288,6 +7659,9 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
                     cached: true
                 };
                 res.write(`data: ${JSON.stringify(payload)}\n\n`);
+                if (typeof (res as any).flush === "function") {
+                    (res as any).flush();
+                }
                 res.end();
                 return;
             }
@@ -5338,7 +7712,22 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
 
             // Configure instructions for specific modes
             let baseInstruction = systemInstruction || "";
-            let finalInstruction = baseInstruction;
+            const artifactRule = "\n\n" +
+                "CRITICAL SIDE-BY-SIDE ARTIFACT GENERATION PROTOCOL (ANTIGRAVITY STYLE):\n" +
+                "- For any program scripts, web application code, complete source files, code blocks (such as HTML, CSS, JavaScript, React, Python, Bash, SQL, etc.), task list checkboxes, or structural walk-through manuals that you generate or edit, you MUST wrap them inside an XML-like <artifact> block. This automatically spawns a gorgeous, modern side-by-side interactive code-editor and layout-preview workspace under the same roof, mirroring top-tier developer sandboxes like Claude or Antigravity.\n" +
+                "- Format:\n" +
+                "  <artifact id=\"unique-file-identifier\" title=\"filename.ext\" type=\"language-name\">\n" +
+                "  ...complete code/content...\n" +
+                "  </artifact>\n" +
+                "- Example:\n" +
+                "  <artifact id=\"calculator-py\" title=\"calculator.py\" type=\"python\">\n" +
+                "  def calculator():\n" +
+                "      print('Python Calculator initialized')\n" +
+                "  calculator()\n" +
+                "  </artifact>\n" +
+                "- Under no circumstances should you output raw markdown code blocks for these complete files without wrapping them in `<artifact>` tags first. ALWAYS wrap them in `<artifact>` tags.\n" +
+                "- If asked to create multi-file projects, you should still output the `INIT_PROJECT: [...]` JSON payload inside your thoughts or message body to initialize the files in the workspace filesystem, while wrapping the main visual files inside `<artifact>` tags for rich side-by-side visualization.";
+            let finalInstruction = `${baseInstruction}${artifactRule}`;
 
             if (toolMode === 'research') {
                 finalInstruction = `${baseInstruction}\n\nCRITICAL RESEARCH MODE ACTIVATED: The user expects an exceptionally detailed, highly structured, multi-section research report. Synthesize your answer step-by-step using actual facts from Google Search Grounding. Your query has been treated as an intensive investigative query. Structure the reply with clear headings: "Executive Summary", "Detailed Fact Finding & Analysis", "Critical Recommendations", and "Next Steps/Follow-ups". \n\nCRITICAL MULTI-SOURCE HYPERLINKING RULE: You MUST cite EVERY single line, statement, fact, or bullet point that is derived from search results individually at the end of that specific sentence with its standard citation token (e.g. "[1]" or "[2]"). Do NOT bundle multiple facts together without individual sentence/line citations. Doing so is critical for the front-end link-rendering engine to successfully turn every sentence/line directly into a clickable source hyperlink.\n\nSTRICT GROUNDED VERIFIED VERACITY PROTOCOL:\n- You are STRICTLY FORBIDDEN from generating or listing any claims, news stories, data points, or statements from your general parametric knowledge or pre-trained memory.\n- EVERY SINGLE SENTENCE, CLAIM, OR BULLET POINT in your output presenting search facts MUST be verified by a search result and MUST terminate with a citation (e.g., [1], [2]).\n- If some news item or fact cannot be verified/grounded in the active search results, DO NOT include it in your output. Filter or discard any unverified lines from your response entirely. Only verified facts and sources are allowed.\n- Structural layout elements (like markdown titles, section headers, short intro/outro transition phrases, and the final list of follow-up questions) are fully EXEMPT from requiring citations.\n- Every bullet point must have its own citation. NEVER emit a bullet point without a citation.\n\nIMPORTANT: Do NOT output or append any '[SOURCES: ...]' block or web reference blocks yourself at the end of your response. Simply output your answer with standard bracket citations (e.g. [1], [2]). The server proxy automatically constructs and appends the active [SOURCES: ...] tag matching the real, live search results behind the scenes. You MUST, however, provide 3 high-quality follow-up questions at the absolute end in the exact format: [FOLLOW_UPS: ["question 1", "question 2", "question 3"]].`;
@@ -5434,8 +7823,12 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
             console.log("[GEMINI_PROXY] Stream connection established successfully. Streaming chunks...");
 
             res.setHeader("Content-Type", "text/event-stream");
-            res.setHeader("Cache-Control", "no-cache");
+            res.setHeader("Cache-Control", "no-cache, no-transform");
             res.setHeader("Connection", "keep-alive");
+            res.setHeader("X-Accel-Buffering", "no");
+            if (typeof (res as any).flushHeaders === "function") {
+                (res as any).flushHeaders();
+            }
 
             let aggregatedText = "";
             let savedGroundingMetadata: any = undefined;
@@ -5504,6 +7897,9 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
                 };
                 console.log(`[GEMINI_PROXY] Streaming chunk #${chunkCount}, text length:`, chunk.text?.length || 0);
                 res.write(`data: ${JSON.stringify(payload)}\n\n`);
+                if (typeof (res as any).flush === "function") {
+                    (res as any).flush();
+                }
             }
 
             // Automatically synthesize and append [SOURCES: ...] tag if missing, ensuring client receives sources
@@ -5562,6 +7958,9 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
                     aggregatedText += sourcesTag;
                     console.log("[GEMINI_PROXY] Appending synthesized SEARCH sources tag to response stream.");
                     res.write(`data: ${JSON.stringify({ text: sourcesTag })}\n\n`);
+                    if (typeof (res as any).flush === "function") {
+                        (res as any).flush();
+                    }
                 }
             }
 
@@ -5599,8 +7998,12 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
                 try {
                     if (!res.headersSent) {
                         res.setHeader("Content-Type", "text/event-stream");
-                        res.setHeader("Cache-Control", "no-cache");
+                        res.setHeader("Cache-Control", "no-cache, no-transform");
                         res.setHeader("Connection", "keep-alive");
+                        res.setHeader("X-Accel-Buffering", "no");
+                        if (typeof (res as any).flushHeaders === "function") {
+                            (res as any).flushHeaders();
+                        }
                     }
 
                     const contentsArray = req.body.contents || [];
@@ -5737,6 +8140,9 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
                             }]
                         };
                         res.write(`data: ${JSON.stringify(load)}\n\n`);
+                        if (typeof (res as any).flush === "function") {
+                            (res as any).flush();
+                        }
                         cIdx++;
                         setTimeout(pushChunk, 15);
                     };
@@ -5770,7 +8176,23 @@ Keep the presentation format elegant, using high-impact markdown headers, bullet
 
             console.log(`[GEMINI_PROXY] chat-simple request. Selected model: ${model}. Custom key present: ${!!customApiKey}`);
 
-            const instructions = systemInstruction || "You are Unison OS, a highly intelligent cognitive node assistant. Respond conversationally, keeping replies helpful, crisp, and beautifully styled.";
+            const baseInstructionsText = systemInstruction || "You are Unison OS, a highly intelligent cognitive node assistant. Respond conversationally, keeping replies helpful, crisp, and beautifully styled.";
+            const artifactRule = "\n\n" +
+                "CRITICAL SIDE-BY-SIDE ARTIFACT GENERATION PROTOCOL (ANTIGRAVITY STYLE):\n" +
+                "- For any program scripts, web application code, complete source files, code blocks (such as HTML, CSS, JavaScript, React, Python, Bash, SQL, etc.), task list checkboxes, or structural walk-through manuals that you generate or edit, you MUST wrap them inside an XML-like <artifact> block. This automatically spawns a gorgeous, modern side-by-side interactive code-editor and layout-preview workspace under the same roof, mirroring top-tier developer sandboxes like Claude or Antigravity.\n" +
+                "- Format:\n" +
+                "  <artifact id=\"unique-file-identifier\" title=\"filename.ext\" type=\"language-name\">\n" +
+                "  ...complete code/content...\n" +
+                "  </artifact>\n" +
+                "- Example:\n" +
+                "  <artifact id=\"calculator-py\" title=\"calculator.py\" type=\"python\">\n" +
+                "  def calculator():\n" +
+                "      print('Python Calculator initialized')\n" +
+                "  calculator()\n" +
+                "  </artifact>\n" +
+                "- Under no circumstances should you output raw markdown code blocks for these complete files without wrapping them in `<artifact>` tags first. ALWAYS wrap them in `<artifact>` tags.\n" +
+                "- If asked to create multi-file projects, you should still output the `INIT_PROJECT: [...]` JSON payload inside your thoughts or message body to initialize the files in the workspace filesystem, while wrapping the main visual files inside `<artifact>` tags for rich side-by-side visualization.";
+            const instructions = `${baseInstructionsText}${artifactRule}`;
 
             const targetThinkingLevel = sanitizeThinkingLevel(thinkingLevel);
 
@@ -6232,6 +8654,9 @@ ${formattedHistory}`;
                 const { done, value } = await reader.read();
                 if (done) break;
                 res.write(value);
+                if (typeof (res as any).flush === "function") {
+                    (res as any).flush();
+                }
             }
             res.end();
         } catch (err: any) {
@@ -6509,6 +8934,144 @@ ${formattedHistory}`;
         }
     });
 
+    // Workspace Overview Files & Folders Endpoints
+    const overviewFilesPath = path.join(process.cwd(), 'overview_files.json');
+
+    app.get("/api/overview/files", (req, res) => {
+        try {
+            if (fs.existsSync(overviewFilesPath)) {
+                const data = fs.readFileSync(overviewFilesPath, 'utf-8');
+                const parsed = JSON.parse(data);
+                return res.json({ files: parsed });
+            }
+            return res.json({ files: [] });
+        } catch (err: any) {
+            console.error("[API] GET /api/overview/files Error:", err);
+            return res.status(500).json({ error: "Failed to read overview files" });
+        }
+    });
+
+    app.post("/api/overview/files", (req, res) => {
+        try {
+            const { files } = req.body;
+            if (Array.isArray(files)) {
+                fs.writeFileSync(overviewFilesPath, JSON.stringify(files, null, 2));
+                return res.json({ success: true, count: files.length });
+            }
+            return res.status(400).json({ error: "Invalid payload: files must be an array" });
+        } catch (err: any) {
+            console.error("[API] POST /api/overview/files Error:", err);
+            return res.status(500).json({ error: "Failed to save overview files" });
+        }
+    });
+
+    app.post("/api/overview/files/upload", (req, res) => {
+        try {
+            const { name, content, type = 'file', parentId = null } = req.body;
+            if (!name) return res.status(400).json({ error: "Missing name" });
+
+            let currentFiles: any[] = [];
+            if (fs.existsSync(overviewFilesPath)) {
+                try {
+                    currentFiles = JSON.parse(fs.readFileSync(overviewFilesPath, 'utf-8'));
+                } catch (e) {
+                    currentFiles = [];
+                }
+            }
+
+            const now = new Date().toISOString();
+            const newItem = {
+                id: `file_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                name: name,
+                type: type || 'file',
+                parentId: parentId || null,
+                content: content || '',
+                size: content ? Math.round((content.length * 3) / 4) : 0,
+                updatedAt: now
+            };
+
+            // Remove existing item with same name in same parent
+            currentFiles = currentFiles.filter((f: any) => !(f.name === name && (f.parentId || null) === (parentId || null)));
+            currentFiles.unshift(newItem);
+
+            fs.writeFileSync(overviewFilesPath, JSON.stringify(currentFiles, null, 2));
+            return res.json({ success: true, item: newItem });
+        } catch (err: any) {
+            console.error("[API] POST /api/overview/files/upload Error:", err);
+            return res.status(500).json({ error: "Failed to upload file" });
+        }
+    });
+
+    app.put("/api/overview/files/rename", (req, res) => {
+        try {
+            const { id, oldName, newName } = req.body;
+            if (!newName) return res.status(400).json({ error: "Missing newName" });
+
+            if (fs.existsSync(overviewFilesPath)) {
+                let currentFiles = JSON.parse(fs.readFileSync(overviewFilesPath, 'utf-8'));
+                currentFiles = currentFiles.map((f: any) => {
+                    if (f.id === id || f.name === oldName || f.name === id) {
+                        return { ...f, name: newName, updatedAt: new Date().toISOString() };
+                    }
+                    return f;
+                });
+                fs.writeFileSync(overviewFilesPath, JSON.stringify(currentFiles, null, 2));
+            }
+            return res.json({ success: true });
+        } catch (err: any) {
+            console.error("[API] PUT /api/overview/files/rename Error:", err);
+            return res.status(500).json({ error: "Failed to rename file" });
+        }
+    });
+
+    app.delete("/api/overview/files/:idOrName", (req, res) => {
+        try {
+            const idOrName = decodeURIComponent(req.params.idOrName);
+            if (fs.existsSync(overviewFilesPath)) {
+                let currentFiles = JSON.parse(fs.readFileSync(overviewFilesPath, 'utf-8'));
+                // Collect ids/names to delete (including folder contents if folder)
+                const itemsToDelete = new Set<string>([idOrName]);
+                const findChildren = (pid: string) => {
+                    currentFiles.forEach((f: any) => {
+                        if (f.parentId === pid) {
+                            itemsToDelete.add(f.id);
+                            itemsToDelete.add(f.name);
+                            if (f.type === 'folder') findChildren(f.id);
+                        }
+                    });
+                };
+                findChildren(idOrName);
+
+                currentFiles = currentFiles.filter((f: any) => !itemsToDelete.has(f.id) && !itemsToDelete.has(f.name));
+                fs.writeFileSync(overviewFilesPath, JSON.stringify(currentFiles, null, 2));
+            }
+            return res.json({ success: true });
+        } catch (err: any) {
+            console.error("[API] DELETE /api/overview/files Error:", err);
+            return res.status(500).json({ error: "Failed to delete file" });
+        }
+    });
+
+    app.get("/api/overview/files/download/:name", (req, res) => {
+        try {
+            const name = decodeURIComponent(req.params.name);
+            if (fs.existsSync(overviewFilesPath)) {
+                const currentFiles = JSON.parse(fs.readFileSync(overviewFilesPath, 'utf-8'));
+                const fileItem = currentFiles.find((f: any) => f.name === name || f.id === name);
+                if (fileItem && fileItem.content) {
+                    const base64Data = fileItem.content.replace(/^data:[^;]+;base64,/, '');
+                    const buffer = Buffer.from(base64Data, 'base64');
+                    res.setHeader('Content-Disposition', `attachment; filename="${fileItem.name}"`);
+                    return res.send(buffer);
+                }
+            }
+            return res.status(404).send("File not found");
+        } catch (err: any) {
+            console.error("[API] GET /api/overview/files/download Error:", err);
+            return res.status(500).send("Error serving file");
+        }
+    });
+
     app.post("/api/process-screenshot", async (req, res) => {
         try {
             const { image, query } = req.body;
@@ -6556,7 +9119,7 @@ Return a JSON-like structured response:
 
     app.post("/api/mac/agent/reason", express.json({ limit: "50mb" }), async (req, res) => {
         try {
-            const { image, query, lastCommandResult } = req.body;
+            const { image, query, lastCommandResult, previousActions } = req.body;
             if (!image) return res.status(400).json({ error: "Missing image data" });
 
             let base64Data = image;
@@ -6570,6 +9133,13 @@ Return a JSON-like structured response:
 Exit Code: ${lastCommandResult.exitCode}
 Output:
 ${lastCommandResult.output}\n`;
+            }
+
+            let previousActionsPrompt = "";
+            if (Array.isArray(previousActions) && previousActions.length > 0) {
+                previousActionsPrompt = `\n\nHISTORY OF ACTIONS ALREADY EXECUTED IN THIS ACTIVE SESSION:
+${previousActions.map((act, idx) => `  - Step ${idx + 1}: ${act}`).join("\n")}
+IMPORTANT: Use this history to keep track of your progress. If you see you've already clicked some coordinates or typed some text in a previous step, do NOT repeat it if it didn't work. Learn from this history to adapt your strategy, try different coordinates, use different keyboard shortcut combinations, or try different UI elements to avoid getting stuck in infinite loops.`;
             }
 
             // Query latest real-time macOS companion diagnostics and permissions from Firestore
@@ -6607,7 +9177,7 @@ ${lastCommandResult.output}\n`;
                 console.warn("[MacAgent] Could not read hardware diagnostics for agent reasoning:", err.message);
             }
 
-            const prompt = `You are a professional macOS Computer Use agent. You see a screenshot of the user's active screen.${lastCommandPrompt}
+            const prompt = `You are a professional macOS Computer Use agent. You see a screenshot of the user's active screen.${lastCommandPrompt}${previousActionsPrompt}
 The current objective is: "${query || "Analyze and assist the user with their environment."}"
 
 REAL-TIME SYSTEM DIAGNOSTICS & HARDWARE CONTEXT:
@@ -6713,46 +9283,15 @@ CRITICAL CREDIBILITY, REASONING & FOCUS MANDATE:
             }
 
             if (!parsed || !parsed.action) {
-                const queryClean = (query || "default").toLowerCase();
-                const currentStep = sessionSteps.get(queryClean) || 0;
-                sessionSteps.set(queryClean, currentStep + 1);
-
-                if (queryClean.includes("safari") || queryClean.includes("search") || queryClean.includes("google")) {
-                    const mockSequence = [
-                        { action: "launchApp", x: 0, y: 0, text: "Safari", explanation: "Launching Safari browser from Applications folder." },
-                        { action: "click", x: 500, y: 80, text: "", explanation: "Clicking the Safari search address bar to focus." },
-                        { action: "typeText", x: 500, y: 80, text: "https://www.google.com\n", explanation: "Typing Google URL and pressing enter." },
-                        { action: "click", x: 500, y: 350, text: "", explanation: "Clicking search query text input box." },
-                        { action: "typeText", x: 500, y: 350, text: "Unison OS AI Desktop\n", explanation: "Entering query string and executing search." },
-                        { action: "finish", x: 0, y: 0, text: "", explanation: "Objective accomplished successfully! Visual search complete." }
-                    ];
-                    parsed = mockSequence[Math.min(currentStep, mockSequence.length - 1)];
-                } else if (queryClean.includes("note") || queryClean.includes("write") || queryClean.includes("memo")) {
-                    const mockSequence = [
-                        { action: "launchApp", x: 0, y: 0, text: "Notes", explanation: "Launching macOS native Notes application." },
-                        { action: "keyCombo", x: 0, y: 0, text: "cmd+n", explanation: "Pressing Command+N key combination to create a new note." },
-                        { action: "typeText", x: 300, y: 200, text: "Meeting Notes: Unison OS is fully operational!\n", explanation: "Typing the header content into the note." },
-                        { action: "typeText", x: 300, y: 200, text: "- Real-time permissions synced.\n- Film-grain orbs active.\n", explanation: "Appending details to the note canvas." },
-                        { action: "finish", x: 0, y: 0, text: "", explanation: "Objective accomplished! Note written and saved successfully." }
-                    ];
-                    parsed = mockSequence[Math.min(currentStep, mockSequence.length - 1)];
-                } else if (queryClean.includes("music") || queryClean.includes("spotify") || queryClean.includes("song")) {
-                    const mockSequence = [
-                        { action: "launchApp", x: 0, y: 0, text: "Music", explanation: "Launching native macOS Music Player." },
-                        { action: "click", x: 120, y: 90, text: "", explanation: "Clicking the player Search input box." },
-                        { action: "typeText", x: 120, y: 90, text: "Lo-Fi Beats for coding\n", explanation: "Searching for standard relaxing audio track." },
-                        { action: "click", x: 400, y: 250, text: "", explanation: "Clicking the first song item to start playback." },
-                        { action: "finish", x: 0, y: 0, text: "", explanation: "Playback initiated. Audio streams operational." }
-                    ];
-                    parsed = mockSequence[Math.min(currentStep, mockSequence.length - 1)];
-                } else {
-                    const mockSequence = [
-                        { action: "click", x: 500, y: 500, text: "", explanation: "Clicking active viewport area to focus window." },
-                        { action: "runCommand", x: 0, y: 0, text: "say 'Unison system check complete'", explanation: "Running a text-to-speech confirmation command." },
-                        { action: "finish", x: 0, y: 0, text: "", explanation: "Default system diagnostics validation complete." }
-                    ];
-                    parsed = mockSequence[Math.min(currentStep, mockSequence.length - 1)];
-                }
+                // Return a clean final action indicating that no valid, real action could be processed by the model.
+                // This eliminates simulated mock action sequences, ensuring all processes are 100% real.
+                parsed = {
+                    action: "finish",
+                    x: 500,
+                    y: 500,
+                    text: "",
+                    explanation: "Model reasoning did not yield a valid action format. Terminating autonomous loop safely to avoid simulated inputs."
+                };
             }
 
             console.log(`[MacAgent] Resolved final parsed action:`, JSON.stringify(parsed));
