@@ -49,6 +49,8 @@ const googleGenAI = new GoogleGenAI({
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_CONFIG_FILE = path.join(process.cwd(), "supabase_config.json");
+const PAIRINGS_FILE = path.join(process.cwd(), "pairings.json");
+const NOTES_FILE = path.join(process.cwd(), "notes.json");
 
 let customSupabaseConfig = {
     url: process.env.NEXT_PUBLIC_SUPABASE_URL || "https://copravscnxxgyabaftgz.supabase.co",

@@ -3,6 +3,9 @@ import { Request, Response, NextFunction } from "express";
 export interface LoggedRequest extends Request {
     traceId?: string;
     startTime?: number;
+    path: string;
+    method: string;
+    ip: string;
 }
 
 export function requestLogger(req: LoggedRequest, res: Response, next: NextFunction) {
