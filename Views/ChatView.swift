@@ -748,28 +748,31 @@ public struct ChatView: View {
                                                 }
                                                 .buttonStyle(PlainButtonStyle())
                                                 
-                                                // Send arrow button
+                                                // Send / Stop button with circular progress spinner and click-to-cancel
                                                 Button(action: {
-                                                    if AgentStateController.shared.isLoopRunning {
+                                                    if db.isSendingMessage || AgentStateController.shared.isLoopRunning {
+                                                        db.isSendingMessage = false
                                                         AgentStateController.shared.stopLoop()
+                                                        TokenStreamQueue.shared.flushAll()
                                                     } else {
                                                         vm.submitPrompt()
                                                     }
                                                 }) {
-                                                    if AgentStateController.shared.isLoopRunning {
+                                                    if db.isSendingMessage || AgentStateController.shared.isLoopRunning {
                                                         ZStack {
                                                             Circle()
-                                                                .fill(Color.orange.opacity(0.9))
-                                                                .frame(width: 26, height: 26)
+                                                                .fill(Color.red.opacity(0.85))
+                                                                .frame(width: 28, height: 28)
                                                             ProgressView()
                                                                 .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                                                .scaleEffect(0.5)
+                                                                .scaleEffect(0.55)
                                                         }
+                                                        .help("Click to stop AI generation")
                                                     } else {
                                                         Image(systemName: "arrow.right")
                                                             .font(.system(size: 11, weight: .bold))
                                                             .foregroundColor(vm.promptText.isEmpty ? .white.opacity(0.3) : .white)
-                                                            .frame(width: 26, height: 26)
+                                                            .frame(width: 28, height: 28)
                                                             .background(Color.white.opacity(vm.promptText.isEmpty ? 0.08 : 0.25))
                                                             .clipShape(Circle())
                                                     }

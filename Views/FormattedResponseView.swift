@@ -417,9 +417,9 @@ public struct RichTextView: View {
     
     public var body: some View {
         parseFormattedText(text, sources: sources)
-            .font(.system(size: 13, weight: .regular))
-            .foregroundColor(.white.opacity(0.95))
-            .lineSpacing(4.5)
+            .font(.system(size: 14.5, weight: .regular))
+            .foregroundColor(Color(red: 0.92, green: 0.93, blue: 0.96))
+            .lineSpacing(5.5)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -430,10 +430,10 @@ public struct HeaderView: View {
     
     public var body: some View {
         Text(text)
-            .font(.system(size: level == 1 ? 16 : (level == 2 ? 15 : 14), weight: .bold))
-            .foregroundColor(.white)
-            .padding(.top, 12)
-            .padding(.bottom, 4)
+            .font(.system(size: level == 1 ? 19 : (level == 2 ? 17 : 15.5), weight: .bold))
+            .foregroundColor(Color(red: 0.95, green: 0.96, blue: 1.0))
+            .padding(.top, 14)
+            .padding(.bottom, 6)
     }
 }
 
@@ -2668,8 +2668,8 @@ public func parseExecutionLog(_ text: String) -> ParsedExecutionLog {
     }
     
     result.exploredItems = customExplored
-    result.exploredFilesCount = max(1, customExplored.filter { !$0.isFolder && $0.action != "Thought" }.count)
-    result.exploredFoldersCount = max(1, customExplored.filter { $0.isFolder }.count)
+    result.exploredFilesCount = customExplored.filter { !$0.isFolder && $0.action != "Thought" }.count
+    result.exploredFoldersCount = customExplored.filter { $0.isFolder }.count
     
     var customCommands: [CommandLogItem] = []
     for line in lines {

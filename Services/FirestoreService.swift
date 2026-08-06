@@ -2549,6 +2549,11 @@ Required changes to my new portfolio:
         let systemText = buildSystemInstruction(toolMode: "default")
         let adaptiveTemp = computeAdaptiveTemperature(prompt: prompt)
 
+        var toolsArray: [[String: Any]] = [["function_declarations": toolDeclarations]]
+        if lowerPrompt.contains("dsa") || lowerPrompt.contains("syllabus") || lowerPrompt.contains("recruitment") || lowerPrompt.contains("placement") || lowerPrompt.contains("nit") || lowerPrompt.contains("search") || lowerPrompt.contains("latest") || lowerPrompt.contains("google") {
+            toolsArray.append(["google_search": [String: Any]()])
+        }
+
         var body: [String: Any] = [
             "contents": contents,
             "generationConfig": [
@@ -2560,7 +2565,7 @@ Required changes to my new portfolio:
                     "text": systemText
                 ]]
             ],
-            "tools": [["function_declarations": toolDeclarations]]
+            "tools": toolsArray
         ]
         
         if modelId.contains("2.5") {
