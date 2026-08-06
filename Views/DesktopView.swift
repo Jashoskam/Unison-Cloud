@@ -302,13 +302,28 @@ public struct DesktopView: View {
             .padding(.top, 48) // Safe clearance below macOS traffic lights
             .padding(.bottom, 8)
             
-            // App name dropdown selector: "UNISON ⌄"
-            HStack(spacing: 4) {
+            // App name dropdown selector with appLogo.png: [Logo Image] "UNISON ⌄"
+            HStack(spacing: 8) {
                 Button(action: {}) {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 8) {
+                        if let nsImg = NSImage(contentsOfFile: "/Users/jashoskam/Desktop/Unison-ES/Unison/appLogo.png") {
+                            Image(nsImage: nsImg)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 22, height: 22)
+                                .background(Color.white)
+                                .cornerRadius(5)
+                                .shadow(color: Color.blue.opacity(0.3), radius: 4, x: 0, y: 1)
+                        } else {
+                            Image(systemName: "circle.hexagongrid.fill")
+                                .font(.system(size: 16))
+                                .foregroundColor(.cyan)
+                        }
+                        
                         Text("UNISON")
                             .font(.system(size: 17, weight: .bold, design: .monospaced))
                             .foregroundColor(.white)
+                        
                         Image(systemName: "chevron.down")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundColor(.cyan)

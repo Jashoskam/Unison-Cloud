@@ -1015,16 +1015,26 @@ extension Color {
 struct UnisonLogoView: View {
     var body: some View {
         ZStack {
-            // Elegant white squircle container
-            RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .fill(Color.white)
-                .frame(width: 68, height: 68)
-                .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 5)
-            
-            // Vector path representing the sleek interlocking ribbon (the "U/S" loop)
-            InterlockingLoopPath()
-                .stroke(Color.black, style: StrokeStyle(lineWidth: 4.8, lineCap: .round, lineJoin: .round))
-                .frame(width: 28, height: 36)
+            if let nsImg = NSImage(contentsOfFile: "/Users/jashoskam/Desktop/Unison-ES/Unison/appLogo.png") {
+                Image(nsImage: nsImg)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 68, height: 68)
+                    .background(Color.white)
+                    .cornerRadius(15)
+                    .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 5)
+            } else {
+                // Elegant white squircle container
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .fill(Color.white)
+                    .frame(width: 68, height: 68)
+                    .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 5)
+                
+                // Vector path representing the sleek interlocking ribbon (the "U/S" loop)
+                InterlockingLoopPath()
+                    .stroke(Color.black, style: StrokeStyle(lineWidth: 4.8, lineCap: .round, lineJoin: .round))
+                    .frame(width: 28, height: 36)
+            }
         }
     }
 }

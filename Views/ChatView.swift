@@ -17,30 +17,40 @@ struct UnisonPalette {
     static let darkPillBg = Color(white: 0.10)
 }
 
-/// Vector drawing representing the signature cursive continuous string logo shown in image_2b1d9c.png
+/// Official Unison App Logo loaded from appLogo.png
 struct UnisonLoopLogo: View {
+    var size: CGFloat = 84
+    
     var body: some View {
         ZStack {
-            // Dark glowing outer frame
-            RoundedRectangle(cornerRadius: 24)
+            // Dark glowing outer container
+            RoundedRectangle(cornerRadius: 22)
                 .fill(Color.black)
-                .frame(width: 96, height: 96)
+                .frame(width: size + 20, height: size + 20)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 24)
-                        .stroke(Color.white.opacity(0.12), lineWidth: 1.5)
+                    RoundedRectangle(cornerRadius: 22)
+                        .stroke(Color.white.opacity(0.15), lineWidth: 1.5)
                 )
-                .shadow(color: Color.blue.opacity(0.15), radius: 10, x: 0, y: 4)
+                .shadow(color: Color.blue.opacity(0.25), radius: 12, x: 0, y: 4)
             
-            // White background canvas for the loop symbol
-            RoundedRectangle(cornerRadius: 18)
-                .fill(Color.white)
-                .frame(width: 72, height: 72)
-                .overlay(
-                    // Detailed cursive unison ribbon/string
-                    UnisonRibbonShape()
-                        .stroke(Color.black, style: StrokeStyle(lineWidth: 4.5, lineCap: .round, lineJoin: .round))
-                        .padding(14)
-                )
+            if let nsImg = NSImage(contentsOfFile: "/Users/jashoskam/Desktop/Unison-ES/Unison/appLogo.png") {
+                Image(nsImage: nsImg)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: size, height: size)
+                    .background(Color.white)
+                    .cornerRadius(16)
+            } else {
+                // Fallback loop ribbon shape if file not found
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.white)
+                    .frame(width: size, height: size)
+                    .overlay(
+                        UnisonRibbonShape()
+                            .stroke(Color.black, style: StrokeStyle(lineWidth: 4.5, lineCap: .round, lineJoin: .round))
+                            .padding(14)
+                    )
+            }
         }
     }
 }

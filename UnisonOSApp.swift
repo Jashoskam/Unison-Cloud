@@ -62,6 +62,9 @@ struct UnisonOSApp: App {
         DispatchQueue.main.async {
             NSApp?.setActivationPolicy(.regular)
             NSApp?.activate(ignoringOtherApps: true)
+            if let logoImg = NSImage(contentsOfFile: "/Users/jashoskam/Desktop/Unison-ES/Unison/appLogo.png") {
+                NSApp?.applicationIconImage = logoImg
+            }
             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
             _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
             _ = CGRequestScreenCaptureAccess()
