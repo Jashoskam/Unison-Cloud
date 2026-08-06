@@ -4,18 +4,20 @@ import { AppError } from "../middleware/errorHandler";
 
 export const streamingRouter = Router();
 
-const googleGenAI = new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY || "",
-    httpOptions: {
-        headers: {
-            'User-Agent': 'aistudio-build'
+const getGenAIClient = () => {
+    return new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY || "",
+        httpOptions: {
+            headers: {
+                'User-Agent': 'aistudio-build'
+            }
         }
-    }
-});
+    });
+};
 
 streamingRouter.post("/chat", async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { message, modelName, prompt } = req.body;
+        const { message, modelName, prompt, history } = req.body;
         const textPrompt = prompt || message;
 
         if (!textPrompt) {
@@ -30,8 +32,13 @@ streamingRouter.post("/chat", async (req: Request, res: Response, next: NextFunc
             (res as any).flushHeaders();
         }
 
-        const targetModel = modelName || "gemini-2.5-flash";
-        console.log(`[Streaming Route] Streaming prompt to '${targetModel}'`);
+        const modelsToCascade = [
+            modelName || "gemini-2.5-flash",
+            "gemini-2.5-flash",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro"
+        ];
+        const uniqueModels = Array.from(new Set(modelsToCascade));
 
         const systemInstruction = `You are Unison OS, an advanced AI-native desktop operating system and coding workspace. You are a world-class software engineer, systems architect, and technical writer.
 
@@ -43,24 +50,40 @@ CORE BEHAVIORAL RULES:
 5. RICH MARKDOWN: Use clean markdown headers (###), bold text, inline code, and language-tagged code blocks.
 6. At the absolute end of your response, provide 3 relevant follow-up questions using: [FOLLOW_UPS: ["Q1", "Q2", "Q3"]].`;
 
-        const responseStream = await googleGenAI.models.generateContentStream({
-            model: targetModel,
-            contents: textPrompt,
-            config: {
-                systemInstruction,
-                temperature: 0.2,
-                maxOutputTokens: 32768,
-                ...(targetModel.includes("2.5") ? { thinkingConfig: { thinkingBudget: 8192 } } : {})
-            }
-        });
+        const googleGenAI = getGenAIClient();
+        let streamSuccess = false;
 
-        for await (const chunk of responseStream) {
-            if (chunk.text) {
-                res.write(`data: ${JSON.stringify({ text: chunk.text })}\n\n`);
-                if (typeof (res as any).flush === 'function') {
-                    (res as any).flush();
+        for (const targetModel of uniqueModels) {
+            try {
+                console.log(`[Streaming Route] Attempting model pathway: '${targetModel}'`);
+                const responseStream = await googleGenAI.models.generateContentStream({
+                    model: targetModel,
+                    contents: textPrompt,
+                    config: {
+                        systemInstruction,
+                        temperature: 0.7,
+                        maxOutputTokens: 32768,
+                        ...(targetModel.includes("2.5") ? { thinkingConfig: { thinkingBudget: 8192 } } : {})
+                    }
+                });
+
+                for await (const chunk of responseStream) {
+                    if (chunk.text) {
+                        res.write(`data: ${JSON.stringify({ text: chunk.text, model: targetModel })}\n\n`);
+                        if (typeof (res as any).flush === 'function') {
+                            (res as any).flush();
+                        }
+                    }
                 }
+                streamSuccess = true;
+                break;
+            } catch (modelErr: any) {
+                console.warn(`[Streaming Route] Model '${targetModel}' failed: ${modelErr.message}. Attempting fallback...`);
             }
+        }
+
+        if (!streamSuccess) {
+            res.write(`data: ${JSON.stringify({ error: "All neural model pathways exhausted. Please check network connection or API Key." })}\n\n`);
         }
 
         res.write(`data: [DONE]\n\n`);
@@ -88,12 +111,13 @@ streamingRouter.post("/live", async (req: Request, res: Response, next: NextFunc
         const targetModel = "gemini-2.5-flash";
         const systemInstruction = `You are Gemini Live, the real-time AI voice assistant for Unison OS. Provide concise, direct, natural voice answers suitable for real-time speech synthesis. Keep answers under 3 sentences unless complex technical details are explicitly requested.`;
 
+        const googleGenAI = getGenAIClient();
         const responseStream = await googleGenAI.models.generateContentStream({
             model: targetModel,
             contents: textPrompt,
             config: {
                 systemInstruction,
-                temperature: 0.4,
+                temperature: 0.7,
                 maxOutputTokens: 2048
             }
         });
