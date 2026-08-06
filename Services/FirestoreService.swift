@@ -199,6 +199,62 @@ public class FirestoreService: ObservableObject {
         }
     }
     
+    @Published public var workspaceProjects: [WorkspaceProject] = {
+        if let data = UserDefaults.standard.data(forKey: "unison_workspace_projects_v3"),
+           let projects = try? JSONDecoder().decode([WorkspaceProject].self, from: data),
+           !projects.isEmpty {
+            return projects
+        }
+        let defaultPath = "/Users/jashoskam/Desktop/Unison-ES/Unison"
+        let defaultProj = WorkspaceProject(id: "default_proj", name: "Arduino", directoryPath: defaultPath)
+        return [defaultProj]
+    }()
+    
+    public func saveWorkspaceProjectsToDefaults() {
+        if let data = try? JSONEncoder().encode(workspaceProjects) {
+            UserDefaults.standard.set(data, forKey: "unison_workspace_projects_v3")
+        }
+    }
+    
+    public func addWorkspaceProject(path: String, completion: ((String) -> Void)? = nil) {
+        let name = (path as NSString).lastPathComponent
+        let projId = UUID().uuidString
+        if let existing = workspaceProjects.first(where: { $0.directoryPath == path }) {
+            self.activeWorkspaceDirectoryPath = existing.directoryPath
+            completion?(existing.id)
+            return
+        }
+        let proj = WorkspaceProject(id: projId, name: name, directoryPath: path)
+        workspaceProjects.append(proj)
+        saveWorkspaceProjectsToDefaults()
+        self.activeWorkspaceDirectoryPath = path
+        
+        // Create initial conversation tab under this project
+        createWorkspaceConversation(title: "New \(name) Chat", type: "project", parentId: proj.id) { newConvoId in
+            self.selectedConversationId = newConvoId
+            self.messages = []
+            completion?(projId)
+        }
+    }
+    
+    public func removeWorkspaceProject(id: String) {
+        workspaceProjects.removeAll { $0.id == id }
+        saveWorkspaceProjectsToDefaults()
+        if let first = workspaceProjects.first {
+            activeWorkspaceDirectoryPath = first.directoryPath
+        }
+    }
+    
+    public func renameWorkspaceConversation(id: String, newTitle: String) {
+        DispatchQueue.main.async {
+            if let idx = self.conversations.firstIndex(where: { $0.id == id }) {
+                self.conversations[idx].title = newTitle
+                self.saveConversationsToDefaults()
+                self.logEvent(message: "Renamed conversation \(id) to: \(newTitle)")
+            }
+        }
+    }
+    
     // Custom user configurable keys
     @Published public var selectedModel: String = {
         UserDefaults.standard.string(forKey: "unison_selected_model") ?? "Gemini 3.5 Flash"

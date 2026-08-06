@@ -392,8 +392,8 @@ public struct DesktopView: View {
                     }
                     .buttonStyle(.plain)
                     
-                    // 1. Projects Section Header
-                    VStack(alignment: .leading, spacing: 4) {
+                    // 1. Projects Section Header & Multi-Project Tree
+                    VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 6) {
                             Text("Projects")
                                 .font(.system(size: 14, weight: .medium))
@@ -404,84 +404,87 @@ public struct DesktopView: View {
                             Button(action: {
                                 openProjectFolderPicker()
                             }) {
-                                Image(systemName: "line.3.horizontal.decrease")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.white.opacity(0.45))
-                            }
-                            .buttonStyle(.plain)
-                            .help("Filter projects")
-                            
-                            Button(action: {
-                                openProjectFolderPicker()
-                            }) {
                                 Image(systemName: "folder.badge.plus")
                                     .font(.system(size: 12))
-                                    .foregroundColor(.white.opacity(0.7))
+                                    .foregroundColor(.white.opacity(0.75))
                             }
                             .buttonStyle(.plain)
-                            .help("Open workspace directory")
+                            .help("Open project directory from disk")
                         }
                         .padding(.vertical, 6)
                         .padding(.horizontal, 12)
                         
-                        // Workspace Folder Node (e.g. 📁 unison +)
-                        let activeFolder = (db.activeWorkspaceDirectoryPath as NSString?)?.lastPathComponent ?? "unison"
-                        HStack(spacing: 8) {
-                            Image(systemName: "folder")
-                                .font(.system(size: 12))
-                                .foregroundColor(.white.opacity(0.5))
-                            Text(activeFolder)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.white.opacity(0.8))
-                            Spacer()
-                            Button(action: {
-                                // Use the workspace directory path as parentId for proper hierarchy
-                                let projectParentId = db.activeWorkspaceDirectoryPath ?? activeFolder
-                                db.createWorkspaceConversation(title: "New \(activeFolder) Chat", type: "project", parentId: projectParentId) { newId in
-                                    db.selectedConversationId = newId
-                                    db.messages = []
-                                }
-                            }) {
-                                Image(systemName: "plus")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundColor(.white.opacity(0.7))
-                            }
-                            .buttonStyle(.plain)
-                            .help("Make a new chat tab under \(activeFolder)")
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 4)
-                        
-                        // Active Project Item (e.g., Cloning ChatGPT Project... 19h)
-                        if let firstConvo = db.conversations.first {
-                            let isSelected = db.selectedConversationId == firstConvo.id
-                            Button(action: {
-                                db.selectedConversationId = firstConvo.id
-                                db.messages = []
-                                db.fetchLiveMessages(conversationId: firstConvo.id)
-                            }) {
+                        // Multi-Project Folders and Nested Conversation Tabs
+                        ForEach(db.workspaceProjects) { project in
+                            VStack(alignment: .leading, spacing: 2) {
+                                // Project Folder Header Row
                                 HStack(spacing: 8) {
-                                    Text(firstConvo.title)
-                                        .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
-                                        .foregroundColor(isSelected ? .white : .white.opacity(0.7))
+                                    Image(systemName: "folder.fill")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.blue.opacity(0.85))
+                                    
+                                    Text(project.name)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(.white.opacity(0.9))
                                         .lineLimit(1)
+                                    
                                     Spacer()
-                                    Text("19h")
-                                        .font(.system(size: 11, weight: .regular))
-                                        .foregroundColor(.white.opacity(0.4))
+                                    
+                                    // Add conversation tab SPECIFICALLY under THIS project
+                                    Button(action: {
+                                        db.createWorkspaceConversation(title: "\(project.name) Chat", type: "project", parentId: project.id) { newId in
+                                            db.selectedConversationId = newId
+                                            db.activeWorkspaceDirectoryPath = project.directoryPath
+                                            db.messages = []
+                                        }
+                                    }) {
+                                        Image(systemName: "plus")
+                                            .font(.system(size: 11, weight: .bold))
+                                            .foregroundColor(.white.opacity(0.7))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Add new conversation tab under \(project.name)")
+                                    
+                                    // Option to remove project folder
+                                    Button(action: {
+                                        db.removeWorkspaceProject(id: project.id)
+                                    }) {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 9, weight: .bold))
+                                            .foregroundColor(.white.opacity(0.35))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Remove project workspace from list")
                                 }
-                                .padding(.vertical, 6)
                                 .padding(.horizontal, 12)
-                                .background(isSelected ? Color.white.opacity(0.12) : Color.clear)
-                                .cornerRadius(8)
+                                .padding(.vertical, 4)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    db.activeWorkspaceDirectoryPath = project.directoryPath
+                                }
+                                
+                                // Conversation Tabs under THIS Project
+                                let projectConvos = db.conversations.filter { $0.parentId == project.id || $0.parentId == project.directoryPath || ($0.type == "project" && (db.workspaceProjects.count == 1 || $0.parentId == nil)) }
+                                
+                                if projectConvos.isEmpty {
+                                    Text("No active tabs")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.white.opacity(0.35))
+                                        .padding(.leading, 24)
+                                        .padding(.vertical, 2)
+                                } else {
+                                    ForEach(projectConvos) { convo in
+                                        SidebarConversationRowView(convo: convo, projectPath: project.directoryPath, isProjectTab: true)
+                                    }
+                                    .padding(.leading, 12)
+                                }
                             }
-                            .buttonStyle(.plain)
-                            .padding(.leading, 16)
+                            .padding(.bottom, 6)
                         }
                     }
                     .padding(.bottom, 12)
                     
-                    // 2. Conversations Section Header with + button
+                    // 2. General Conversations Section Header with + button
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
                             Text("Conversations")
@@ -501,55 +504,23 @@ public struct DesktopView: View {
                                     .foregroundColor(.white.opacity(0.75))
                             }
                             .buttonStyle(.plain)
-                            .help("Start new conversation tab")
+                            .help("Start new general conversation tab")
                         }
                         .padding(.vertical, 6)
                         .padding(.horizontal, 12)
                         
-                        // Conversations List under Active Project
-                        if db.conversations.count <= 1 {
-                            Text("No additional conversation tabs")
+                        // General Chats List
+                        let generalConvos = db.conversations.filter { $0.type == "chat" || ($0.parentId == nil && $0.type != "project") }
+                        
+                        if generalConvos.isEmpty {
+                            Text("No general conversation tabs")
                                 .font(.system(size: 11))
                                 .foregroundColor(.gray)
                                 .padding(.leading, 12)
                                 .padding(.vertical, 4)
                         } else {
-                            ForEach(Array(db.conversations.dropFirst())) { convo in
-                                let isSelected = db.selectedConversationId == convo.id
-                                HStack(spacing: 4) {
-                                    Button(action: {
-                                        db.selectedConversationId = convo.id
-                                        db.messages = []
-                                        db.fetchLiveMessages(conversationId: convo.id)
-                                    }) {
-                                        HStack(spacing: 8) {
-                                            Text(convo.title)
-                                                .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
-                                                .foregroundColor(isSelected ? .white : .white.opacity(0.7))
-                                                .lineLimit(1)
-                                            Spacer()
-                                            Text("2d")
-                                                .font(.system(size: 11, weight: .regular))
-                                                .foregroundColor(.white.opacity(0.4))
-                                        }
-                                    }
-                                    .buttonStyle(.plain)
-                                    
-                                    Button(action: {
-                                        db.deleteWorkspaceConversation(id: convo.id)
-                                    }) {
-                                        Image(systemName: "trash")
-                                            .font(.system(size: 10))
-                                            .foregroundColor(.red.opacity(0.6))
-                                            .padding(4)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("Delete conversation tab")
-                                }
-                                .padding(.vertical, 5)
-                                .padding(.horizontal, 12)
-                                .background(isSelected ? Color.white.opacity(0.1) : Color.clear)
-                                .cornerRadius(8)
+                            ForEach(generalConvos) { convo in
+                                SidebarConversationRowView(convo: convo, projectPath: nil, isProjectTab: false)
                             }
                         }
                     }
@@ -2042,5 +2013,107 @@ You can record directly your classes and automatically transcribe them using Eve
             }
         }
         .background(Color(red: 0.93, green: 0.93, blue: 0.93).ignoresSafeArea())
+    }
+}
+
+// MARK: - Sidebar Conversation Tab Row View with Rename & Delete Support
+public struct SidebarConversationRowView: View {
+    let convo: Conversation
+    let projectPath: String?
+    let isProjectTab: Bool
+    
+    @ObservedObject var db = FirestoreService.shared
+    @State private var isEditingTitle: Bool = false
+    @State private var editedTitle: String = ""
+    @FocusState private var isFieldFocused: Bool
+    
+    public init(convo: Conversation, projectPath: String? = nil, isProjectTab: Bool) {
+        self.convo = convo
+        self.projectPath = projectPath
+        self.isProjectTab = isProjectTab
+    }
+    
+    public var body: some View {
+        let isSelected = db.selectedConversationId == convo.id
+        
+        HStack(spacing: 6) {
+            if isEditingTitle {
+                TextField("Conversation title", text: $editedTitle, onCommit: {
+                    let clean = editedTitle.trimmingCharacters(in: .whitespaces)
+                    if !clean.isEmpty {
+                        db.renameWorkspaceConversation(id: convo.id, newTitle: clean)
+                    }
+                    isEditingTitle = false
+                })
+                .focused($isFieldFocused)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.white)
+                .textFieldStyle(PlainTextFieldStyle())
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.white.opacity(0.15))
+                .cornerRadius(4)
+                .onAppear {
+                    editedTitle = convo.title
+                    isFieldFocused = true
+                }
+            } else {
+                Button(action: {
+                    db.selectedConversationId = convo.id
+                    if let path = projectPath {
+                        db.activeWorkspaceDirectoryPath = path
+                    }
+                    db.messages = []
+                    db.fetchLiveMessages(conversationId: convo.id)
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: isProjectTab ? "terminal" : "bubble.left")
+                            .font(.system(size: 10))
+                            .foregroundColor(isSelected ? (isProjectTab ? .cyan : .blue) : .white.opacity(0.45))
+                        
+                        Text(convo.title)
+                            .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
+                            .foregroundColor(isSelected ? .white : .white.opacity(0.8))
+                            .lineLimit(1)
+                        
+                        Spacer()
+                    }
+                }
+                .buttonStyle(PlainButtonStyle())
+                .onTapGesture(count: 2) {
+                    editedTitle = convo.title
+                    isEditingTitle = true
+                }
+                
+                // Rename icon
+                Button(action: {
+                    editedTitle = convo.title
+                    isEditingTitle = true
+                }) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 9))
+                        .foregroundColor(.white.opacity(0.35))
+                        .padding(2)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help("Rename conversation tab")
+                
+                // Delete icon
+                Button(action: {
+                    db.deleteWorkspaceConversation(id: convo.id)
+                }) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 10))
+                        .foregroundColor(.red.opacity(0.6))
+                        .padding(2)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help("Delete conversation tab")
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background(isSelected ? Color.white.opacity(0.1) : Color.clear)
+        .cornerRadius(6)
     }
 }

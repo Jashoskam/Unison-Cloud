@@ -106,3 +106,18 @@ public struct UnisonFile: Identifiable, Codable, Hashable {
         self.content = content
     }
 }
+
+/// Persistent Workspace Project directory representation
+public struct WorkspaceProject: Identifiable, Codable, Hashable {
+    public var id: String
+    public var name: String
+    public var directoryPath: String
+    public var createdAt: Date
+    
+    public init(id: String = UUID().uuidString, name: String, directoryPath: String, createdAt: Date = Date()) {
+        self.id = id
+        self.name = name
+        self.directoryPath = directoryPath
+        self.createdAt = createdAt
+    }
+}
