@@ -21,7 +21,7 @@ searchRouter.post("/index", async (req: Request, res: Response, next: NextFuncti
 
 searchRouter.get("/search", (req: Request, res: Response, next: NextFunction) => {
     try {
-        const query = (req.query.q as String) || "";
+        const query = ((req.query.q as string) || "").toString();
         const limit = parseInt((req.query.limit as string) || "15", 10);
 
         if (!query) {
