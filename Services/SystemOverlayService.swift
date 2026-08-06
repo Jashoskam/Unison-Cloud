@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AVFoundation
 #if os(macOS)
 import AppKit
 import ApplicationServices
@@ -272,6 +273,26 @@ public final class SystemOverlayService: ObservableObject {
         return ""
     }
 
+    public func requestAllSystemPermissions() {
+        #if os(macOS)
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+        _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
+        
+        if #available(macOS 10.15, *) {
+            if !CGPreflightScreenCaptureAccess() {
+                CGRequestScreenCaptureAccess()
+            }
+        }
+        
+        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        if micStatus == .notDetermined {
+            AVCaptureDevice.requestAccess(for: .audio) { _ in }
+        }
+        
+        SpeechRecognizer.shared.requestPermissions()
+        #endif
+    }
+
     private func buildAccessibilitySummary(appName: String, windowTitle: String, selectedText: String) -> String {
         var parts: [String] = ["App: \(appName)"]
         if !windowTitle.isEmpty { parts.append("Window: \(windowTitle)") }
@@ -349,11 +370,7 @@ public struct SpotlightOverlayView: View {
                         .foregroundColor(.white.opacity(0.85))
                     Spacer()
                     Button(action: {
-                        #if os(macOS)
-                        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-                        _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
-                        isAccessibilityGranted = AXIsProcessTrusted()
-                        #endif
+                        service.requestAllSystemPermissions()
                     }) {
                         Text("Grant Access")
                             .font(.system(size: 11, weight: .bold))
@@ -385,6 +402,7 @@ public struct SpotlightOverlayView: View {
             }
         }
         .onAppear {
+            service.requestAllSystemPermissions()
             #if os(macOS)
             isAccessibilityGranted = AXIsProcessTrusted()
             #endif

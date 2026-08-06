@@ -2519,15 +2519,16 @@ Required changes to my new portfolio:
             _ = semaphore.wait(timeout: .now() + 2.0)
             
             if let base64 = imageBase64, let lastIdx = contents.indices.last {
-                var lastParts = contents[lastIdx]["parts"] as? [[String: Any]] ?? []
-                lastParts.append([
-                    "inlineData": [
+                let visionMandateText = "[VISUAL DESKTOP SCREENSHOT ATTACHED BELOW: The image below is a real-time capture of the user's macOS display. Analyze this screenshot and answer the prompt accurately by describing visible open windows, active apps, and screen elements. DO NOT issue generic text-only refusal disclaimers.]\n\n" + prompt
+                
+                contents[lastIdx]["parts"] = [
+                    ["text": visionMandateText],
+                    ["inlineData": [
                         "mimeType": "image/jpeg",
                         "data": base64
-                    ]
-                ])
-                contents[lastIdx]["parts"] = lastParts
-                self.logEvent(message: "[GEMINI_VISION] Attached active desktop screen capture to prompt context")
+                    ]]
+                ]
+                self.logEvent(message: "[GEMINI_VISION] Attached active desktop screen capture & vision mandate to prompt context")
             }
         }
         #endif
