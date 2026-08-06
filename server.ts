@@ -1,7 +1,10 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
+let createViteServer: any;
+try {
+    createViteServer = require("vite").createServer;
+} catch (_) {}
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
 import { GoogleGenAI } from "@google/genai";
