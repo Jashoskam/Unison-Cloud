@@ -127,23 +127,27 @@ public final class SystemOverlayService: ObservableObject {
 
     public func hideSpotlight() {
         spotlightWindow?.orderOut(nil)
-        spotlightWindow = nil
         isSpotlightVisible = false
     }
 
     @objc private func toggleSpotlightFromMenuBar() {
-        if isSpotlightVisible {
-            hideSpotlight()
-        } else {
-            showSpotlight()
-        }
+        toggleSpotlight()
     }
 
+    private var lastToggleTimestamp: TimeInterval = 0
+
     public func toggleSpotlight() {
-        if isSpotlightVisible {
-            hideSpotlight()
-        } else {
-            showSpotlight()
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastToggleTimestamp > 0.35 else { return }
+        lastToggleTimestamp = now
+        
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            if self.isSpotlightVisible {
+                self.hideSpotlight()
+            } else {
+                self.showSpotlight()
+            }
         }
     }
 
@@ -175,58 +179,30 @@ public final class SystemOverlayService: ObservableObject {
         spotlightWindow = panel
     }
 
-    private var carbonHotKeyRef: EventHotKeyRef?
-    private var eventHandlerRef: EventHandlerRef?
-
     private func startGlobalHotkeyMonitoring() {
         #if os(macOS)
-        // 1. Carbon EventHotKey (System-wide OS-level global hotkey for Option + Space across ALL applications)
-        var eventSpec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        let hotKeyID = EventHotKeyID(signature: OSType(0x554E534E), id: 1) // 'UNSN'
-        
-        let status = RegisterEventHotKey(
-            UInt32(kVK_Space),
-            UInt32(optionKey),
-            hotKeyID,
-            GetApplicationEventTarget(),
-            0,
-            &carbonHotKeyRef
-        )
-        
-        if status == noErr {
-            InstallEventHandler(GetApplicationEventTarget(), { (_, _, _) -> OSStatus in
-                Task { @MainActor in
-                    SystemOverlayService.shared.toggleSpotlight()
-                }
-                return noErr
-            }, 1, &eventSpec, nil, &eventHandlerRef)
-        }
-        #endif
-
-        // 2. NSEvent Global & Local Monitor Fallbacks
         guard globalEventMonitor == nil else { return }
+        
         globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             guard let self = self else { return }
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             let isOptionSpace = flags.contains(.option) && (event.keyCode == 49 || event.charactersIgnoringModifiers == " ")
             if isOptionSpace {
-                DispatchQueue.main.async {
-                    self.toggleSpotlight()
-                }
+                self.toggleSpotlight()
             }
         }
+        
         _ = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             guard let self = self else { return event }
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             let isOptionSpace = flags.contains(.option) && (event.keyCode == 49 || event.charactersIgnoringModifiers == " ")
             if isOptionSpace {
-                DispatchQueue.main.async {
-                    self.toggleSpotlight()
-                }
+                self.toggleSpotlight()
                 return nil
             }
             return event
         }
+        #endif
     }
 
     private func windowTitle(for app: NSRunningApplication) -> String {
