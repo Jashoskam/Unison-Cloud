@@ -84,3 +84,50 @@ STRICT INDUSTRIAL EXECUTION LOG PROTOCOL (ANTIGRAVITY / CURSOR STANDARDS):
         }
     }
 });
+
+streamingRouter.post("/live", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { prompt, voiceContext } = req.body;
+        const textPrompt = prompt || "Hello Gemini Live";
+
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache, no-transform");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Accel-Buffering", "no");
+
+        const targetModel = "gemini-2.5-flash";
+        const systemInstruction = `You are Gemini Live, the real-time AI voice assistant for Unison OS. Provide concise, direct, natural voice answers suitable for real-time speech synthesis. Keep answers under 3 sentences unless complex technical details are explicitly requested.`;
+
+        const responseStream = await googleGenAI.models.generateContentStream({
+            model: targetModel,
+            contents: textPrompt,
+            config: {
+                systemInstruction,
+                temperature: 0.4,
+                maxOutputTokens: 2048
+            }
+        });
+
+        let accumulated = "";
+        for await (const chunk of responseStream) {
+            if (chunk.text) {
+                accumulated += chunk.text;
+                res.write(`data: ${JSON.stringify({ text: chunk.text, fullText: accumulated })}\n\n`);
+                if (typeof (res as any).flush === 'function') {
+                    (res as any).flush();
+                }
+            }
+        }
+
+        res.write(`data: ${JSON.stringify({ type: "done", fullText: accumulated })}\n\n`);
+        res.write(`data: [DONE]\n\n`);
+        res.end();
+    } catch (err: any) {
+        if (!res.headersSent) {
+            next(new AppError(`Gemini Live failure: ${err.message}`, 500, true, "LIVE_STREAMING_ERROR"));
+        } else {
+            res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+            res.end();
+        }
+    }
+});
