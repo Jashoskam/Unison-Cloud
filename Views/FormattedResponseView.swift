@@ -1,21 +1,13 @@
 import SwiftUI
 import Combine
 
-public enum MessageBlock: Identifiable, Equatable {
-    public var id: String {
-        switch self {
-        case .text(let t): return "t_\(t.hashValue)"
-        case .header(let l, let t): return "h_\(l)_\(t.hashValue)"
-        case .bullet(let t): return "b_\(t.hashValue)"
-        case .quote(let t): return "q_\(t.hashValue)"
-        case .code(let l, let c): return "c_\(l)_\(c.hashValue)"
-        case .image(let url): return "img_\(url.hashValue)"
-        }
-    }
+public enum MessageBlock: Identifiable {
+    public var id: String { UUID().uuidString }
     
     case text(String)
     case header(level: Int, text: String)
     case bullet(String)
+    case numbered(number: String, text: String)
     case quote(String)
     case code(lang: String, code: String)
     case image(url: String)
@@ -84,6 +76,11 @@ public func parseMarkdown(_ text: String) -> [MessageBlock] {
                 flushTextBlock()
                 let bulletText = String(trimmedLine.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
                 blocks.append(.bullet(bulletText))
+            } else if let numRange = trimmedLine.range(of: "^\\d+\\.\\s+", options: .regularExpression) {
+                flushTextBlock()
+                let numStr = String(trimmedLine[numRange]).trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ".", with: "")
+                let restText = String(trimmedLine[numRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                blocks.append(.numbered(number: numStr, text: restText))
             } else {
                 if currentTextBlock.isEmpty {
                     currentTextBlock = line
@@ -456,6 +453,33 @@ public struct BulletRowView: View {
                 .font(.system(size: 13))
                 .foregroundColor(.white.opacity(0.95))
                 .lineSpacing(4)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+public struct NumberedListRowView: View {
+    let number: String
+    let text: String
+    let sources: [GroundedSource]
+    
+    public init(number: String, text: String, sources: [GroundedSource] = []) {
+        self.number = number
+        self.text = text
+        self.sources = sources
+    }
+    
+    public var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("\(number).")
+                .foregroundColor(.white.opacity(0.85))
+                .font(.system(size: 14, weight: .bold))
+                .frame(minWidth: 20, alignment: .trailing)
+            
+            parseFormattedText(text, sources: sources)
+                .font(.system(size: 14.5, weight: .regular))
+                .foregroundColor(Color(red: 0.92, green: 0.93, blue: 0.96))
+                .lineSpacing(5.5)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -931,6 +955,235 @@ func removeLeftoverTagMarkers(_ content: String) -> String {
         }
     }
     return result
+}
+
+// MARK: - Collapsible Web Search Grounding Header (Searching the web ˅)
+public struct WebSearchGroundingHeaderView: View {
+    let searchQuery: String
+    let sources: [GroundedSource]
+    
+    @State private var isExpanded: Bool = true
+    @State private var isOverflowExpanded: Bool = false
+    
+    public init(searchQuery: String, sources: [GroundedSource]) {
+        self.searchQuery = searchQuery
+        self.sources = sources
+    }
+    
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Header disclosure control (Searching the web ˅)
+            Button(action: {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.65))
+                    
+                    Text("Searching the web")
+                        .font(.system(size: 12.5, weight: .regular))
+                        .foregroundColor(.white.opacity(0.75))
+                    
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.45))
+                    
+                    Spacer()
+                }
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 5) {
+                    // Itemized Search Query Display
+                    if !searchQuery.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.4))
+                            Text(searchQuery)
+                                .font(.system(size: 12, weight: .regular, design: .default))
+                                .foregroundColor(.white.opacity(0.55))
+                        }
+                        .padding(.leading, 18)
+                        .padding(.vertical, 2)
+                    }
+                    
+                    // Source Attribution List
+                    let displaySources = isOverflowExpanded ? sources : Array(sources.prefix(3))
+                    let overflowCount = sources.count - 3
+                    
+                    ForEach(displaySources) { source in
+                        SourceRowWithHoverPopover(source: source)
+                    }
+                    .padding(.leading, 18)
+                    
+                    // Overflow Counter Button (+7 more)
+                    if overflowCount > 0 && !isOverflowExpanded {
+                        Button(action: {
+                            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                                isOverflowExpanded = true
+                            }
+                        }) {
+                            Text("+\(overflowCount) more")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.white.opacity(0.45))
+                                .padding(.leading, 18)
+                                .padding(.vertical, 2)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Itemized Source Row with Rich Hover Popover Preview
+struct SourceRowWithHoverPopover: View {
+    let source: GroundedSource
+    @State private var isHovered: Bool = false
+    
+    var domainLabel: String {
+        if let site = source.siteName, !site.isEmpty {
+            return site.replacingOccurrences(of: "www.", with: "").lowercased()
+        }
+        if let urlStr = source.url, let host = URL(string: urlStr)?.host {
+            return host.replacingOccurrences(of: "www.", with: "").components(separatedBy: ".").first ?? "web"
+        }
+        return "web"
+    }
+    
+    var isYoutube: Bool {
+        domainLabel.lowercased().contains("youtube") || domainLabel.lowercased().contains("youtu.be")
+    }
+    
+    var body: some View {
+        Button(action: {
+            if let urlStr = source.url, let url = URL(string: urlStr) {
+                #if os(macOS)
+                NSWorkspace.shared.open(url)
+                #endif
+            }
+        }) {
+            HStack(spacing: 8) {
+                if isYoutube {
+                    Image(systemName: "play.rectangle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(.red)
+                } else {
+                    AsyncFaviconView(domain: domainLabel)
+                }
+                
+                Text(source.title ?? domainLabel)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundColor(.white.opacity(0.85))
+                    .lineLimit(1)
+                
+                Text(domainLabel)
+                    .font(.system(size: 10.5, weight: .regular))
+                    .foregroundColor(.white.opacity(0.4))
+                
+                Spacer()
+            }
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onHover { hover in
+            isHovered = hover
+        }
+        .popover(isPresented: $isHovered, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    if isYoutube {
+                        Image(systemName: "play.rectangle.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(.red)
+                    } else {
+                        AsyncFaviconView(domain: domainLabel)
+                    }
+                    Text(domainLabel)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.6))
+                }
+                
+                Text(source.title ?? "Web Resource")
+                    .font(.system(size: 12.5, weight: .bold))
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+                
+                if let snippet = source.snippet, !snippet.isEmpty {
+                    Text(snippet)
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundColor(.white.opacity(0.75))
+                        .lineLimit(4)
+                }
+            }
+            .padding(12)
+            .frame(width: 280)
+            .background(Color(red: 0.12, green: 0.12, blue: 0.15))
+            .cornerRadius(10)
+        }
+    }
+}
+
+// MARK: - Citation Chips Footer Pill Buttons
+public struct CitationChipsFooterView: View {
+    let sources: [GroundedSource]
+    
+    public init(sources: [GroundedSource]) {
+        self.sources = sources
+    }
+    
+    public var body: some View {
+        if !sources.isEmpty {
+            HStack(spacing: 8) {
+                ForEach(Array(sources.prefix(6))) { source in
+                    let domain = (source.siteName ?? URL(string: source.url ?? "")?.host ?? "web")
+                        .replacingOccurrences(of: "www.", with: "")
+                        .components(separatedBy: ".").first ?? "web"
+                    
+                    let isYoutube = domain.lowercased().contains("youtube")
+                    
+                    Button(action: {
+                        if let urlStr = source.url, let url = URL(string: urlStr) {
+                            #if os(macOS)
+                            NSWorkspace.shared.open(url)
+                            #endif
+                        }
+                    }) {
+                        HStack(spacing: 5) {
+                            if isYoutube {
+                                Image(systemName: "play.rectangle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.red)
+                            } else {
+                                AsyncFaviconView(domain: domain)
+                            }
+                            Text(domain.lowercased())
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.white.opacity(0.06))
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(.top, 8)
+        }
+    }
 }
 
 public struct GroundedSourcesView: View {
@@ -3411,6 +3664,11 @@ public struct FormattedResponseView: View {
                 DynamicThinkingBlockView(thoughts: synthesizedThoughts, isStreaming: isStreaming, detectedSources: parsedResult.sources)
             }
             
+            // Collapsible Web Search Grounding Header (Searching the web ˅)
+            if !parsedResult.sources.isEmpty {
+                WebSearchGroundingHeaderView(searchQuery: "", sources: parsedResult.sources)
+            }
+            
             if let project = projectNode {
                 ProjectNodeView(project: project)
             }
@@ -3435,6 +3693,8 @@ public struct FormattedResponseView: View {
                         HeaderView(level: level, text: headerText)
                     case .bullet(let bulletText):
                         BulletRowView(text: bulletText, sources: parsedResult.sources)
+                    case .numbered(let number, let listText):
+                        NumberedListRowView(number: number, text: listText, sources: parsedResult.sources)
                     case .quote(let quoteText):
                         BlockquoteView(text: quoteText, sources: parsedResult.sources)
                     case .code(let lang, let codeText):
@@ -3443,6 +3703,11 @@ public struct FormattedResponseView: View {
                         AgentScreenshotView(url: url)
                     }
                 }
+            }
+            
+            // Citation Chips Footer Pill Buttons at bottom
+            if !parsedResult.sources.isEmpty {
+                CitationChipsFooterView(sources: parsedResult.sources)
             }
             
             // Bottom Action Bar
