@@ -7,7 +7,7 @@ export const searchRouter = Router();
 searchRouter.post("/index", async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { dir } = req.body;
-        const targetDir = dir || process.cwd();
+        const targetDir = typeof dir === "string" ? dir : process.cwd();
         const stats = await CodeIndexer.getInstance().indexWorkspace(targetDir);
         res.json({
             success: true,
@@ -21,17 +21,18 @@ searchRouter.post("/index", async (req: Request, res: Response, next: NextFuncti
 
 searchRouter.get("/search", (req: Request, res: Response, next: NextFunction) => {
     try {
-        const query = ((req.query.q as string) || "").toString();
-        const limit = parseInt((req.query.limit as string) || "15", 10);
+        const searchQuery: string = typeof req.query.q === "string" ? req.query.q : "";
+        const limitStr: string = typeof req.query.limit === "string" ? req.query.limit : "15";
+        const limit = parseInt(limitStr, 10);
 
-        if (!query) {
+        if (!searchQuery) {
             return res.json({ success: true, query: "", results: [] });
         }
 
-        const results = CodeIndexer.getInstance().searchCodebase(query, limit);
+        const results = CodeIndexer.getInstance().searchCodebase(searchQuery, limit);
         res.json({
             success: true,
-            query,
+            query: searchQuery,
             totalMatches: results.length,
             results
         });
