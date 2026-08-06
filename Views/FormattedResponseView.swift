@@ -2919,8 +2919,8 @@ public struct DynamicThinkingBlockView: View {
                             .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.1), lineWidth: 1))
                     }
                     
-                    // Explored Activity Feed Container
-                    if !log.exploredItems.isEmpty {
+                    // Explored Activity Feed Container (ONLY render if actual files or folders were explored)
+                    if !log.exploredItems.isEmpty && (log.exploredFilesCount > 0 || log.exploredFoldersCount > 0) {
                         VStack(alignment: .leading, spacing: 4) {
                             Button(action: {
                                 withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
@@ -3393,8 +3393,8 @@ public struct FormattedResponseView: View {
             return raw
         }
         
-        // PRIORITY 3: Minimal fallback — just show thinking indicator, no fake data
-        return "Thought for 1s\nAnalyzing your request and generating a response..."
+        // PRIORITY 3: If no tools were executed and no thinking text exists, return empty string
+        return ""
     }
     
     public var body: some View {
@@ -3407,7 +3407,9 @@ public struct FormattedResponseView: View {
         let parsedResult = extractSources(textWithoutPlan)
         
         VStack(alignment: .leading, spacing: 10) {
-            DynamicThinkingBlockView(thoughts: synthesizedThoughts, isStreaming: isStreaming, detectedSources: parsedResult.sources)
+            if isStreaming || !synthesizedThoughts.isEmpty {
+                DynamicThinkingBlockView(thoughts: synthesizedThoughts, isStreaming: isStreaming, detectedSources: parsedResult.sources)
+            }
             
             if let project = projectNode {
                 ProjectNodeView(project: project)
