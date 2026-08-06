@@ -2306,17 +2306,26 @@ Required changes to my new portfolio:
                                         DispatchQueue.main.async { onChunk(deltaText) }
                                     } else if let fc = part["functionCall"] as? [String: Any],
                                               let fcName = fc["name"] as? String {
-                                        // Recursive tool call — the model wants another tool
+                                        // FUNCTION CALL DETECTED — execute the tool locally & stream live activity card to UI
                                         let fcArgs = fc["args"] as? [String: Any] ?? [:]
-                                        self.logEvent(message: "[TOOL_CHAIN] Model requested additional tool: \(fcName)")
-                                        
-                                        let (toolResult, toolSummary, toolDuration) = self.executeToolCall(name: fcName, args: fcArgs)
                                         let argsJson = (try? String(data: JSONSerialization.data(withJSONObject: fcArgs), encoding: .utf8)) ?? "{}"
-                                        toolExecs.append(ToolExecution(toolName: fcName, arguments: argsJson, resultSummary: toolSummary, durationMs: toolDuration))
+                                        self.logEvent(message: "[FUNCTION_CALL] Model invoked tool: \(fcName) args: \(fcArgs)")
+                                        
+                                        // Push immediate live activity feed update into UI
+                                        let pendingTool = ToolExecution(toolName: fcName, arguments: argsJson, resultSummary: "Executing \(fcName)...", durationMs: 0)
+                                        toolExecs.append(pendingTool)
                                         
                                         DispatchQueue.main.async {
-                                            onChunk("") // Trigger UI update
+                                            onChunk("") // Trigger UI update to show tool activity
                                         }
+                                        
+                                        let (toolResult, toolSummary, toolDuration) = self.executeToolCall(name: fcName, args: fcArgs)
+                                        
+                                        if let lastIdx = toolExecs.indices.last {
+                                            toolExecs[lastIdx] = ToolExecution(toolName: fcName, arguments: argsJson, resultSummary: toolSummary, durationMs: toolDuration)
+                                        }
+                                        
+                                        self.logEvent(message: "[FUNCTION_CALL] Tool \(fcName) completed in \(toolDuration)ms: \(toolSummary)")
                                         
                                         // Recursively send this tool's response
                                         self.sendToolResponse(
