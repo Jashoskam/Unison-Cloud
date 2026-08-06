@@ -2629,7 +2629,12 @@ public func parseExecutionLog(_ text: String) -> ParsedExecutionLog {
                 
                 let isFolder = rawRest.contains("/") && !rawRest.contains(".") || rawRest.hasPrefix("~") || rawRest == "Models" || rawRest == "Services" || rawRest == "Views"
                 if !isFolder && action == "Edited" && addCount == 0 {
-                    addCount = 69
+                    var lineCount = 1
+                    if let codeMatch = text.range(of: #"```[\s\S]*?\n([\s\S]*?)```"#, options: .regularExpression) {
+                        let snippet = String(text[codeMatch])
+                        lineCount = max(1, snippet.components(separatedBy: .newlines).count - 2)
+                    }
+                    addCount = lineCount
                     delCount = 0
                 }
                 customExplored.append(ExploredLogItem(action: action, isFolder: isFolder, path: rawRest, lines: linesRef, additions: addCount, deletions: delCount))
@@ -2649,7 +2654,12 @@ public func parseExecutionLog(_ text: String) -> ParsedExecutionLog {
                 if !seen.contains(path) && !path.contains("http") {
                     seen.insert(path)
                     let isFolder = !path.contains(".")
-                    let addCount = 69
+                    var lineCount = 1
+                    if let codeMatch = text.range(of: #"```[\s\S]*?\n([\s\S]*?)```"#, options: .regularExpression) {
+                        let snippet = String(text[codeMatch])
+                        lineCount = max(1, snippet.components(separatedBy: .newlines).count - 2)
+                    }
+                    let addCount = lineCount
                     let delCount = 0
                     customExplored.append(ExploredLogItem(action: "Edited", isFolder: isFolder, path: path, lines: nil, additions: addCount, deletions: delCount))
                 }
@@ -2929,6 +2939,11 @@ public struct DynamicThinkingBlockView: View {
                                     ForEach(Array(log.exploredItems.enumerated()), id: \.element.id) { index, item in
                                         let isCurrentActiveAction = isStreaming && (index == log.exploredItems.count - 1)
                                         ExploredLogItemView(item: item, isCurrentActiveAction: isCurrentActiveAction)
+                                            .transition(.asymmetric(
+                                                insertion: .move(edge: .top).combined(with: .opacity),
+                                                removal: .opacity
+                                            ))
+                                            .animation(.spring(response: 0.35, dampingFraction: 0.82).delay(Double(index) * 0.12), value: log.exploredItems.count)
                                     }
                                 }
                                 .padding(.leading, 12)
@@ -3295,6 +3310,7 @@ public struct FormattedResponseView: View {
     let thoughts: String?
     var isStreaming: Bool = false
     var messageId: String? = nil
+    var toolExecutions: [ToolExecution]? = nil
     var onSelectFollowUp: ((String) -> Void)? = nil
     
     @State private var showSources: Bool = false
@@ -3304,11 +3320,12 @@ public struct FormattedResponseView: View {
     
     private let typewriterTimer = Timer.publish(every: 0.016, on: .main, in: .common).autoconnect()
     
-    public init(text: String, thoughts: String? = nil, isStreaming: Bool = false, messageId: String? = nil, onSelectFollowUp: ((String) -> Void)? = nil) {
+    public init(text: String, thoughts: String? = nil, isStreaming: Bool = false, messageId: String? = nil, toolExecutions: [ToolExecution]? = nil, onSelectFollowUp: ((String) -> Void)? = nil) {
         self.text = text
         self.thoughts = thoughts
         self.isStreaming = isStreaming
         self.messageId = messageId
+        self.toolExecutions = toolExecutions
         self.onSelectFollowUp = onSelectFollowUp
     }
     
@@ -3318,19 +3335,69 @@ public struct FormattedResponseView: View {
         return String(str[..<index])
     }
     
+    private func synthesizeActivityFeed(rawThoughts: String?, currentText: String) -> String {
+        // PRIORITY 1: If we have REAL tool execution data from Gemini function calling,
+        // render that instead of any fake template or model-generated thoughts
+        if let tools = toolExecutions, !tools.isEmpty {
+            let totalDurationMs = tools.reduce(0) { $0 + $1.durationMs }
+            let totalDurationSec = max(1, totalDurationMs / 1000)
+            
+            // Count files and folders from tool executions
+            var fileCount = 0
+            var folderCount = 0
+            var commandCount = 0
+            var searchCount = 0
+            for t in tools {
+                switch t.toolName {
+                case "read_file", "write_file": fileCount += 1
+                case "list_directory": folderCount += 1
+                case "run_command": commandCount += 1
+                case "search_files": searchCount += 1
+                default: break
+                }
+            }
+            
+            var lines: [String] = []
+            lines.append("Worked for \(totalDurationSec)s")
+            
+            var exploredParts: [String] = []
+            if fileCount > 0 { exploredParts.append("\(fileCount) file\(fileCount == 1 ? "" : "s")") }
+            if folderCount > 0 { exploredParts.append("\(folderCount) folder\(folderCount == 1 ? "" : "s")") }
+            if commandCount > 0 { exploredParts.append("\(commandCount) command\(commandCount == 1 ? "" : "s")") }
+            if searchCount > 0 { exploredParts.append("\(searchCount) search\(searchCount == 1 ? "" : "es")") }
+            if !exploredParts.isEmpty {
+                lines.append("Explored \(exploredParts.joined(separator: ", "))")
+            }
+            lines.append("")
+            
+            // Render each real tool execution as an activity line
+            for t in tools {
+                lines.append(t.resultSummary)
+            }
+            
+            return lines.joined(separator: "\n")
+        }
+        
+        // PRIORITY 2: Use model-generated [THOUGHTS] block if present
+        if let raw = rawThoughts, !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return raw
+        }
+        
+        // PRIORITY 3: Minimal fallback — just show thinking indicator, no fake data
+        return "Thought for 1s\nAnalyzing your request and generating a response..."
+    }
+    
     public var body: some View {
         let currentText = isStreaming ? typewrittenText : text
         let (textWithoutThoughts, extractedThoughts) = extractThinkingBlock(currentText)
         let finalThoughts = isStreaming ? typewrittenThoughts : (thoughts ?? extractedThoughts)
-        let activeThoughts = finalThoughts?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let synthesizedThoughts = synthesizeActivityFeed(rawThoughts: finalThoughts, currentText: currentText)
         let (textWithoutProject, projectNode) = extractProjectNode(textWithoutThoughts)
         let (textWithoutPlan, planNode) = extractPlanNode(textWithoutProject)
         let parsedResult = extractSources(textWithoutPlan)
         
         VStack(alignment: .leading, spacing: 10) {
-            if let thoughtsToRender = activeThoughts, !thoughtsToRender.isEmpty {
-                DynamicThinkingBlockView(thoughts: thoughtsToRender, isStreaming: isStreaming, detectedSources: parsedResult.sources)
-            }
+            DynamicThinkingBlockView(thoughts: synthesizedThoughts, isStreaming: isStreaming, detectedSources: parsedResult.sources)
             
             if let project = projectNode {
                 ProjectNodeView(project: project)
@@ -3340,7 +3407,7 @@ public struct FormattedResponseView: View {
                 PlanCardView(plan: plan)
             }
             
-            if currentText.contains("Worked for") || currentText.contains("AGENT_PROCESS_CARD") || currentText.contains("[ App Launch ]") || currentText.contains("[ Key Shortcut ]") {
+            if currentText.contains("AGENT_PROCESS_CARD") || currentText.contains("[ App Launch ]") || currentText.contains("[ Key Shortcut ]") {
                 ProfessionalAgentProcessCardView(text: currentText)
             } else {
                 let parsedCmds = parseSwiftCommands(from: currentText)

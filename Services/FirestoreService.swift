@@ -1645,6 +1645,699 @@ Required changes to my new portfolio:
         return "convo"
     }
 
+    // MARK: - GEMINI FUNCTION CALLING TOOL DECLARATIONS & EXECUTION ENGINE
+    
+    /// JSON-schema tool declarations for Gemini's native function calling API.
+    /// These are injected into every streamGenerateContent request so the model can
+    /// invoke native macOS tools: read files, list dirs, write files, run commands, search.
+    private var toolDeclarations: [[String: Any]] {
+        return [
+            [
+                "name": "read_file",
+                "description": "Read the full text contents of a file at the given path in the user's workspace. Returns the file content as a string. Use this to inspect source code, configs, or any text file.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "path": [
+                            "type": "string",
+                            "description": "Relative or absolute path to the file. Relative paths are resolved from the active workspace directory."
+                        ]
+                    ],
+                    "required": ["path"]
+                ]
+            ],
+            [
+                "name": "list_directory",
+                "description": "List all files and subdirectories inside the given directory path. Returns names, types (file/directory), and sizes. Use this to explore project structure.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "path": [
+                            "type": "string",
+                            "description": "Relative or absolute path to the directory. Relative paths are resolved from the active workspace directory."
+                        ],
+                        "recursive": [
+                            "type": "boolean",
+                            "description": "If true, list contents recursively including all subdirectories. Defaults to false."
+                        ]
+                    ],
+                    "required": ["path"]
+                ]
+            ],
+            [
+                "name": "write_file",
+                "description": "Create or overwrite a file at the given path with the specified content. Parent directories are created automatically. Use this to generate code files, configs, or any text file in the user's workspace.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "path": [
+                            "type": "string",
+                            "description": "Relative or absolute path for the file to create/overwrite. Relative paths are resolved from the active workspace directory."
+                        ],
+                        "content": [
+                            "type": "string",
+                            "description": "The full text content to write to the file."
+                        ]
+                    ],
+                    "required": ["path", "content"]
+                ]
+            ],
+            [
+                "name": "run_command",
+                "description": "Execute a shell command in the user's workspace directory. Returns stdout, stderr, and exit code. Use this to build projects, install dependencies, run tests, or execute scripts. Commands run in /bin/zsh with a 30-second timeout.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "command": [
+                            "type": "string",
+                            "description": "The shell command to execute (e.g. 'swift build', 'npm install', 'python3 script.py')."
+                        ]
+                    ],
+                    "required": ["command"]
+                ]
+            ],
+            [
+                "name": "search_files",
+                "description": "Search for a text pattern across all files in the workspace using grep. Returns matching file names, line numbers, and line content. Use this to find function definitions, imports, variable usage, or any text pattern across the codebase.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "query": [
+                            "type": "string",
+                            "description": "The text pattern to search for (supports basic regex)."
+                        ],
+                        "file_pattern": [
+                            "type": "string",
+                            "description": "Optional glob pattern to filter files (e.g. '*.swift', '*.ts'). If omitted, searches all text files."
+                        ]
+                    ],
+                    "required": ["query"]
+                ]
+            ],
+            [
+                "name": "list_emails",
+                "description": "List unread or recent emails from the connected Gmail inbox. Returns email headers, snippets, and labels.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "query": ["type": "string", "description": "Optional search term or filter keyword (e.g. 'security', 'render', 'unread')."]
+                    ]
+                ]
+            ],
+            [
+                "name": "send_email",
+                "description": "Send an email message via Gmail integration.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "to": ["type": "string", "description": "Recipient email address."],
+                        "subject": ["type": "string", "description": "Email subject line."],
+                        "body": ["type": "string", "description": "Email body content."]
+                    ],
+                    "required": ["to", "subject", "body"]
+                ]
+            ],
+            [
+                "name": "code_interpreter_execute",
+                "description": "Evaluate Python or JavaScript code in a sandboxed server execution engine. Returns stdout, evaluated variables, and data visualization specs.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "language": ["type": "string", "description": "'python' or 'javascript'"],
+                        "code": ["type": "string", "description": "Source code to run."]
+                    ],
+                    "required": ["language", "code"]
+                ]
+            ],
+            [
+                "name": "create_scheduled_task",
+                "description": "Create and schedule a new periodic or cron AI agent task on the server.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "name": ["type": "string", "description": "Name of the task."],
+                        "scheduleType": ["type": "string", "description": "'Daily', 'Hourly', 'Weekly', or 'Cron'"],
+                        "scheduleTime": ["type": "string", "description": "Schedule time string (e.g. '9:00 AM', 'Every 1 hour')"],
+                        "prompt": ["type": "string", "description": "AI prompt to execute on trigger."]
+                    ],
+                    "required": ["name", "scheduleType", "prompt"]
+                ]
+            ],
+            [
+                "name": "list_scheduled_tasks",
+                "description": "List all active scheduled agent tasks running on the server.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [:]
+                ]
+            ],
+            [
+                "name": "launch_application",
+                "description": "Launch or focus a desktop application on macOS (e.g. Spotify, Notes, Terminal, Xcode).",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "appName": ["type": "string", "description": "Target app name (e.g. 'Spotify', 'Notes', 'Terminal', 'Xcode', 'Safari')."]
+                    ],
+                    "required": ["appName"]
+                ]
+            ],
+            [
+                "name": "memory_store_node",
+                "description": "Store a new concept, user preference, architecture detail, or project rule into the persistent long-term knowledge graph.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "concept": ["type": "string", "description": "Concept heading or title (e.g. 'User Swift Style Preference')"],
+                        "category": ["type": "string", "description": "Category (e.g. 'User Preference', 'System Architecture', 'Coding Rule')"],
+                        "details": ["type": "string", "description": "Detailed explanation/content"],
+                        "tags": ["type": "string", "description": "Comma-separated list of tags"]
+                    ],
+                    "required": ["concept", "details"]
+                ]
+            ],
+            [
+                "name": "memory_query_graph",
+                "description": "Query persistent long-term knowledge graph across sessions for saved user preferences, concepts, or rules.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "query": ["type": "string", "description": "Search keyword or topic (e.g. 'preference', 'architecture', 'swift')"]
+                    ],
+                    "required": ["query"]
+                ]
+            ],
+            [
+                "name": "capture_desktop_screenshot",
+                "description": "Capture a live high-resolution screenshot of the user's active desktop screen to inspect UI elements or visual application state.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [:]
+                ]
+            ],
+            [
+                "name": "execute_server_plugin",
+                "description": "Execute a server plugin tool (e.g. Gmail, Scheduled Tasks, Workspace Manager, Python Code Interpreter). Returns JSON output.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "toolName": [
+                            "type": "string",
+                            "description": "The plugin tool name (e.g. 'send_gmail', 'schedule_task', 'run_python', 'manage_workspace')."
+                        ],
+                        "args_json": [
+                            "type": "string",
+                            "description": "JSON string containing tool arguments."
+                        ]
+                    ],
+                    "required": ["toolName"]
+                ]
+            ],
+            [
+                "name": "manage_memory",
+                "description": "Save or retrieve persistent user preferences, project rules, or memory notes across sessions.",
+                "parameters": [
+                    "type": "object",
+                    "properties": [
+                        "action": [
+                            "type": "string",
+                            "description": "'save' or 'get'"
+                        ],
+                        "key": [
+                            "type": "string",
+                            "description": "Memory key or topic name"
+                        ],
+                        "value": [
+                            "type": "string",
+                            "description": "Content to store (required if action='save')"
+                        ]
+                    ],
+                    "required": ["action", "key"]
+                ]
+            ]
+        ]
+    }
+    
+    /// Resolve a path argument (relative or absolute) against the active workspace directory.
+    private func resolveToolPath(_ rawPath: String) -> String {
+        if rawPath.hasPrefix("/") || rawPath.hasPrefix("~") {
+            return NSString(string: rawPath).expandingTildeInPath
+        }
+        let wsDir = activeWorkspaceDirectoryPath ?? FileManager.default.currentDirectoryPath
+        return (wsDir as NSString).appendingPathComponent(rawPath)
+    }
+    
+    /// Execute a single Gemini function call tool locally on the Mac.
+    /// Returns a (resultString, humanSummary, durationMs) tuple.
+    private func executeToolCall(name: String, args: [String: Any]) -> (result: String, summary: String, durationMs: Int) {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        var result = ""
+        var summary = ""
+        
+        switch name {
+        case "read_file":
+            let rawPath = args["path"] as? String ?? ""
+            let fullPath = resolveToolPath(rawPath)
+            self.logEvent(message: "[TOOL] read_file: \(fullPath)")
+            
+            if FileManager.default.fileExists(atPath: fullPath) {
+                if let data = FileManager.default.contents(atPath: fullPath),
+                   let content = String(data: data, encoding: .utf8) {
+                    let lineCount = content.components(separatedBy: .newlines).count
+                    // Cap at 500 lines to avoid flooding context
+                    let lines = content.components(separatedBy: .newlines)
+                    if lines.count > 500 {
+                        result = lines.prefix(500).joined(separator: "\n") + "\n... (truncated, \(lines.count) total lines)"
+                    } else {
+                        result = content
+                    }
+                    summary = "Read 📄 \((rawPath as NSString).lastPathComponent)#L1-\(lineCount) (\(lineCount) lines)"
+                } else {
+                    result = "[Error] Could not read file at \(fullPath) — binary or encoding error."
+                    summary = "⚠️ Failed to read \((rawPath as NSString).lastPathComponent)"
+                }
+            } else {
+                result = "[Error] File not found: \(fullPath)"
+                summary = "⚠️ File not found: \((rawPath as NSString).lastPathComponent)"
+            }
+            
+        case "list_directory":
+            let rawPath = args["path"] as? String ?? "."
+            let fullPath = resolveToolPath(rawPath)
+            let recursive = args["recursive"] as? Bool ?? false
+            self.logEvent(message: "[TOOL] list_directory: \(fullPath) (recursive=\(recursive))")
+            
+            do {
+                let items: [String]
+                if recursive {
+                    items = try FileManager.default.subpathsOfDirectory(atPath: fullPath)
+                } else {
+                    items = try FileManager.default.contentsOfDirectory(atPath: fullPath)
+                }
+                
+                // Filter hidden files, build output with type/size info
+                let filtered = items.filter { !$0.hasPrefix(".") && !$0.contains("/.") }
+                var outputLines: [String] = []
+                let limit = min(filtered.count, 200) // Cap at 200 entries
+                for i in 0..<limit {
+                    let item = filtered[i]
+                    let itemPath = (fullPath as NSString).appendingPathComponent(item)
+                    var isDir: ObjCBool = false
+                    FileManager.default.fileExists(atPath: itemPath, isDirectory: &isDir)
+                    if isDir.boolValue {
+                        outputLines.append("📁 \(item)/")
+                    } else {
+                        let attrs = try? FileManager.default.attributesOfItem(atPath: itemPath)
+                        let size = attrs?[.size] as? UInt64 ?? 0
+                        outputLines.append("📄 \(item) (\(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)))")
+                    }
+                }
+                if filtered.count > 200 {
+                    outputLines.append("... (\(filtered.count - 200) more items)")
+                }
+                
+                result = outputLines.joined(separator: "\n")
+                let folderName = (rawPath as NSString).lastPathComponent
+                summary = "Listed 📁 \(folderName.isEmpty ? rawPath : folderName) (\(filtered.count) items)"
+            } catch {
+                result = "[Error] Could not list directory \(fullPath): \(error.localizedDescription)"
+                summary = "⚠️ Failed to list \((rawPath as NSString).lastPathComponent)"
+            }
+            
+        case "write_file":
+            let rawPath = args["path"] as? String ?? ""
+            let content = args["content"] as? String ?? ""
+            let fullPath = resolveToolPath(rawPath)
+            self.logEvent(message: "[TOOL] write_file: \(fullPath) (\(content.count) chars)")
+            
+            let dir = (fullPath as NSString).deletingLastPathComponent
+            do {
+                try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true, attributes: nil)
+                try content.write(toFile: fullPath, atomically: true, encoding: .utf8)
+                let lineCount = content.components(separatedBy: .newlines).count
+                result = "Successfully wrote \(lineCount) lines to \(rawPath)"
+                summary = "Wrote 📄 \((rawPath as NSString).lastPathComponent) (+\(lineCount) lines)"
+            } catch {
+                result = "[Error] Failed to write file \(fullPath): \(error.localizedDescription)"
+                summary = "⚠️ Failed to write \((rawPath as NSString).lastPathComponent)"
+            }
+            
+        case "run_command":
+            let command = args["command"] as? String ?? ""
+            let wsDir = activeWorkspaceDirectoryPath ?? FileManager.default.currentDirectoryPath
+            self.logEvent(message: "[TOOL] run_command: \(command) in \(wsDir)")
+            
+            #if os(macOS)
+            let semaphore = DispatchSemaphore(value: 0)
+            var exitCode: Int32 = -1
+            var output = ""
+            
+            DispatchQueue.global(qos: .userInitiated).async {
+                LocalShellExecutor.shared.execute(command: command, in: wsDir) { code, out in
+                    exitCode = code
+                    output = out
+                    semaphore.signal()
+                }
+            }
+            
+            let timeout = semaphore.wait(timeout: .now() + 35.0)
+            if timeout == .timedOut {
+                result = "[Timeout] Command did not complete within 35 seconds."
+                summary = "⚠️ Timeout: $ \(command.prefix(40))"
+            } else {
+                // Cap output at 3000 chars to avoid flooding context
+                if output.count > 3000 {
+                    output = String(output.prefix(3000)) + "\n... (output truncated, \(output.count) total chars)"
+                }
+                result = "Exit code: \(exitCode)\n\(output)"
+                summary = "Ran $ \(command.prefix(50))\(command.count > 50 ? "..." : "") (exit \(exitCode))"
+            }
+            #else
+            result = "Shell execution not available on this platform."
+            summary = "⚠️ Shell unavailable"
+            #endif
+            
+        case "search_files":
+            let query = args["query"] as? String ?? ""
+            let filePattern = args["file_pattern"] as? String ?? ""
+            let wsDir = activeWorkspaceDirectoryPath ?? FileManager.default.currentDirectoryPath
+            self.logEvent(message: "[TOOL] search_files: '\(query)' pattern='\(filePattern)' in \(wsDir)")
+            
+            #if os(macOS)
+            var grepCmd = "grep -rnI --color=never"
+            if !filePattern.isEmpty {
+                grepCmd += " --include='\(filePattern)'"
+            }
+            // Exclude common noise directories
+            grepCmd += " --exclude-dir=.build --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.swiftpm"
+            grepCmd += " '\(query.replacingOccurrences(of: "'", with: "'\\''"))' ."
+            
+            let semaphore = DispatchSemaphore(value: 0)
+            var output = ""
+            
+            DispatchQueue.global(qos: .userInitiated).async {
+                LocalShellExecutor.shared.execute(command: grepCmd, in: wsDir) { _, out in
+                    output = out
+                    semaphore.signal()
+                }
+            }
+            
+            _ = semaphore.wait(timeout: .now() + 15.0)
+            let lines = output.components(separatedBy: .newlines).filter { !$0.isEmpty }
+            let matchCount = lines.count
+            if matchCount > 50 {
+                result = lines.prefix(50).joined(separator: "\n") + "\n... (\(matchCount) total matches, showing first 50)"
+            } else {
+                result = lines.joined(separator: "\n")
+            }
+            if result.isEmpty {
+                result = "No matches found for '\(query)'"
+            }
+            summary = "Searched '\(query)' → \(matchCount) match\(matchCount == 1 ? "" : "es")"
+            #else
+            result = "Search not available on this platform."
+            summary = "⚠️ Search unavailable"
+            #endif
+            
+        case "list_emails", "send_email", "code_interpreter_execute", "create_scheduled_task", "list_scheduled_tasks", "launch_application", "query_installed_apps", "memory_store_node", "memory_query_graph":
+            self.logEvent(message: "[SERVER_PLUGIN] Executing server plugin tool: \(name)")
+            let semaphore = DispatchSemaphore(value: 0)
+            var resText = ""
+            
+            if let serverUrl = URL(string: "http://localhost:3000/api/tools/execute") {
+                var req = URLRequest(url: serverUrl)
+                req.httpMethod = "POST"
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                let bodyObj: [String: Any] = ["toolName": name, "args": args]
+                req.httpBody = try? JSONSerialization.data(withJSONObject: bodyObj)
+                
+                URLSession.shared.dataTask(with: req) { data, _, err in
+                    if let d = data, let str = String(data: d, encoding: .utf8) {
+                        resText = str
+                    } else {
+                        resText = "{\"error\": \"Server plugin execution failed: \(err?.localizedDescription ?? "connection error")\"}"
+                    }
+                    semaphore.signal()
+                }.resume()
+            } else {
+                resText = "{\"error\": \"Invalid server URL\"}"
+                semaphore.signal()
+            }
+            
+            _ = semaphore.wait(timeout: .now() + 15.0)
+            result = resText
+            summary = "Server plugin \(name) executed"
+
+        case "capture_desktop_screenshot":
+            self.logEvent(message: "[TOOL] capture_desktop_screenshot")
+            #if os(macOS)
+            let semaphore = DispatchSemaphore(value: 0)
+            var base64Res = ""
+            ScreenCaptureManager.shared.captureCurrentScreen { data in
+                if let d = data {
+                    base64Res = d.base64EncodedString()
+                }
+                semaphore.signal()
+            }
+            _ = semaphore.wait(timeout: .now() + 3.0)
+            if !base64Res.isEmpty {
+                result = "Screenshot captured successfully (\(base64Res.count) base64 chars). Desktop screen state is verified."
+                summary = "Captured 📸 Desktop Screenshot"
+            } else {
+                result = "[Error] Failed to capture desktop screen."
+                summary = "⚠️ Failed desktop capture"
+            }
+            #else
+            result = "Screen capture not supported on this hardware."
+            summary = "⚠️ Screen capture unavailable"
+            #endif
+
+        case "execute_server_plugin":
+            let toolName = args["toolName"] as? String ?? ""
+            let argsJsonStr = args["args_json"] as? String ?? "{}"
+            self.logEvent(message: "[TOOL] execute_server_plugin: \(toolName)")
+            
+            let semaphore = DispatchSemaphore(value: 0)
+            var resText = ""
+            
+            if let serverUrl = URL(string: "http://localhost:3000/api/tools/execute") {
+                var req = URLRequest(url: serverUrl)
+                req.httpMethod = "POST"
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                let parsedArgs = (try? JSONSerialization.jsonObject(with: argsJsonStr.data(using: .utf8) ?? Data())) ?? [:]
+                let bodyObj: [String: Any] = ["toolName": toolName, "args": parsedArgs]
+                req.httpBody = try? JSONSerialization.data(withJSONObject: bodyObj)
+                
+                URLSession.shared.dataTask(with: req) { data, _, err in
+                    if let d = data, let str = String(data: d, encoding: .utf8) {
+                        resText = str
+                    } else {
+                        resText = "[Error] Plugin request failed: \(err?.localizedDescription ?? "unknown error")"
+                    }
+                    semaphore.signal()
+                }.resume()
+            } else {
+                resText = "[Error] Invalid server URL"
+                semaphore.signal()
+            }
+            
+            _ = semaphore.wait(timeout: .now() + 15.0)
+            result = resText
+            summary = "Plugin \(toolName) executed"
+            
+        case "manage_memory":
+            let action = args["action"] as? String ?? "get"
+            let key = args["key"] as? String ?? ""
+            let value = args["value"] as? String ?? ""
+            let storageKey = "unison_memory_\(key.lowercased())"
+            
+            if action == "save" {
+                UserDefaults.standard.set(value, forKey: storageKey)
+                result = "Memory saved for '\(key)'"
+                summary = "Saved memory: \(key)"
+            } else {
+                let saved = UserDefaults.standard.string(forKey: storageKey) ?? "No memory found for '\(key)'"
+                result = saved
+                summary = "Retrieved memory: \(key)"
+            }
+            
+        default:
+            result = "[Error] Unknown tool: \(name)"
+            summary = "⚠️ Unknown tool: \(name)"
+        }
+        
+        let elapsed = Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000)
+        return (result, summary, elapsed)
+    }
+    
+    /// Compute adaptive temperature based on task intent for natural, non-robotic responses.
+    private func computeAdaptiveTemperature(prompt: String) -> Double {
+        let lower = prompt.lowercased()
+        let isStrictCodeTask = lower.contains("build") || lower.contains("compile") || lower.contains("syntax") || lower.contains("fix bug") || lower.contains("debug") || lower.contains("error")
+        let isCreativeTask = lower.contains("poem") || lower.contains("story") || lower.contains("joke") || lower.contains("brainstorm")
+        
+        if isStrictCodeTask {
+            return 0.3 // Precise syntax for compiler/code tasks
+        } else if isCreativeTask {
+            return 0.85 // High creativity for stories/brainstorming
+        } else {
+            return 0.7 // Natural, engaging, human-like voice for general chat & engineering guidance
+        }
+    }
+
+    /// Single authoritative system instruction for Unison OS across all streaming and fallback pathways.
+    private func buildSystemInstruction(toolMode: String = "default") -> String {
+        if toolMode == "research" {
+            return "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.\n\nCRITICAL RESEARCH MODE ACTIVATED: Structure your answer with clear headings: \"Executive Summary\", \"Detailed Fact Finding & Analysis\", \"Critical Recommendations\", and \"Next Steps/Follow-ups\". Cite sources using bracket tokens (e.g. [1], [2]). At the absolute end, provide 3 follow-up questions using: [FOLLOW_UPS: [\"Q1\", \"Q2\", \"Q3\"]]."
+        } else if toolMode == "search" {
+            return "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.\n\nCRITICAL SEARCH MODE ACTIVATED: Provide high-quality Google Search grounded information with standard citations (e.g. [1], [2]). At the absolute end, provide 3 follow-up questions using: [FOLLOW_UPS: [\"Q1\", \"Q2\", \"Q3\"]]."
+        } else {
+            let workspaceContext = buildWorkspaceContext()
+            
+            return "You are Unison OS, an advanced AI-native desktop operating system and coding workspace. You are a world-class software engineer, systems architect, and technical writer.\n\n" +
+                "CORE BEHAVIORAL RULES:\n" +
+                "1. ELEGANT & NATURAL VOICE: Speak naturally, warmly, and eloquently. Avoid formulaic robotic phrasing or repetitive fluff.\n" +
+                "2. THOROUGHNESS & PRECISION: Provide complete, production-quality responses. NEVER abbreviate, truncate, or use placeholders like '// ... rest of code ...', '// TODO', or 'etc.'. Every code file must be 100% complete and copy-pasteable.\n" +
+                "3. NATIVE TOOL USE: You have access to native tools (read_file, list_directory, write_file, run_command, search_files, list_emails, send_email, code_interpreter_execute, create_scheduled_task, list_scheduled_tasks, launch_application, memory_store_node, memory_query_graph, capture_desktop_screenshot). Use them proactively to inspect files, execute shell commands, run code, and check memory before answering. Do NOT guess file contents — read them first.\n" +
+                "4. FILE CREATION: When generating code files, specify the filename in the code fence header using the format: ```language filename.ext (e.g. ```cpp ServoControl.ino or ```python main.py or ```swift MainView.swift). This triggers automatic file creation in the workspace.\n" +
+                "5. RICH MARKDOWN: Use clean markdown headers (###), bold text (**symbol**), inline code (`symbol`), and language-tagged code blocks. Structure responses logically.\n" +
+                "6. HONESTY & ACCURACY: Base your answers on real workspace inspection and tool findings. Never fabricate information.\n" +
+                "7. SYSTEM_ACTION RULE: ONLY if the user explicitly commands you to launch an app, append: `[SYSTEM_ACTION: launchApp=\"AppName\"]` at the end.\n" +
+                workspaceContext +
+                "\nAt the absolute end of your response, provide 3 relevant follow-up questions using: [FOLLOW_UPS: [\"Q1\", \"Q2\", \"Q3\"]]."
+        }
+    }
+    
+    /// After executing a tool call, send the function response back to Gemini and resume streaming.
+    private func sendToolResponse(
+        modelId: String,
+        contents: [[String: Any]],
+        functionName: String,
+        functionResult: String,
+        assistantMsgId: String,
+        pendingToolExecutions: [ToolExecution],
+        onChunk: @escaping (String) -> Void,
+        completion: @escaping (String?, [ToolExecution]) -> Void
+    ) {
+        let urlString = "https://generativelanguage.googleapis.com/v1beta/models/\(modelId):streamGenerateContent?alt=sse&key=\(userGeminiApiKey)"
+        guard let url = URL(string: urlString) else {
+            completion(nil, pendingToolExecutions)
+            return
+        }
+        
+        var updatedContents = contents
+        
+        updatedContents.append([
+            "role": "model",
+            "parts": [["functionCall": ["name": functionName, "args": [String: String]()]]]
+        ])
+        
+        updatedContents.append([
+            "role": "user",
+            "parts": [["functionResponse": [
+                "name": functionName,
+                "response": ["result": functionResult]
+            ]]]
+        ])
+        
+        let systemText = buildSystemInstruction(toolMode: "default")
+        
+        var body: [String: Any] = [
+            "contents": updatedContents,
+            "generationConfig": [
+                "temperature": 0.7,
+                "maxOutputTokens": 32768
+            ],
+            "systemInstruction": [
+                "parts": [["text": systemText]]
+            ],
+            "tools": [["function_declarations": toolDeclarations]]
+        ]
+        
+        if modelId.contains("2.5") {
+            var genConfig = body["generationConfig"] as? [String: Any] ?? [:]
+            genConfig["thinkingConfig"] = ["thinkingBudget": 4096]
+            body["generationConfig"] = genConfig
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        if #available(macOS 12.0, iOS 15.0, *) {
+            Task {
+                do {
+                    let session = URLSession(configuration: .default)
+                    let (asyncBytes, response) = try await session.bytes(for: request)
+                    guard let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200 else {
+                        DispatchQueue.main.async { completion(nil, pendingToolExecutions) }
+                        return
+                    }
+                    
+                    var accumulated = ""
+                    var toolExecs = pendingToolExecutions
+                    
+                    for try await line in asyncBytes.lines {
+                        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if trimmed.hasPrefix("data:") {
+                            let jsonStr = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                            if jsonStr == "[DONE]" { break }
+                            
+                            if let data = jsonStr.data(using: .utf8),
+                               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                               let candidates = json["candidates"] as? [[String: Any]],
+                               let firstCandidate = candidates.first,
+                               let content = firstCandidate["content"] as? [String: Any],
+                               let parts = content["parts"] as? [[String: Any]] {
+                                
+                                for part in parts {
+                                    if let deltaText = part["text"] as? String {
+                                        accumulated += deltaText
+                                        DispatchQueue.main.async { onChunk(deltaText) }
+                                    } else if let fc = part["functionCall"] as? [String: Any],
+                                              let fcName = fc["name"] as? String {
+                                        // Recursive tool call — the model wants another tool
+                                        let fcArgs = fc["args"] as? [String: Any] ?? [:]
+                                        self.logEvent(message: "[TOOL_CHAIN] Model requested additional tool: \(fcName)")
+                                        
+                                        let (toolResult, toolSummary, toolDuration) = self.executeToolCall(name: fcName, args: fcArgs)
+                                        let argsJson = (try? String(data: JSONSerialization.data(withJSONObject: fcArgs), encoding: .utf8)) ?? "{}"
+                                        toolExecs.append(ToolExecution(toolName: fcName, arguments: argsJson, resultSummary: toolSummary, durationMs: toolDuration))
+                                        
+                                        DispatchQueue.main.async {
+                                            onChunk("") // Trigger UI update
+                                        }
+                                        
+                                        // Recursively send this tool's response
+                                        self.sendToolResponse(
+                                            modelId: modelId,
+                                            contents: updatedContents,
+                                            functionName: fcName,
+                                            functionResult: toolResult,
+                                            assistantMsgId: assistantMsgId,
+                                            pendingToolExecutions: toolExecs,
+                                            onChunk: onChunk,
+                                            completion: completion
+                                        )
+                                        return // Exit this stream — recursive call handles the rest
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    DispatchQueue.main.async { completion(accumulated, toolExecs) }
+                } catch {
+                    self.logEvent(message: "[TOOL_RESPONSE] Stream error: \(error.localizedDescription)")
+                    DispatchQueue.main.async { completion(nil, pendingToolExecutions) }
+                }
+            }
+        } else {
+            completion(nil, pendingToolExecutions)
+        }
+    }
+    
     /// Real-time SSE streaming integration targeting Google Gemini API key
     private func streamGeminiResponse(prompt: String, history: [ChatMessage], onChunk: @escaping (String) -> Void, completion: @escaping (String?) -> Void) {
         guard !userGeminiApiKey.isEmpty else {
@@ -1673,18 +2366,81 @@ Required changes to my new portfolio:
         executeStreamingWithFallback(models: uniqueModels, index: 0, prompt: prompt, history: history, onChunk: onChunk, completion: completion)
     }
     
+    /// Clean UI metadata tags ([THOUGHTS], [FOLLOW_UPS], [SYSTEM_ACTION], etc.) out of message history
+    /// so the model's memory context window remains unpolluted by internal rendering tags.
+    private func cleanContentForHistory(_ raw: String) -> String {
+        var text = raw
+        
+        // Strip [THOUGHTS]...[/THOUGHTS] blocks
+        if let startRange = text.range(of: "[THOUGHTS]") {
+            if let endRange = text.range(of: "[/THOUGHTS]") {
+                text.removeSubrange(startRange.lowerBound..<endRange.upperBound)
+            } else {
+                text.removeSubrange(startRange.lowerBound..<text.endIndex)
+            }
+        }
+        
+        // Strip [FOLLOW_UPS: ...] tags
+        if let range = text.range(of: #"\s*\[FOLLOW_UPS:\s*\[[\s\S]*?\]\]"#, options: .regularExpression) {
+            text.removeSubrange(range)
+        }
+        
+        // Strip [SYSTEM_ACTION: ...] tags
+        if let range = text.range(of: #"\s*\[SYSTEM_ACTION:[^\]]+\]"#, options: .regularExpression) {
+            text.removeSubrange(range)
+        }
+        
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    /// Build rich workspace context including actual source code contents of open/active project files
+    /// so Gemini has immediate visibility into the code structure.
+    private func buildWorkspaceContext() -> String {
+        var workspaceContext = ""
+        if let wsPath = self.activeWorkspaceDirectoryPath, !wsPath.isEmpty {
+            let folderName = (wsPath as NSString).lastPathComponent
+            workspaceContext = "\n\nACTIVE WORKSPACE CONTEXT:\n- Project directory: \(wsPath)\n- Project name: \(folderName)\n"
+            
+            let fileNames = self.activeProjectFiles.map { $0.name }
+            if !fileNames.isEmpty {
+                workspaceContext += "- Project file list: \(fileNames.joined(separator: ", "))\n\n"
+                workspaceContext += "- ACTIVE WORKSPACE SOURCE CODE:\n"
+                
+                // Inject actual code of top active files (capped to 3000 chars per file to stay efficient)
+                for file in self.activeProjectFiles.prefix(6) {
+                    let fileContent = file.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !fileContent.isEmpty {
+                        let snippet = fileContent.count > 3000 ? String(fileContent.prefix(3000)) + "\n... (truncated)" : fileContent
+                        workspaceContext += "--- FILE: \(file.name) (\(file.language)) ---\n\(snippet)\n\n"
+                    }
+                }
+            }
+        }
+        return workspaceContext
+    }
+
     private func executeStreamingWithFallback(models: [String], index: Int, prompt: String, history: [ChatMessage], onChunk: @escaping (String) -> Void, completion: @escaping (String?) -> Void) {
+        // Wrap the old completion into a tool-aware one that discards toolExecutions
+        executeStreamingWithToolSupport(models: models, index: index, prompt: prompt, history: history, onChunk: onChunk) { reply, _ in
+            completion(reply)
+        }
+    }
+    
+    /// Tool-aware streaming with Gemini function calling support.
+    /// The completion callback provides both the response text and an array of tool executions
+    /// performed during this request, which get stored on the ChatMessage for the activity feed.
+    private func executeStreamingWithToolSupport(models: [String], index: Int, prompt: String, history: [ChatMessage], onChunk: @escaping (String) -> Void, completion: @escaping (String?, [ToolExecution]) -> Void) {
         guard index < models.count else {
-            completion("Unison neural error: Failed all backup model pathways. Please check your network connection or Gemini API key.")
+            completion("Unison neural error: Failed all backup model pathways. Please check your network connection or Gemini API key.", [])
             return
         }
         
         let modelId = models[index]
-        self.logEvent(message: "[GEMINI_STREAM] Initializing SSE neural stream: \(modelId)")
+        self.logEvent(message: "[GEMINI_STREAM] Initializing SSE neural stream with tools: \(modelId)")
         
         let urlString = "https://generativelanguage.googleapis.com/v1beta/models/\(modelId):streamGenerateContent?alt=sse&key=\(userGeminiApiKey)"
         guard let url = URL(string: urlString) else {
-            self.executeStreamingWithFallback(models: models, index: index + 1, prompt: prompt, history: history, onChunk: onChunk, completion: completion)
+            self.executeStreamingWithToolSupport(models: models, index: index + 1, prompt: prompt, history: history, onChunk: onChunk, completion: completion)
             return
         }
         
@@ -1695,10 +2451,13 @@ Required changes to my new portfolio:
         var rawTurns: [[String: Any]] = []
         for msg in history {
             let role = msg.role == "user" ? "user" : "model"
-            rawTurns.append([
-                "role": role,
-                "text": msg.content
-            ])
+            let cleanedText = cleanContentForHistory(msg.content)
+            if !cleanedText.isEmpty {
+                rawTurns.append([
+                    "role": role,
+                    "text": cleanedText
+                ])
+            }
         }
         
         let lastTurnIsPrompt = !rawTurns.isEmpty &&
@@ -1742,45 +2501,51 @@ Required changes to my new portfolio:
             contents.removeFirst()
         }
         
-        var workspaceContext = ""
-        if let wsPath = self.activeWorkspaceDirectoryPath, !wsPath.isEmpty {
-            let folderName = (wsPath as NSString).lastPathComponent
-            workspaceContext = "\n\nACTIVE WORKSPACE CONTEXT:\n- Project directory: \(wsPath)\n- Project name: \(folderName)\n"
-            let fileNames = self.activeProjectFiles.map { $0.name }
-            if !fileNames.isEmpty {
-                workspaceContext += "- Files in project: \(fileNames.joined(separator: ", "))\n"
+        // MULTIMODAL VISION INJECTION: If user asks about their screen or visual context, capture the display and attach JPEG data
+        let lowerPrompt = prompt.lowercased()
+        let requiresVision = lowerPrompt.contains("screen") || lowerPrompt.contains("look") || lowerPrompt.contains("see") || lowerPrompt.contains("screenshot") || lowerPrompt.contains("visual") || lowerPrompt.contains("ui") || lowerPrompt.contains("window") || lowerPrompt.contains("display")
+        
+        #if os(macOS)
+        if requiresVision, !contents.isEmpty {
+            let semaphore = DispatchSemaphore(value: 0)
+            var imageBase64: String? = nil
+            ScreenCaptureManager.shared.captureCurrentScreen { imgData in
+                if let data = imgData {
+                    imageBase64 = data.base64EncodedString()
+                }
+                semaphore.signal()
+            }
+            _ = semaphore.wait(timeout: .now() + 2.0)
+            
+            if let base64 = imageBase64, let lastIdx = contents.indices.last {
+                var lastParts = contents[lastIdx]["parts"] as? [[String: Any]] ?? []
+                lastParts.append([
+                    "inlineData": [
+                        "mimeType": "image/jpeg",
+                        "data": base64
+                    ]
+                ])
+                contents[lastIdx]["parts"] = lastParts
+                self.logEvent(message: "[GEMINI_VISION] Attached active desktop screen capture to prompt context")
             }
         }
+        #endif
         
-        let systemText = "You are Unison OS, an advanced AI-native desktop operating system and coding workspace. You are a world-class software engineer, systems architect, and technical writer.\n\n" +
-            "CORE BEHAVIORAL RULES:\n" +
-            "1. THOROUGHNESS: Provide complete, production-quality responses. NEVER abbreviate, truncate, or use placeholders. Every code file must be 100% complete.\n" +
-            "2. PRECISION: When writing code, generate the ENTIRE file with correct filename code fences (e.g. ```cpp blink.ino or ```cpp ServoControl.ino).\n" +
-            "3. REASONING & EXECUTION LOG: ALWAYS begin every response with a [THOUGHTS]...[/THOUGHTS] block. Structure your reasoning like Antigravity / Cursor IDE execution logs:\n" +
-            "   - Navigation & File Search Logs format:\n" +
-            "     Worked for {duration_seconds}s\n" +
-            "     Explored {file_count} files, {folder_count} folders\n\n" +
-            "     Thought for 1s\n" +
-            "     Analyzed 📁 {folder_path}\n" +
-            "     Analyzed 📄 {file_name}#L{start_line}-{end_line}\n" +
-            "     Thought for 1s\n" +
-            "     Crafting {file_name}\n" +
-            "     Edited 📄 {file_name} +{additions} -{deletions}\n" +
-            "     Analyzed 📄 {file_name}#L1-{total_lines}\n" +
-            workspaceContext +
-            "\nAt the absolute end of your response, provide 3 relevant follow-up questions using: [FOLLOW_UPS: [\"Q1\", \"Q2\", \"Q3\"]]."
+        let systemText = buildSystemInstruction(toolMode: "default")
+        let adaptiveTemp = computeAdaptiveTemperature(prompt: prompt)
 
         var body: [String: Any] = [
             "contents": contents,
             "generationConfig": [
-                "temperature": 0.2,
+                "temperature": adaptiveTemp,
                 "maxOutputTokens": 32768
             ],
             "systemInstruction": [
                 "parts": [[
                     "text": systemText
                 ]]
-            ]
+            ],
+            "tools": [["function_declarations": toolDeclarations]]
         ]
         
         if modelId.contains("2.5") {
@@ -1792,7 +2557,6 @@ Required changes to my new portfolio:
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
         let session = URLSession(configuration: .default)
-        let dataTask = session.dataTask(with: request)
         
         if #available(macOS 12.0, iOS 15.0, *) {
             Task {
@@ -1800,12 +2564,14 @@ Required changes to my new portfolio:
                     let (asyncBytes, response) = try await session.bytes(for: request)
                     guard let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200 else {
                         DispatchQueue.main.async {
-                            self.executeStreamingWithFallback(models: models, index: index + 1, prompt: prompt, history: history, onChunk: onChunk, completion: completion)
+                            self.executeStreamingWithToolSupport(models: models, index: index + 1, prompt: prompt, history: history, onChunk: onChunk, completion: completion)
                         }
                         return
                     }
                     
                     var accumulated = ""
+                    var toolExecutions: [ToolExecution] = []
+                    
                     for try await line in asyncBytes.lines {
                         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                         if trimmed.hasPrefix("data:") {
@@ -1817,29 +2583,58 @@ Required changes to my new portfolio:
                                let candidates = json["candidates"] as? [[String: Any]],
                                let firstCandidate = candidates.first,
                                let content = firstCandidate["content"] as? [String: Any],
-                               let parts = content["parts"] as? [[String: Any]],
-                               let firstPart = parts.first,
-                               let deltaText = firstPart["text"] as? String {
+                               let parts = content["parts"] as? [[String: Any]] {
                                 
-                                accumulated += deltaText
-                                DispatchQueue.main.async {
-                                    onChunk(deltaText)
+                                for part in parts {
+                                    if let deltaText = part["text"] as? String {
+                                        // Standard text streaming
+                                        accumulated += deltaText
+                                        DispatchQueue.main.async {
+                                            onChunk(deltaText)
+                                        }
+                                    } else if let fc = part["functionCall"] as? [String: Any],
+                                              let fcName = fc["name"] as? String {
+                                        // FUNCTION CALL DETECTED — execute the tool locally
+                                        let fcArgs = fc["args"] as? [String: Any] ?? [:]
+                                        self.logEvent(message: "[FUNCTION_CALL] Model invoked tool: \(fcName) args: \(fcArgs)")
+                                        
+                                        let (toolResult, toolSummary, toolDuration) = self.executeToolCall(name: fcName, args: fcArgs)
+                                        let argsJson = (try? String(data: JSONSerialization.data(withJSONObject: fcArgs), encoding: .utf8)) ?? "{}"
+                                        toolExecutions.append(ToolExecution(toolName: fcName, arguments: argsJson, resultSummary: toolSummary, durationMs: toolDuration))
+                                        
+                                        self.logEvent(message: "[FUNCTION_CALL] Tool \(fcName) completed in \(toolDuration)ms: \(toolSummary)")
+                                        
+                                        // Send the function response back to Gemini and resume streaming
+                                        self.sendToolResponse(
+                                            modelId: modelId,
+                                            contents: contents,
+                                            functionName: fcName,
+                                            functionResult: toolResult,
+                                            assistantMsgId: "", // Handled by the caller
+                                            pendingToolExecutions: toolExecutions,
+                                            onChunk: onChunk,
+                                            completion: completion
+                                        )
+                                        return // Exit — sendToolResponse handles the rest (including chaining)
+                                    }
                                 }
                             }
                         }
                     }
                     
                     DispatchQueue.main.async {
-                        completion(accumulated)
+                        completion(accumulated, toolExecutions)
                     }
                 } catch {
                     DispatchQueue.main.async {
-                        self.executeStreamingWithFallback(models: models, index: index + 1, prompt: prompt, history: history, onChunk: onChunk, completion: completion)
+                        self.executeStreamingWithToolSupport(models: models, index: index + 1, prompt: prompt, history: history, onChunk: onChunk, completion: completion)
                     }
                 }
             }
         } else {
-            self.executeWithFallback(models: models, index: index, prompt: prompt, history: history, completion: completion)
+            self.executeWithFallback(models: models, index: index, prompt: prompt, history: history, completion: { reply in
+                completion(reply, [])
+            })
         }
     }
 
@@ -1887,10 +2682,13 @@ Required changes to my new portfolio:
         var rawTurns: [[String: Any]] = []
         for msg in history {
             let role = msg.role == "user" ? "user" : "model"
-            rawTurns.append([
-                "role": role,
-                "text": msg.content
-            ])
+            let cleanedText = cleanContentForHistory(msg.content)
+            if !cleanedText.isEmpty {
+                rawTurns.append([
+                    "role": role,
+                    "text": cleanedText
+                ])
+            }
         }
         
         let lastTurnIsPrompt = !rawTurns.isEmpty &&
@@ -1937,10 +2735,7 @@ Required changes to my new portfolio:
         
         // Adaptive temperature: precise for code, balanced for general, creative for writing
         let toolMode = determineAutoToolMode(prompt: prompt)
-        let lowerPrompt = prompt.lowercased()
-        let isCodeTask = lowerPrompt.contains("code") || lowerPrompt.contains("write") || lowerPrompt.contains("function") || lowerPrompt.contains("script") || lowerPrompt.contains("sketch") || lowerPrompt.contains("program") || lowerPrompt.contains(".ino") || lowerPrompt.contains(".py") || lowerPrompt.contains(".ts") || lowerPrompt.contains(".swift") || lowerPrompt.contains("arduino") || lowerPrompt.contains("servo") || lowerPrompt.contains("build") || lowerPrompt.contains("implement") || lowerPrompt.contains("debug") || lowerPrompt.contains("fix")
-        let isCreativeTask = lowerPrompt.contains("poem") || lowerPrompt.contains("story") || lowerPrompt.contains("creative") || lowerPrompt.contains("joke") || lowerPrompt.contains("song")
-        let adaptiveTemp: Double = isCodeTask ? 0.2 : (isCreativeTask ? 0.9 : 0.7)
+        let adaptiveTemp = computeAdaptiveTemperature(prompt: prompt)
         
         var body: [String: Any] = [
             "contents": contents,
@@ -1957,76 +2752,18 @@ Required changes to my new portfolio:
             body["generationConfig"] = genConfig
         }
         
-        if toolMode == "research" {
+        if toolMode == "research" || toolMode == "search" {
             body["tools"] = [[
                 "googleSearch": [String: Any]()
             ]]
-            
-            let systemText = "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.\n\nCRITICAL RESEARCH MODE ACTIVATED: The user expects an exceptionally detailed, highly structured, multi-section research report. Synthesize your answer step-by-step using actual facts from Google Search Grounding. Your query has been treated as an intensive investigative query. Structure the reply with clear headings: \"Executive Summary\", \"Detailed Fact Finding & Analysis\", \"Critical Recommendations\", and \"Next Steps/Follow-ups\". \n\nCRITICAL MULTI-SOURCE HYPERLINKING RULE: You MUST cite EVERY single line, statement, fact, or bullet point that is derived from search results individually at the end of that specific sentence with its standard citation token (e.g. \"[1]\" or \"[2]\"). Do NOT bundle multiple facts together without individual sentence/line citations. Doing so is critical for the front-end link-rendering engine to successfully turn every sentence/line directly into a clickable source hyperlink.\n\nSTRICT GROUNDED VERIFIED VERACITY PROTOCOL:\n- You are STRICTLY FORBIDDEN from generating or listing any claims, news stories, data points, or statements from your general parametric knowledge or pre-trained memory.\n- EVERY SINGLE SENTENCE, CLAIM, OR BULLET POINT in your output presenting search facts MUST be verified by a search result and MUST terminate with a citation (e.g., [1], [2]).\n- If some news item or fact cannot be verified/grounded in the active search results, DO NOT include it in your output. Filter or discard any unverified lines from your response entirely. Only verified facts and sources are allowed.\n- Structural layout elements (like markdown titles, section headers, short intro/outro transition phrases, and the final list of follow-up questions) are fully EXEMPT from requiring citations.\n- Every bullet point must have its own citation. NEVER emit a bullet point without a citation.\n\nIMPORTANT: Do NOT output or append any '[SOURCES: ...]' block or web reference blocks yourself at the end of your response. Simply output your answer with standard bracket citations (e.g. [1], [2]). At the absolute end of your response, you MUST provide 3 interactive follow-up questions using the exact tag syntax: [FOLLOW_UPS: [\"Follow-up Q1\", \"Follow-up Q2\", \"Follow-up Q3\"]]."
-            
-            body["systemInstruction"] = [
-                "parts": [[
-                    "text": systemText
-                ]]
-            ]
-        } else if toolMode == "search" {
-            body["tools"] = [[
-                "googleSearch": [String: Any]()
-            ]]
-            
-            let systemText = "You are the central core consciousness of Unison OS, a state-of-the-art native AI desktop environment. Speak beautifully, with precision, confidence, and highly curated cyber-aesthetic eloquence.\n\nCRITICAL SEARCH MODE ACTIVATED: The user expects high-quality Google Search grounded information. Always use standard citations immediately after periods (e.g., [1], [2]). \n\nCRITICAL MULTI-SOURCE HYPERLINKING RULE: You MUST cite EVERY single statement, fact, bullet point, or individual line that is derived from search results at the end of that specific line/sentence with its respective citation token (e.g. '[1]' or '[2]'). Do NOT leave lines/points containing grounded search facts without their respective citation tag at the absolute end of that line or sentence. This guarantees our engine can safely hyperlink each line directly to its source URL.\n\nSTRICT GROUNDED VERIFIED VERACITY PROTOCOL:\n- You are STRICTLY FORBIDDEN from generating or listing any claims, news stories, data points, or statements from your general parametric knowledge or pre-trained memory.\n- EVERY SINGLE SENTENCE, CLAIM, OR BULLET POINT in your output presenting search facts MUST be verified by a search result and MUST terminate with a citation (e.g., [1], [2]).\n- If some news item or fact cannot be verified/grounded in the active search results, DO NOT include it in your output. Filter or discard any unverified lines from your response entirely. Only verified facts and sources are allowed.\n- Structural layout elements (like markdown titles, section headers, short intro/outro transition phrases, and the final list of follow-up questions) are fully EXEMPT from requiring citations.\n- Every bullet point must have its own citation. NEVER emit a bullet point without a citation.\n\nIMPORTANT: Do NOT output or append any '[SOURCES: ...]' block or web reference blocks yourself at the end of your response. Only output your natural response with standard bracket citations (e.g. [1], [2]). At the absolute end of your response, you MUST provide 3 interactive follow-up questions using the exact tag syntax: [FOLLOW_UPS: [\"Follow-up Q1\", \"Follow-up Q2\", \"Follow-up Q3\"]]."
-            
-            body["systemInstruction"] = [
-                "parts": [[
-                    "text": systemText
-                ]]
-            ]
-        } else {
-            // Build workspace context if available
-            var workspaceContext = ""
-            if let wsPath = self.activeWorkspaceDirectoryPath, !wsPath.isEmpty {
-                let folderName = (wsPath as NSString).lastPathComponent
-                workspaceContext = "\n\nACTIVE WORKSPACE CONTEXT:\n- Project directory: \(wsPath)\n- Project name: \(folderName)\n"
-                // Inject project file list
-                let fileNames = self.activeProjectFiles.map { $0.name }
-                if !fileNames.isEmpty {
-                    workspaceContext += "- Files in project: \(fileNames.joined(separator: ", "))\n"
-                }
-            }
-            
-            let systemText = "You are Unison OS, an advanced AI-native desktop operating system and coding workspace. You are a world-class software engineer, systems architect, and technical writer.\n\n" +
-                "CORE BEHAVIORAL RULES:\n" +
-                "1. THOROUGHNESS: Provide complete, production-quality responses. NEVER abbreviate, truncate, or use placeholders like '// ... rest of code ...', '// TODO', or 'etc.'. Every code file must be 100% complete and executable.\n" +
-                "2. PRECISION: When writing code, generate the ENTIRE file — every import, every function, every line. The user should be able to copy-paste and run it directly.\n" +
-                "3. REASONING & EXECUTION LOG: ALWAYS begin every response with a [THOUGHTS]...[/THOUGHTS] block. Structure your reasoning like Antigravity / Cursor IDE execution logs:\n" +
-                "   - Navigation & File Search Logs format:\n" +
-                "     Worked for {duration_seconds}s\n" +
-                "     Explored {file_count} files, {folder_count} folders | {search_count} search\n\n" +
-                "     Searched {search_query} {result_count} results\n" +
-                "     Analyzed {file_type_icon} {file_name}#L{start_line}-{end_line}\n" +
-                "     Analyzed {folder_icon} {folder_path}\n" +
-                "   - Command Execution Logs format:\n" +
-                "     Ran {command_count} commands\n" +
-                "     Ran {command_string}\n\n" +
-                "     [{working_directory}] $ {command_string}\n" +
-                "     {stdout_stderr_output}\n" +
-                "   - Clear Step-by-Step Reasoning: Use bold section headings (e.g. '**Investigating Text Input**', '**Resolving First Responder Issue**') and wrap code symbols, variables, raw prompt inputs, or filenames in rounded backtick pills (e.g., `TextField`, `axis: .vertical`, `window.isMovableByWindowBackground`).\n" +
-                "4. FILE CREATION: When generating code, ALWAYS specify the filename in the code fence header using the format: ```language filename.ext (e.g. ```cpp ServoControl.ino or ```python main.py). This triggers automatic file creation in the user's workspace.\n" +
-                "5. MARKDOWN: Use rich markdown formatting — headers (###), bold (**text**), inline code (`symbol`), bullet points, and code blocks with language tags. Structure long responses with clear sections.\n" +
-                "6. HONESTY: If you don't know something, say so. Never fabricate information.\n" +
-                "7. CONTEXT AWARENESS: Pay attention to the full conversation history. Reference previous messages and build on prior context.\n\n" +
-                "SYSTEM_ACTION RULE:\n" +
-                "If the user asks you to open or launch any macOS application, append the exact tag: `[SYSTEM_ACTION: launchApp=\"AppName\"]` at the end of your response.\n" +
-                "If the user asks for a complex desktop task (open Notes and type X, search in Safari, etc.), append: `[SYSTEM_ACTION: startAgent=\"Objective\"]`.\n" +
-                workspaceContext +
-                "\nAt the absolute end of your response, provide 3 relevant follow-up questions using: [FOLLOW_UPS: [\"Q1\", \"Q2\", \"Q3\"]]."
-            
-            body["systemInstruction"] = [
-                "parts": [[
-                    "text": systemText
-                ]]
-            ]
         }
+        
+        let systemText = buildSystemInstruction(toolMode: toolMode)
+        body["systemInstruction"] = [
+            "parts": [[
+                "text": systemText
+            ]]
+        ]
         
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
@@ -2332,7 +3069,14 @@ Required changes to my new portfolio:
             self.messages.append(placeholderMsg)
             self.isSendingMessage = true
             
-            self.streamGeminiResponse(
+            // Use tool-aware streaming that supports Gemini function calling
+            let modelsToTry = [self.selectedModel.lowercased().contains("pro") ? "gemini-1.5-pro" : "gemini-2.5-flash", "gemini-2.5-flash", "gemini-1.5-flash"]
+            var uniqueModels: [String] = []
+            for m in modelsToTry { if !uniqueModels.contains(m) { uniqueModels.append(m) } }
+            
+            self.executeStreamingWithToolSupport(
+                models: uniqueModels,
+                index: 0,
                 prompt: prompt,
                 history: self.messages,
                 onChunk: { [weak self] deltaText in
@@ -2341,13 +3085,17 @@ Required changes to my new portfolio:
                         self.messages[idx].content += deltaText
                     }
                 },
-                completion: { [weak self] responseText in
+                completion: { [weak self] responseText, toolExecutions in
                     guard let self = self else { return }
                     DispatchQueue.main.async {
                         self.isSendingMessage = false
                         if let reply = responseText, !reply.contains("Unison neural error"), !reply.isEmpty {
                             if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
                                 self.messages[idx].content = reply
+                                // Store real tool execution data on the message for the activity feed
+                                if !toolExecutions.isEmpty {
+                                    self.messages[idx].toolExecutions = toolExecutions
+                                }
                             }
                             self.processDynamicWorkspaceFiles(reply: reply, prompt: prompt)
                             self.saveMessagesToDefaults()
@@ -2359,10 +3107,8 @@ Required changes to my new portfolio:
                             }
                             self.triggerSoundFX()
                         } else {
-                            // Remove placeholder if stream failed completely
+                            self.logEvent(message: "All streaming pathways exhausted. Removing placeholder.")
                             self.messages.removeAll(where: { $0.id == assistantMsgId })
-                            self.logEvent(message: "Direct Gemini SSE stream failed. Falling back to Unison server pipeline...")
-                            self.postChatMessageToServer(prompt: prompt, convoId: convoId)
                         }
                     }
                 }
@@ -2371,6 +3117,115 @@ Required changes to my new portfolio:
             // Standard server pipeline
             self.postChatMessageToServer(prompt: prompt, convoId: convoId)
         }
+    }
+
+    public func sendVoicePromptToGeminiLive(prompt: String) {
+        guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        
+        let userMsg = ChatMessage(role: "user", content: prompt)
+        self.messages.append(userMsg)
+        
+        let assistantMsgId = UUID().uuidString
+        let placeholderMsg = ChatMessage(id: assistantMsgId, role: "model", content: "")
+        self.messages.append(placeholderMsg)
+        self.isSendingMessage = true
+        
+        // Interrupt any ongoing TTS speech immediately when new prompt comes in
+        DispatchQueue.main.async {
+            SpeechManager.shared.stop()
+        }
+        
+        // Direct Gemini neural streaming pipeline if API key is present
+        if !userGeminiApiKey.isEmpty {
+            self.executeStreamingWithToolSupport(
+                models: ["gemini-2.5-flash", "gemini-1.5-flash"],
+                index: 0,
+                prompt: prompt,
+                history: self.messages,
+                onChunk: { [weak self] deltaText in
+                    guard let self = self else { return }
+                    if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
+                        self.messages[idx].content += deltaText
+                    }
+                },
+                completion: { [weak self] replyText, toolExecs in
+                    guard let self = self else { return }
+                    DispatchQueue.main.async {
+                        self.isSendingMessage = false
+                        if let reply = replyText, !reply.isEmpty {
+                            if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
+                                self.messages[idx].content = reply
+                                if !toolExecs.isEmpty {
+                                    self.messages[idx].toolExecutions = toolExecs
+                                }
+                            }
+                            self.saveMessagesToDefaults()
+                            SpeechManager.shared.speak(reply)
+                        } else {
+                            self.messages.removeAll(where: { $0.id == assistantMsgId })
+                        }
+                    }
+                }
+            )
+            return
+        }
+        
+        // Fallback to server endpoint
+        let serverUrlStr = "http://localhost:3000/api/streaming/live"
+        guard let url = URL(string: serverUrlStr) else {
+            DispatchQueue.main.async {
+                self.isSendingMessage = false
+                SpeechRecognizer.shared.errorMessage = "⚠️ Voice Stream Error: Invalid server URL"
+            }
+            return
+        }
+        
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload: [String: Any] = ["prompt": prompt]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        
+        URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
+            guard let self = self, let data = data, error == nil else {
+                DispatchQueue.main.async {
+                    self?.isSendingMessage = false
+                    SpeechRecognizer.shared.errorMessage = "⚠️ Voice Stream Notice: Re-routing to offline fallback"
+                    self?.executeStreamingWithToolSupport(models: ["gemini-2.5-flash", "gemini-1.5-flash"], index: 0, prompt: prompt, history: self?.messages ?? [], onChunk: { _ in }, completion: { reply, _ in
+                        if let r = reply {
+                            SpeechManager.shared.speak(r)
+                        }
+                    })
+                }
+                return
+            }
+            
+            let rawStr = String(data: data, encoding: .utf8) ?? ""
+            var accumulated = ""
+            let lines = rawStr.components(separatedBy: "\n")
+            for line in lines {
+                if line.starts(with: "data: ") {
+                    let jsonStr = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
+                    if jsonStr != "[DONE]", let dataObj = jsonStr.data(using: .utf8),
+                       let json = try? JSONSerialization.jsonObject(with: dataObj) as? [String: Any],
+                       let text = json["text"] as? String {
+                        accumulated += text
+                    }
+                }
+            }
+            
+            let finalOutput = accumulated.isEmpty ? "I am connected live to Unison OS. How can I assist your workspace?" : accumulated
+            
+            DispatchQueue.main.async {
+                self.isSendingMessage = false
+                if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
+                    self.messages[idx].content = finalOutput
+                }
+                self.deduplicateMessages()
+                self.saveMessagesToDefaults()
+                SpeechManager.shared.speak(finalOutput)
+            }
+        }.resume()
     }
 
     public func processDynamicWorkspaceFiles(reply: String, prompt: String) {
@@ -2627,13 +3482,28 @@ Required changes to my new portfolio:
                             if jsonStr == "[DONE]" { break }
                             
                             if let data = jsonStr.data(using: .utf8),
-                               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                               let deltaText = json["text"] as? String {
+                               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                                 
-                                accumulated += deltaText
-                                DispatchQueue.main.async {
-                                    if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
-                                        self.messages[idx].content += deltaText
+                                var deltaText = ""
+                                if let text = json["text"] as? String {
+                                    deltaText = text
+                                } else if let candidates = json["candidates"] as? [[String: Any]],
+                                          let firstCandidate = candidates.first,
+                                          let content = firstCandidate["content"] as? [String: Any],
+                                          let parts = content["parts"] as? [[String: Any]],
+                                          let firstPart = parts.first,
+                                          let text = firstPart["text"] as? String {
+                                    deltaText = text
+                                } else if let reply = json["reply"] as? String {
+                                    deltaText = reply
+                                }
+                                
+                                if !deltaText.isEmpty {
+                                    accumulated += deltaText
+                                    DispatchQueue.main.async {
+                                        if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
+                                            self.messages[idx].content += deltaText
+                                        }
                                     }
                                 }
                             }
@@ -2642,21 +3512,69 @@ Required changes to my new portfolio:
                     
                     DispatchQueue.main.async {
                         self.isSendingMessage = false
-                        if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
-                            self.messages[idx].content = accumulated
+                        if accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            self.logEvent(message: "Server SSE returned empty payload. Executing direct fallback stream into assistantMsgId...")
+                            self.executeStreamingWithFallback(models: ["gemini-2.5-flash", "gemini-1.5-flash"], index: 0, prompt: prompt, history: self.messages, onChunk: { deltaText in
+                                if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
+                                    self.messages[idx].content += deltaText
+                                }
+                            }, completion: { reply in
+                                if let finalReply = reply, !finalReply.isEmpty {
+                                    if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
+                                        self.messages[idx].content = finalReply
+                                    }
+                                    self.processDynamicWorkspaceFiles(reply: finalReply, prompt: prompt)
+                                    self.deduplicateMessages()
+                                    self.saveMessagesToDefaults()
+                                } else {
+                                    self.messages.removeAll(where: { $0.id == assistantMsgId })
+                                }
+                            })
+                        } else {
+                            if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
+                                self.messages[idx].content = accumulated
+                            }
+                            self.processDynamicWorkspaceFiles(reply: accumulated, prompt: prompt)
+                            self.deduplicateMessages()
+                            self.saveMessagesToDefaults()
+                            self.triggerSoundFX()
                         }
-                        self.processDynamicWorkspaceFiles(reply: accumulated, prompt: prompt)
-                        self.saveMessagesToDefaults()
-                        self.triggerSoundFX()
                     }
                 } catch {
                     DispatchQueue.main.async {
-                        self.isSendingMessage = false
-                        self.messages.removeAll(where: { $0.id == assistantMsgId })
+                        self.logEvent(message: "Server stream connection failed. Executing fallback stream...")
+                        self.executeStreamingWithFallback(models: ["gemini-2.5-flash", "gemini-1.5-flash"], index: 0, prompt: prompt, history: self.messages, onChunk: { deltaText in
+                            if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
+                                self.messages[idx].content += deltaText
+                            }
+                        }, completion: { reply in
+                            self.isSendingMessage = false
+                            if let finalReply = reply, !finalReply.isEmpty {
+                                if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
+                                    self.messages[idx].content = finalReply
+                                }
+                                self.processDynamicWorkspaceFiles(reply: finalReply, prompt: prompt)
+                                self.deduplicateMessages()
+                                self.saveMessagesToDefaults()
+                            } else {
+                                self.messages.removeAll(where: { $0.id == assistantMsgId })
+                            }
+                        })
                     }
                 }
             }
         }
+    }
+    
+    public func deduplicateMessages() {
+        var deduped: [ChatMessage] = []
+        for msg in self.messages {
+            if let last = deduped.last, last.role == "model" && msg.role == "model" && (last.content == msg.content || msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                continue
+            }
+            deduped.append(msg)
+        }
+        self.messages = deduped
     }
     
     /// Create brand new workspace interaction node (with parentId support and instant remote-local mapping)
