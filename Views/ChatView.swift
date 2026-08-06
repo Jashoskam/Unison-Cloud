@@ -628,20 +628,25 @@ public struct ChatView: View {
                                 } else if db.activeWorkspaceDirectoryPath != nil {
                                     // Project Mode Text Area (matching user screenshot)
                                     VStack(alignment: .leading, spacing: 0) {
-                                        // Top Folder Header (matching screenshot: 📁 unison ⌵)
-                                        HStack(spacing: 6) {
-                                            Image(systemName: "folder")
-                                                .foregroundColor(.white.opacity(0.6))
-                                            Text((db.activeWorkspaceDirectoryPath! as NSString).lastPathComponent)
-                                                .font(.system(size: 13, weight: .medium))
-                                                .foregroundColor(.white.opacity(0.85))
-                                            Image(systemName: "chevron.down")
-                                                .font(.system(size: 9, weight: .bold))
-                                                .foregroundColor(.white.opacity(0.4))
-                                            Spacer()
+                                        // Top Folder Header (rendered ONLY for Project tabs: 📁 folder ⌵)
+                                        let activeConvo = db.conversations.first(where: { $0.id == db.selectedConversationId })
+                                        let isProjectTab = activeConvo?.type == "project" || activeConvo?.parentId != nil
+                                        
+                                        if isProjectTab, let wsPath = db.activeWorkspaceDirectoryPath, !wsPath.isEmpty {
+                                            HStack(spacing: 6) {
+                                                Image(systemName: "folder.fill")
+                                                    .foregroundColor(.blue.opacity(0.85))
+                                                Text((wsPath as NSString).lastPathComponent)
+                                                    .font(.system(size: 13, weight: .semibold))
+                                                    .foregroundColor(.white.opacity(0.85))
+                                                Image(systemName: "chevron.down")
+                                                    .font(.system(size: 9, weight: .bold))
+                                                    .foregroundColor(.white.opacity(0.4))
+                                                Spacer()
+                                            }
+                                            .padding(.horizontal, 4)
+                                            .padding(.bottom, 8)
                                         }
-                                        .padding(.horizontal, 4)
-                                        .padding(.bottom, 8)
                                         
                                         // Card Container (matching screenshot)
                                         VStack(alignment: .leading, spacing: 10) {

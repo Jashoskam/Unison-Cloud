@@ -3682,12 +3682,13 @@ Required changes to my new portfolio:
     /// Create brand new workspace interaction node (with parentId support and instant remote-local mapping)
     public func createWorkspaceConversation(title: String, type: String = "chat", parentId: String? = nil, completion: @escaping (String) -> Void) {
         let newId = UUID().uuidString
+        let effectiveParentId = parentId ?? (type == "project" ? (self.workspaceProjects.first(where: { $0.directoryPath == self.activeWorkspaceDirectoryPath })?.id ?? self.activeWorkspaceDirectoryPath) : nil)
         
         let newConvo = Conversation(
             id: newId,
             title: title,
             type: type,
-            parentId: parentId,
+            parentId: effectiveParentId,
             createdAt: Date()
         )
         
