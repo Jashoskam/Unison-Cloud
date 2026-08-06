@@ -528,15 +528,6 @@ public struct ChatView: View {
                                                 }
                                                 .id(msg.id)
                                             }
-                                            
-                                            if db.isSendingMessage {
-                                                let isLastUserMsg = db.messages.last?.role == "user"
-                                                if isLastUserMsg {
-                                                    DynamicThinkingBlockView(thoughts: "Analyzing prompt, scanning workspace files & generating code...", isStreaming: true)
-                                                        .padding(.horizontal, 24)
-                                                        .padding(.vertical, 8)
-                                                }
-                                            }
                                         }
                                         .frame(maxWidth: 768)
                                         .frame(maxWidth: .infinity)

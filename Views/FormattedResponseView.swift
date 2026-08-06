@@ -2893,7 +2893,7 @@ public struct DynamicThinkingBlockView: View {
                             .frame(width: 12, height: 12)
                     }
                     
-                    Text(isStreaming ? (streamQueue.isThinking ? "Thinking (\(String(format: "%.1f", streamQueue.thinkingDurationSeconds))s)..." : "Analyzing Workspace & Generating...") : "Worked for \(log.durationSeconds)s")
+                    Text(isStreaming ? (streamQueue.thinkingText.isEmpty ? "Reasoning & Analyzing Prompt..." : "Thought (\(String(format: "%.1f", streamQueue.thinkingDurationSeconds))s)") : "Worked for \(log.durationSeconds)s")
                         .font(.system(size: 11.5, weight: .regular))
                         .foregroundColor(.white.opacity(0.75))
                         .realtimeShimmer(active: isStreaming)
