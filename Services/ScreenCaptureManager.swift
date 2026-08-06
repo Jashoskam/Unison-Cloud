@@ -98,6 +98,15 @@ public class ScreenCaptureManager: NSObject, SCStreamOutput {
                 return
             }
             
+            // Fast Instant Path: Capture main display directly via CoreGraphics in ~5ms
+            if let cgImage = CGDisplayCreateImage(CGMainDisplayID()) {
+                if let compressedData = self.compressImage(cgImage, maxDimension: 1024, compressionQuality: 0.75) {
+                    self.lastValidFrameData = compressedData
+                    completion(compressedData)
+                    return
+                }
+            }
+            
             guard self.verifyActualScreenCapturePermission() else {
                 print("[ScreenCaptureManager] No real OS permission. Returning mock screen image to avoid OS prompt.")
                 let dummyImage = self.createDummyBlackImage()

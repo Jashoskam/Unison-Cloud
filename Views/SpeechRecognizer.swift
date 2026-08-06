@@ -154,12 +154,12 @@ public class SpeechRecognizer: ObservableObject {
             self.recognitionRequest = nil
         }
         
+        // Remove input tap first to prevent CoreAudio HAL deallocation crash on macOS
+        audioEngine.inputNode.removeTap(onBus: 0)
+        
         if audioEngine.isRunning {
             audioEngine.stop()
         }
-        
-        // Safely remove tap without throwing
-        audioEngine.reset()
         
         isListening = false
         audioLevel = 0.0
