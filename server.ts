@@ -26,6 +26,7 @@ import { authRouter } from "./server/routes/authRoutes";
 import { toolsRouter } from "./server/routes/toolsRoutes";
 import { streamingRouter } from "./server/routes/streamingRoutes";
 import { scheduledTasksRouter } from "./server/routes/scheduledTasksRoutes";
+import { searchRouter } from "./server/routes/searchRoutes";
 
 // Register Core Enterprise Plugins (Antigravity & ChatGPT Kernel)
 PluginRegistry.registerPlugin(FileSystemPlugin);
@@ -1294,6 +1295,7 @@ async function startServer() {
     app.use("/api/v1/tools", express.json(), toolsRouter);
     app.use("/api/v1/streaming", express.json(), streamingRouter);
     app.use("/api/v1/scheduled-tasks", express.json(), scheduledTasksRouter);
+    app.use("/api/v1/codebase", express.json(), searchRouter);
 
     server.on('upgrade', (request, socket, head) => {
         try {

@@ -2601,10 +2601,17 @@ Required changes to my new portfolio:
                                let parts = content["parts"] as? [[String: Any]] {
                                 
                                 for part in parts {
+                                    if let thoughtText = (part["thought"] as? String) ?? (part["thinking"] as? String) {
+                                        DispatchQueue.main.async {
+                                            TokenStreamQueue.shared.pushThinkingChunk(thoughtText)
+                                        }
+                                    }
+                                    
                                     if let deltaText = part["text"] as? String {
                                         // Standard text streaming
                                         accumulated += deltaText
                                         DispatchQueue.main.async {
+                                            TokenStreamQueue.shared.pushTextChunk(deltaText)
                                             onChunk(deltaText)
                                         }
                                     } else if let fc = part["functionCall"] as? [String: Any],
@@ -3082,6 +3089,11 @@ Required changes to my new portfolio:
         
         if !effectiveApiKey.isEmpty {
             self.logEvent(message: "Routing request to Gemini SSE real-time streaming endpoint...")
+            
+            // Reset 60fps word-by-word token queue and thinking disclosure state
+            DispatchQueue.main.async {
+                TokenStreamQueue.shared.reset()
+            }
             
             // Create a live placeholder assistant message for real-time SSE streaming
             let assistantMsgId = UUID().uuidString

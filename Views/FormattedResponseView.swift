@@ -2862,6 +2862,7 @@ public struct DynamicThinkingBlockView: View {
     let isStreaming: Bool
     let detectedSources: [GroundedSource]
     
+    @ObservedObject var streamQueue = TokenStreamQueue.shared
     @State private var isWorkedExpanded: Bool = true
     @State private var isExploredExpanded: Bool = true
     @State private var isCommandsExpanded: Bool = true
@@ -2892,7 +2893,7 @@ public struct DynamicThinkingBlockView: View {
                             .frame(width: 12, height: 12)
                     }
                     
-                    Text(isStreaming ? "Thinking & Analyzing Workspace..." : "Worked for \(log.durationSeconds)s")
+                    Text(isStreaming ? (streamQueue.isThinking ? "Thinking (\(String(format: "%.1f", streamQueue.thinkingDurationSeconds))s)..." : "Analyzing Workspace & Generating...") : "Worked for \(log.durationSeconds)s")
                         .font(.system(size: 11.5, weight: .regular))
                         .foregroundColor(.white.opacity(0.75))
                         .realtimeShimmer(active: isStreaming)
@@ -2908,6 +2909,15 @@ public struct DynamicThinkingBlockView: View {
             
             if isWorkedExpanded {
                 VStack(alignment: .leading, spacing: 6) {
+                    if isStreaming && !streamQueue.thinkingText.isEmpty {
+                        Text(streamQueue.thinkingText)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.7))
+                            .padding(8)
+                            .background(Color.white.opacity(0.04))
+                            .cornerRadius(6)
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.1), lineWidth: 1))
+                    }
                     
                     // Explored Activity Feed Container
                     if !log.exploredItems.isEmpty {
@@ -3330,9 +3340,9 @@ public struct FormattedResponseView: View {
     }
     
     private func safeSubstring(_ str: String, length: Int) -> String {
+        guard !str.isEmpty else { return "" }
         let safeLength = min(max(0, length), str.count)
-        let index = str.index(str.startIndex, offsetBy: safeLength)
-        return String(str[..<index])
+        return String(str.prefix(safeLength))
     }
     
     private func synthesizeActivityFeed(rawThoughts: String?, currentText: String) -> String {
