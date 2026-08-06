@@ -81,12 +81,33 @@ public class SpeechRecognizer: ObservableObject {
             guard let self = self else { return }
             self.stopListening()
             self.errorMessage = nil
+            
+            #if os(macOS)
+            let status = AVCaptureDevice.authorizationStatus(for: .audio)
+            if status == .denied || status == .restricted {
+                self.errorMessage = "⚠️ Mic Permission Denied: Enable in System Settings -> Privacy -> Microphone"
+                self.isListening = false
+                return
+            } else if status == .notDetermined {
+                self.errorMessage = "⚠️ Requesting Microphone Access..."
+                AVCaptureDevice.requestAccess(for: .audio) { granted in
+                    DispatchQueue.main.async {
+                        if granted {
+                            self.startListening()
+                        } else {
+                            self.errorMessage = "⚠️ Microphone Access Denied by User"
+                            self.isListening = false
+                        }
+                    }
+                }
+                return
+            }
+            #endif
+            
             self.isListening = true
             self.isHotwordActive = false
             self.transcript = ""
             self.resetSilenceTimer()
-            
-            // Ensure permissions are requested
             self.requestPermissions()
             
             do {

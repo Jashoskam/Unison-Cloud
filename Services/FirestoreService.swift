@@ -2203,6 +2203,7 @@ Required changes to my new portfolio:
                 "5. RICH MARKDOWN: Use clean markdown headers (###), bold text (**symbol**), inline code (`symbol`), and language-tagged code blocks. Structure responses logically.\n" +
                 "6. HONESTY & ACCURACY: Base your answers on real workspace inspection and tool findings. Never fabricate information.\n" +
                 "7. SYSTEM_ACTION RULE: ONLY if the user explicitly commands you to launch an app, append: `[SYSTEM_ACTION: launchApp=\"AppName\"]` at the end.\n" +
+                "8. REAL-TIME DESKTOP VISION: You HAVE FULL DESKTOP SCREEN VISION ACCESS. When the user asks you to look at their screen, identify visible apps/windows, or inspect UI elements, NEVER issue text-only disclaimers or claim you cannot see their screen. You can analyze attached display images and call `capture_desktop_screenshot` to inspect their active macOS desktop.\n" +
                 workspaceContext +
                 "\nAt the absolute end of your response, provide 3 relevant follow-up questions using: [FOLLOW_UPS: [\"Q1\", \"Q2\", \"Q3\"]]."
         }
