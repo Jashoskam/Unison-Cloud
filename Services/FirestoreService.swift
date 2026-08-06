@@ -209,12 +209,20 @@ public class FirestoreService: ObservableObject {
     }
     
     @Published public var userGeminiApiKey: String = {
-        return UserDefaults.standard.string(forKey: "unison_user_gemini_api_key") ?? ""
+        let stored = UserDefaults.standard.string(forKey: "unison_user_gemini_api_key") ?? ""
+        if !stored.isEmpty { return stored }
+        return ProcessInfo.processInfo.environment["GEMINI_API_KEY"] ?? ""
     }() {
         didSet {
             UserDefaults.standard.set(userGeminiApiKey, forKey: "unison_user_gemini_api_key")
             self.logEvent(message: "Custom Gemini API Key updated.")
         }
+    }
+    
+    public var effectiveApiKey: String {
+        let trimmed = userGeminiApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        return ProcessInfo.processInfo.environment["GEMINI_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
     
     // Industrial IDE State Controls
@@ -2220,7 +2228,7 @@ Required changes to my new portfolio:
         onChunk: @escaping (String) -> Void,
         completion: @escaping (String?, [ToolExecution]) -> Void
     ) {
-        let urlString = "https://generativelanguage.googleapis.com/v1beta/models/\(modelId):streamGenerateContent?alt=sse&key=\(userGeminiApiKey)"
+        let urlString = "https://generativelanguage.googleapis.com/v1beta/models/\(modelId):streamGenerateContent?alt=sse&key=\(effectiveApiKey)"
         guard let url = URL(string: urlString) else {
             completion(nil, pendingToolExecutions)
             return
@@ -2431,6 +2439,11 @@ Required changes to my new portfolio:
     /// The completion callback provides both the response text and an array of tool executions
     /// performed during this request, which get stored on the ChatMessage for the activity feed.
     private func executeStreamingWithToolSupport(models: [String], index: Int, prompt: String, history: [ChatMessage], onChunk: @escaping (String) -> Void, completion: @escaping (String?, [ToolExecution]) -> Void) {
+        guard !effectiveApiKey.isEmpty else {
+            completion("⚠️ Gemini API Key Required\n\nTo enable AI chat, code vision, and workspace tool execution in Unison OS, please enter your Gemini API key in **Settings → AI Model Configuration**.", [])
+            return
+        }
+        
         guard index < models.count else {
             completion("Unison neural error: Failed all backup model pathways. Please check your network connection or Gemini API key.", [])
             return
@@ -2439,7 +2452,7 @@ Required changes to my new portfolio:
         let modelId = models[index]
         self.logEvent(message: "[GEMINI_STREAM] Initializing SSE neural stream with tools: \(modelId)")
         
-        let urlString = "https://generativelanguage.googleapis.com/v1beta/models/\(modelId):streamGenerateContent?alt=sse&key=\(userGeminiApiKey)"
+        let urlString = "https://generativelanguage.googleapis.com/v1beta/models/\(modelId):streamGenerateContent?alt=sse&key=\(effectiveApiKey)"
         guard let url = URL(string: urlString) else {
             self.executeStreamingWithToolSupport(models: models, index: index + 1, prompt: prompt, history: history, onChunk: onChunk, completion: completion)
             return
@@ -2663,6 +2676,11 @@ Required changes to my new portfolio:
     private static var lastApiCallTimestamp: TimeInterval = 0
     
     private func executeWithFallback(models: [String], index: Int, prompt: String, history: [ChatMessage], completion: @escaping (String?) -> Void) {
+        guard !effectiveApiKey.isEmpty else {
+            completion("⚠️ Gemini API Key Required\n\nTo enable AI responses, please enter your Gemini API key in **Settings → AI Model Configuration**.")
+            return
+        }
+        
         guard index < models.count else {
             completion("Unison neural error: Failed all backup model pathways due to temporary High Demand on Google Gemini service capacity. Please retry inside Unison OS or check your API Key configuration.")
             return
@@ -2671,7 +2689,7 @@ Required changes to my new portfolio:
         let modelId = models[index]
         self.logEvent(message: "[GEMINI_FALLBACK] Attempting neural pathway: \(modelId) (index \(index)/\(models.count - 1))")
         
-        let urlString = "https://generativelanguage.googleapis.com/v1beta/models/\(modelId):generateContent?key=\(userGeminiApiKey)"
+        let urlString = "https://generativelanguage.googleapis.com/v1beta/models/\(modelId):generateContent?key=\(effectiveApiKey)"
         guard let url = URL(string: urlString) else {
             self.executeWithFallback(models: models, index: index + 1, prompt: prompt, history: history, completion: completion)
             return
@@ -3062,7 +3080,7 @@ Required changes to my new portfolio:
             return
         }
         
-        if !userGeminiApiKey.isEmpty {
+        if !effectiveApiKey.isEmpty {
             self.logEvent(message: "Routing request to Gemini SSE real-time streaming endpoint...")
             
             // Create a live placeholder assistant message for real-time SSE streaming
@@ -3138,7 +3156,7 @@ Required changes to my new portfolio:
         }
         
         // Direct Gemini neural streaming pipeline if API key is present
-        if !userGeminiApiKey.isEmpty {
+        if !effectiveApiKey.isEmpty {
             self.executeStreamingWithToolSupport(
                 models: ["gemini-2.5-flash", "gemini-1.5-flash"],
                 index: 0,
