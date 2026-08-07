@@ -2729,8 +2729,7 @@ Required changes to my new portfolio:
                                         
                                         if let thoughtText = extractedThought {
                                             DispatchQueue.main.async {
-                                                TokenStreamQueue.shared.isThinking = true
-                                                TokenStreamQueue.shared.thinkingText += thoughtText
+                                                TokenStreamQueue.shared.pushThinkingChunk(thoughtText)
                                                 if let idx = self.messages.indices.last(where: { self.messages[$0].role == "model" }) {
                                                     self.messages[idx].thoughts = (self.messages[idx].thoughts ?? "") + thoughtText
                                                 }
@@ -3687,8 +3686,7 @@ Required changes to my new portfolio:
                                 if let type = json["type"] as? String {
                                     if type == "thought_delta", let thought = json["thought"] as? String {
                                         DispatchQueue.main.async {
-                                            TokenStreamQueue.shared.isThinking = true
-                                            TokenStreamQueue.shared.thinkingText += thought
+                                            TokenStreamQueue.shared.pushThinkingChunk(thought)
                                             if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
                                                 self.messages[idx].thoughts = (self.messages[idx].thoughts ?? "") + thought
                                             }
