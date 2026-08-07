@@ -3228,19 +3228,17 @@ Required changes to my new portfolio:
             return
         }
         
+        let assistantMsgId = UUID().uuidString
+        let placeholderMsg = ChatMessage(id: assistantMsgId, role: "model", content: "")
+        self.messages.append(placeholderMsg)
+        self.isSendingMessage = true
+        
+        DispatchQueue.main.async {
+            TokenStreamQueue.shared.reset()
+        }
+        
         if !effectiveApiKey.isEmpty {
             self.logEvent(message: "Routing request to Gemini SSE real-time streaming endpoint...")
-            
-            // Reset 60fps word-by-word token queue and thinking disclosure state
-            DispatchQueue.main.async {
-                TokenStreamQueue.shared.reset()
-            }
-            
-            // Create a live placeholder assistant message for real-time SSE streaming
-            let assistantMsgId = UUID().uuidString
-            let placeholderMsg = ChatMessage(id: assistantMsgId, role: "model", content: "")
-            self.messages.append(placeholderMsg)
-            self.isSendingMessage = true
             
             // Use tool-aware streaming that supports Gemini function calling
             let modelsToTry = [self.selectedModel.lowercased().contains("pro") ? "gemini-1.5-pro" : "gemini-2.5-flash", "gemini-2.5-flash", "gemini-1.5-flash"]
@@ -3271,6 +3269,7 @@ Required changes to my new portfolio:
                                 }
                             }
                             self.processDynamicWorkspaceFiles(reply: reply, prompt: prompt)
+                            self.deduplicateMessages()
                             self.saveMessagesToDefaults()
                             
                             if self.isUsingCustomSupabase {
@@ -3288,7 +3287,7 @@ Required changes to my new portfolio:
             )
         } else {
             // Standard server pipeline
-            self.postChatMessageToServer(prompt: prompt, convoId: convoId)
+            self.postChatMessageToServer(prompt: prompt, convoId: convoId, existingAssistantMsgId: assistantMsgId)
         }
     }
 
@@ -3633,7 +3632,7 @@ Required changes to my new portfolio:
         }
     }
 
-    private func postChatMessageToServer(prompt: String, convoId: String) {
+    private func postChatMessageToServer(prompt: String, convoId: String, existingAssistantMsgId: String? = nil) {
         guard let url = URL(string: "\(webUrl)/api/companion/stream") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -3651,9 +3650,11 @@ Required changes to my new portfolio:
         
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
-        let assistantMsgId = UUID().uuidString
-        let placeholderMsg = ChatMessage(id: assistantMsgId, role: "model", content: "")
-        self.messages.append(placeholderMsg)
+        let assistantMsgId = existingAssistantMsgId ?? UUID().uuidString
+        if existingAssistantMsgId == nil {
+            let placeholderMsg = ChatMessage(id: assistantMsgId, role: "model", content: "")
+            self.messages.append(placeholderMsg)
+        }
         self.isSendingMessage = true
         
         DispatchQueue.main.async {
