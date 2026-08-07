@@ -206,18 +206,20 @@ public final class SystemOverlayService: ObservableObject {
     }
 
     private func windowTitle(for app: NSRunningApplication) -> String {
+        #if os(macOS)
         let systemElement = AXUIElementCreateSystemWide()
-        var focusedWindow: AnyObject?
+        var focusedWindow: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(systemElement, kAXFocusedWindowAttribute as CFString, &focusedWindow)
 
-        if result == .success, let focusedWindowRef = focusedWindow {
-            let windowValue = focusedWindowRef as! AXUIElement
+        if result == .success, let focusedWindowRef = focusedWindow, CFGetTypeID(focusedWindowRef) == AXUIElementGetTypeID() {
+            let windowValue = unsafeBitCast(focusedWindowRef, to: AXUIElement.self)
             var title: CFTypeRef?
             let titleResult = AXUIElementCopyAttributeValue(windowValue, kAXTitleAttribute as CFString, &title)
             if titleResult == .success, let titleValue = title as? String {
                 return titleValue
             }
         }
+        #endif
 
         if let name = app.localizedName {
             return name
@@ -226,13 +228,14 @@ public final class SystemOverlayService: ObservableObject {
     }
 
     private func extractSelectedText() -> String {
+        #if os(macOS)
         let systemWide = AXUIElementCreateSystemWide()
-        var focusedElement: AnyObject?
+        var focusedElement: CFTypeRef?
         let copyFocused = AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedElement)
-        guard copyFocused == .success, let focusedElementRef = focusedElement else {
+        guard copyFocused == .success, let focusedElementRef = focusedElement, CFGetTypeID(focusedElementRef) == AXUIElementGetTypeID() else {
             return ""
         }
-        let element = focusedElementRef as! AXUIElement
+        let element = unsafeBitCast(focusedElementRef, to: AXUIElement.self)
 
         var selectedText: CFTypeRef?
         let selectedResult = AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selectedText)
@@ -245,6 +248,7 @@ public final class SystemOverlayService: ObservableObject {
         if valueResult == .success, let textValue = value as? String, !textValue.isEmpty {
             return textValue
         }
+        #endif
 
         return ""
     }
