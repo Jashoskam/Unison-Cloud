@@ -547,6 +547,42 @@ Required changes to my new portfolio:
         
         // Start persistent system-wide command WebSocket receiver
         self.connectToWebSocket()
+        
+        // Register active device node in multidisciplinary network mesh
+        self.registerActiveDeviceMesh()
+    }
+
+    public func registerActiveDeviceMesh() {
+        guard let url = URL(string: "\(webUrl)/api/device/register") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        #if os(macOS)
+        let deviceType = "macOS"
+        #elseif os(iOS)
+        let deviceType = "iOS"
+        #else
+        let deviceType = "Desktop"
+        #endif
+        
+        let deviceName = Host.current().localizedName ?? "Unison Native Node"
+        let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
+        
+        let body: [String: Any] = [
+            "deviceId": currentUserId ?? UUID().uuidString,
+            "deviceName": deviceName,
+            "deviceType": deviceType,
+            "osVersion": osVersion,
+            "activeWorkspace": activeWorkspaceDirectoryPath ?? "Unison Cloud Mesh"
+        ]
+        
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
+            if let data = data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                self?.logEvent(message: "[DEVICE_MESH] Active device registered in mesh: \(deviceName) (\(deviceType))")
+            }
+        }.resume()
     }
 
     public func detectUrlAndSync() {

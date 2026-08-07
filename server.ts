@@ -2606,6 +2606,45 @@ export default function App() {
         }
     });
 
+    // MULTIDISCIPLINARY DEVICE MESH API ENDPOINTS
+    const activeDevicesMesh = new Map<string, {
+        deviceId: string;
+        deviceName: string;
+        deviceType: string;
+        osVersion: string;
+        ipAddress: string;
+        activeWorkspace: string;
+        lastActive: string;
+    }>();
+
+    app.post("/api/device/register", (req, res) => {
+        try {
+            const { deviceId, deviceName, deviceType, osVersion, ipAddress, activeWorkspace } = req.body;
+            if (!deviceId || !deviceName) {
+                return res.status(400).json({ error: "Missing deviceId or deviceName" });
+            }
+            const record = {
+                deviceId,
+                deviceName,
+                deviceType: deviceType || "macOS",
+                osVersion: osVersion || "Unknown",
+                ipAddress: ipAddress || (req.ip ?? "127.0.0.1"),
+                activeWorkspace: activeWorkspace || "Unison Workspace",
+                lastActive: new Date().toISOString()
+            };
+            activeDevicesMesh.set(deviceId, record);
+            console.log(`[DEVICE_MESH] Registered node: ${deviceName} (${deviceType})`);
+            res.json({ success: true, registeredDevice: record, totalMeshNodes: activeDevicesMesh.size });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    app.get("/api/device/active", (req, res) => {
+        const devices = Array.from(activeDevicesMesh.values());
+        res.json({ devices, totalMeshNodes: devices.length });
+    });
+
     // Pull all study materials/courses filtered optionally by owner's UID (or email resolved to UID)
     app.get("/api/companion/study_materials", async (req, res) => {
         try {
@@ -3047,7 +3086,8 @@ CORE BEHAVIORAL RULES:
                     systemInstruction,
                     temperature: 0.2,
                     maxOutputTokens: 32768,
-                    thinkingConfig: { thinkingBudget: 8192 }
+                    thinkingConfig: { thinkingBudget: 8192 },
+                    tools: [{ googleSearch: {} }]
                 }
             });
 
