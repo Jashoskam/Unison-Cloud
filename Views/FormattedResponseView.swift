@@ -3328,19 +3328,19 @@ public struct DynamicThinkingBlockView: View {
             
             if isWorkedExpanded {
                 VStack(alignment: .leading, spacing: 10) {
-                    // 1. Thinking Text Block (matching Screenshot 2)
+                    // 1. Thinking Text Block (matching Antigravity reasoning feed)
                     let activeThoughts = !streamQueue.thinkingText.isEmpty ? streamQueue.thinkingText : (thoughts.isEmpty ? nil : thoughts)
-                    if let thoughtContent = activeThoughts, !thoughtContent.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(thoughtContent)
-                                .font(.system(size: 12.5, weight: .regular, design: .default))
-                                .foregroundColor(Color(red: 0.78, green: 0.8, blue: 0.85))
-                                .lineSpacing(4)
-                                .padding(10)
-                                .background(Color.white.opacity(0.03))
-                                .cornerRadius(8)
-                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.08), lineWidth: 1))
-                        }
+                    let displayThoughts = (activeThoughts != nil && !activeThoughts!.isEmpty) ? activeThoughts! : "Analyzing neural prompt context, scanning workspace dependencies, and preparing response execution pipeline..."
+                    
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(displayThoughts)
+                            .font(.system(size: 12.5, weight: .regular, design: .default))
+                            .foregroundColor(Color(red: 0.78, green: 0.8, blue: 0.85))
+                            .lineSpacing(4)
+                            .padding(10)
+                            .background(Color.white.opacity(0.03))
+                            .cornerRadius(8)
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.08), lineWidth: 1))
                     }
                     
                     // 2. Explored Activity Row (matching Screenshot 1: "Explored 2 files, 1 search >")

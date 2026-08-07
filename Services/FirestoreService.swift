@@ -451,9 +451,11 @@ Required changes to my new portfolio:
     @Published public var activeProjectFiles: [UnisonFile] = []
     @Published public var selectedConversationId: String? = nil {
         didSet {
-            if let newId = selectedConversationId {
-                self.loadMessagesFromDefaults(conversationId: newId)
-                self.fetchLiveMessages(conversationId: newId)
+            if oldValue != selectedConversationId, let newId = selectedConversationId {
+                if !isSendingMessage {
+                    self.loadMessagesFromDefaults(conversationId: newId)
+                    self.fetchLiveMessages(conversationId: newId)
+                }
             }
         }
     }
