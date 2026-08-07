@@ -3630,7 +3630,8 @@ Required changes to my new portfolio:
                                 if let type = json["type"] as? String {
                                     if type == "thought_delta", let thought = json["thought"] as? String {
                                         DispatchQueue.main.async {
-                                            TokenStreamQueue.shared.pushThinkingChunk(thought)
+                                            TokenStreamQueue.shared.isThinking = true
+                                            TokenStreamQueue.shared.thinkingText += thought
                                             if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
                                                 self.messages[idx].thoughts = (self.messages[idx].thoughts ?? "") + thought
                                             }

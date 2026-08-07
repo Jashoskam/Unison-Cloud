@@ -3056,22 +3056,37 @@ CORE BEHAVIORAL RULES:
                 const candidates = (chunk as any).candidates;
                 if (candidates && candidates[0] && candidates[0].content && candidates[0].content.parts) {
                     for (const part of candidates[0].content.parts) {
-                        if (part.thought || part.thinking) {
-                            const thoughtStr = part.thought || part.thinking;
-                            fullThoughts += thoughtStr;
-                            res.write(`data: ${JSON.stringify({ type: "thought_delta", thought: thoughtStr, text: "" })}\n\n`);
-                            if (typeof res.flush === 'function') res.flush();
+                        let thoughtStr = "";
+                        let textStr = "";
+
+                        if (part.thought === true && part.text) {
+                            thoughtStr = part.text;
+                        } else if (typeof part.thought === "string") {
+                            thoughtStr = part.thought;
+                        } else if (part.thought && typeof part.thought === "object" && part.thought.text) {
+                            thoughtStr = part.thought.text;
+                        } else if (typeof part.thinking === "string") {
+                            thoughtStr = part.thinking;
+                        } else if (part.text && !part.thought) {
+                            textStr = part.text;
                         }
-                        if (part.text) {
-                            fullText += part.text;
-                            res.write(`data: ${JSON.stringify({ type: "text_delta", text: part.text })}\n\n`);
-                            if (typeof res.flush === 'function') res.flush();
+
+                        if (thoughtStr) {
+                            fullThoughts += thoughtStr;
+                            res.write(`data: ${JSON.stringify({ type: "thought_delta", thought: thoughtStr })}\n\n`);
+                            if (typeof res.flush === "function") res.flush();
+                        }
+
+                        if (textStr) {
+                            fullText += textStr;
+                            res.write(`data: ${JSON.stringify({ type: "text_delta", text: textStr })}\n\n`);
+                            if (typeof res.flush === "function") res.flush();
                         }
                     }
                 } else if (chunk.text) {
                     fullText += chunk.text;
                     res.write(`data: ${JSON.stringify({ type: "text_delta", text: chunk.text })}\n\n`);
-                    if (typeof res.flush === 'function') res.flush();
+                    if (typeof res.flush === "function") res.flush();
                 }
             }
 
