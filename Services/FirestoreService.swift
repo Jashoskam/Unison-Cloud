@@ -255,6 +255,21 @@ public class FirestoreService: ObservableObject {
         }
     }
     
+    public func moveWorkspaceConversation(id: String, targetProjectId: String?) {
+        DispatchQueue.main.async {
+            if let idx = self.conversations.firstIndex(where: { $0.id == id }) {
+                self.conversations[idx].parentId = targetProjectId
+                if targetProjectId == nil {
+                    self.conversations[idx].type = "chat"
+                } else {
+                    self.conversations[idx].type = "project"
+                }
+                self.saveConversationsToDefaults()
+                self.logEvent(message: "Moved conversation \(id) to project parent: \(targetProjectId ?? "general")")
+            }
+        }
+    }
+    
     // Custom user configurable keys
     @Published public var selectedModel: String = {
         UserDefaults.standard.string(forKey: "unison_selected_model") ?? "Gemini 3.5 Flash"
@@ -663,7 +678,7 @@ Required changes to my new portfolio:
         }
     }
     
-    private func logEvent(message: String) {
+    public func logEvent(message: String) {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss"
         let timestamp = formatter.string(from: Date())

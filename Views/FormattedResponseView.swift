@@ -518,20 +518,175 @@ public struct BlockquoteView: View {
     }
 }
 
+public struct SyntaxHighlighterView: View {
+    let code: String
+    let lang: String
+    
+    public init(code: String, lang: String) {
+        self.code = code
+        self.lang = lang
+    }
+    
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(code.components(separatedBy: "\n").enumerated()), id: \.offset) { idx, line in
+                HStack(alignment: .top, spacing: 10) {
+                    Text("\(idx + 1)")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.28))
+                        .frame(width: 24, alignment: .trailing)
+                    
+                    highlightedLineView(line)
+                        .font(.system(size: 12, design: .monospaced))
+                    
+                    Spacer()
+                }
+            }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 10)
+    }
+    
+    @ViewBuilder
+    private func highlightedLineView(_ line: String) -> some View {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("//") || trimmed.hasPrefix("#") || trimmed.hasPrefix("/*") {
+            Text(line)
+                .foregroundColor(Color(red: 0.54, green: 0.58, blue: 0.62))
+        } else {
+            let tokens = line.components(separatedBy: " ")
+            HStack(spacing: 3) {
+                ForEach(Array(tokens.enumerated()), id: \.offset) { _, token in
+                    Text(token + " ")
+                        .foregroundColor(tokenColor(token))
+                }
+            }
+        }
+    }
+    
+    private func tokenColor(_ token: String) -> Color {
+        let clean = token.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        let keywords: Set<String> = ["func", "import", "def", "class", "const", "let", "var", "return", "if", "else", "try", "catch", "public", "private", "struct", "extension", "for", "while", "in", "case", "switch", "async", "await", "export", "from"]
+        let types: Set<String> = ["String", "Int", "Double", "Float", "Bool", "View", "Void", "Promise", "Array", "Dictionary", "ChatMessage", "Conversation"]
+        
+        if keywords.contains(clean) {
+            return Color(red: 1.0, green: 0.48, blue: 0.45)
+        } else if types.contains(clean) || (clean.first?.isUppercase == true && clean.count > 2) {
+            return Color(red: 1.0, green: 0.65, blue: 0.34)
+        } else if token.contains("\"") || token.contains("'") || token.contains("`") {
+            return Color(red: 0.49, green: 0.90, blue: 0.53)
+        } else if Double(clean) != nil {
+            return Color(red: 0.47, green: 0.75, blue: 1.0)
+        } else {
+            return Color.white.opacity(0.88)
+        }
+    }
+}
+
 public struct CodeBlockView: View {
     let lang: String
     let code: String
+    
+    @ObservedObject var db = FirestoreService.shared
     @State private var isCopied = false
+    @State private var isApplied = false
+    @State private var isRunning = false
+    @State private var targetFileName: String = ""
+    @State private var showApplyPopover = false
     
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(lang.uppercased().isEmpty ? "CODE" : lang.uppercased())
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.5))
+            // Header Bar with Window Dots & Action Buttons
+            HStack(spacing: 8) {
+                HStack(spacing: 5) {
+                    Circle().fill(Color.red.opacity(0.7)).frame(width: 7, height: 7)
+                    Circle().fill(Color.yellow.opacity(0.7)).frame(width: 7, height: 7)
+                    Circle().fill(Color.green.opacity(0.7)).frame(width: 7, height: 7)
+                    
+                    Text(lang.uppercased().isEmpty ? "CODE" : lang.uppercased())
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.55))
+                        .padding(.leading, 4)
+                }
                 
                 Spacer()
                 
+                // Run in Terminal button
+                Button(action: {
+                    isRunning = true
+                    let script = code
+                    let wsDir = db.activeWorkspaceDirectoryPath ?? FileManager.default.currentDirectoryPath
+                    LocalShellExecutor.shared.execute(command: script, in: wsDir) { exitCode, output in
+                        DispatchQueue.main.async {
+                            isRunning = false
+                            db.logEvent(message: "Code block executed (Exit \(exitCode)): \(output.prefix(60))...")
+                        }
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: isRunning ? "arrow.triangle.2.circlepath" : "play.fill")
+                            .font(.system(size: 9))
+                        Text(isRunning ? "RUNNING..." : "RUN")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .foregroundColor(isRunning ? .cyan : .green.opacity(0.9))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.white.opacity(0.06))
+                    .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+                .help("Run script in local terminal")
+                
+                // Apply to File button
+                Button(action: {
+                    let defaultName = lang == "swift" ? "main.swift" : (lang == "ts" || lang == "typescript" ? "app.ts" : (lang == "python" || lang == "py" ? "main.py" : "script.txt"))
+                    targetFileName = defaultName
+                    showApplyPopover = true
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: isApplied ? "checkmark.circle.fill" : "square.and.arrow.down")
+                            .font(.system(size: 9))
+                        Text(isApplied ? "APPLIED" : "APPLY")
+                            .font(.system(size: 9, weight: .bold))
+                    }
+                    .foregroundColor(isApplied ? .green : .blue.opacity(0.9))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.white.opacity(0.06))
+                    .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showApplyPopover) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Apply Code to Workspace File")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        TextField("Target file name (e.g. main.swift)", text: $targetFileName)
+                            .textFieldStyle(PlainTextFieldStyle())
+                            .font(.system(size: 11))
+                            .padding(6)
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(4)
+                        
+                        Button("Confirm Write File") {
+                            let wsDir = db.activeWorkspaceDirectoryPath ?? FileManager.default.currentDirectoryPath
+                            let targetPath = (wsDir as NSString).appendingPathComponent(targetFileName)
+                            try? code.write(toFile: targetPath, atomically: true, encoding: .utf8)
+                            isApplied = true
+                            showApplyPopover = false
+                            db.logEvent(message: "Applied code block to file: \(targetPath)")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .font(.system(size: 11))
+                    }
+                    .padding(12)
+                    .frame(width: 220)
+                }
+                .help("Apply code directly to a workspace file")
+                
+                // Copy button
                 Button(action: {
                     #if os(macOS)
                     let pasteboard = NSPasteboard.general
@@ -550,33 +705,34 @@ public struct CodeBlockView: View {
                 }) {
                     HStack(spacing: 4) {
                         Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 10))
+                            .font(.system(size: 9))
                         Text(isCopied ? "COPIED" : "COPY")
                             .font(.system(size: 9, weight: .bold))
                     }
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(isCopied ? .green : .white.opacity(0.6))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.white.opacity(0.06))
+                    .cornerRadius(6)
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(Color.white.opacity(0.04))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Color(red: 0.1, green: 0.1, blue: 0.12))
             
             Divider()
                 .background(Color.white.opacity(0.1))
             
             ScrollView(.horizontal, showsIndicators: true) {
-                Text(code)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.85))
-                    .padding(14)
+                SyntaxHighlighterView(code: code, lang: lang)
             }
         }
-        .background(Color.black.opacity(0.35))
+        .background(Color(red: 0.06, green: 0.06, blue: 0.08))
         .cornerRadius(10)
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
         )
         .padding(.vertical, 6)
     }

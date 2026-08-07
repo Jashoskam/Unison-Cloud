@@ -3,6 +3,86 @@ import SwiftUI
 import AppKit
 #endif
 
+// MARK: - Workspace Directory Tree Node View
+public struct WorkspaceDirectoryTreeView: View {
+    let directoryPath: String
+    @ObservedObject var db = FirestoreService.shared
+    @State private var items: [String] = []
+    @State private var isExpanded: Bool = false
+    
+    public init(directoryPath: String) {
+        self.directoryPath = directoryPath
+    }
+    
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
+                        if isExpanded && items.isEmpty {
+                            loadDirectoryItems()
+                        }
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white.opacity(0.4))
+                        Image(systemName: "folder")
+                            .font(.system(size: 11))
+                            .foregroundColor(.cyan.opacity(0.8))
+                        Text("Files Explorer")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white.opacity(0.65))
+                    }
+                }
+                .buttonStyle(.plain)
+                
+                Spacer()
+            }
+            .padding(.leading, 24)
+            .padding(.vertical, 2)
+            
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(items, id: \.self) { (item: String) in
+                        let fullPath = (directoryPath as NSString).appendingPathComponent(item)
+                        var isDirObj: ObjCBool = false
+                        let exists = FileManager.default.fileExists(atPath: fullPath, isDirectory: &isDirObj)
+                        let isDir = exists && isDirObj.boolValue
+                        
+                        HStack(spacing: 6) {
+                            Image(systemName: isDir ? "folder.fill" : "doc.text")
+                                .font(.system(size: 10))
+                                .foregroundColor(isDir ? .blue.opacity(0.7) : .white.opacity(0.4))
+                            Text(item)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.75))
+                                .lineLimit(1)
+                            Spacer()
+                        }
+                        .padding(.leading, 36)
+                        .padding(.vertical, 2)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            db.logEvent(message: "Selected workspace item: \(fullPath)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private func loadDirectoryItems() {
+        let fm = FileManager.default
+        if let contents = try? fm.contentsOfDirectory(atPath: directoryPath) {
+            let filtered = contents.filter { !$0.hasPrefix(".") && $0 != "node_modules" && $0 != ".build" }.prefix(15)
+            self.items = Array(filtered)
+        }
+    }
+}
+
 /// Primary Workspace Shell with updated Sidebar UI, Top Bar, and Companion Interface
 public struct DesktopView: View {
     @ObservedObject var db = FirestoreService.shared
@@ -478,6 +558,9 @@ public struct DesktopView: View {
                                     db.activeWorkspaceDirectoryPath = project.directoryPath
                                 }
                                 
+                                // Expandable Project Files Explorer Tree
+                                WorkspaceDirectoryTreeView(directoryPath: project.directoryPath)
+                                
                                 // Conversation Tabs under THIS Project
                                 let projectConvos = db.conversations.filter { $0.parentId == project.id || $0.parentId == project.directoryPath || ($0.type == "project" && (db.workspaceProjects.count == 1 || $0.parentId == nil)) }
                                 
@@ -548,7 +631,6 @@ public struct DesktopView: View {
             // Popover user menu (floating card above profile)
             if isUserMenuPresented {
                 VStack(alignment: .leading, spacing: 0) {
-                    // Top profile header in menu
                     HStack(spacing: 10) {
                         Circle()
                             .fill(Color(red: 0.18, green: 0.45, blue: 0.72))
@@ -559,7 +641,7 @@ public struct DesktopView: View {
                                     .foregroundColor(.white)
                             )
                         
-                        Text(db.currentUserEmail?.components(separatedBy: "@").first ?? "jashoskam")
+                        Text(db.currentUserEmail?.components(separatedBy: "@").first ?? "Jashoskam")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.white)
                         
