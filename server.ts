@@ -3031,7 +3031,8 @@ CORE BEHAVIORAL RULES:
 3. TOOL USE: Base your reasoning and answers on actual workspace tools and files inspected.
 4. FILE CREATION: When generating code files, specify the filename in the code fence header: \`\`\`language filename.ext.
 5. RICH MARKDOWN: Use clean markdown headers (###), bold text, inline code, and language-tagged code blocks.
-6. At the absolute end of your response, provide 3 relevant follow-up questions using: [FOLLOW_UPS: ["Q1", "Q2", "Q3"]].`;
+6. CHAIN OF THOUGHT REASONING MANDATE: Before returning any final response or executing any tool call, you MUST perform an explicit internal reasoning step detailing your architectural plan, assumptions, and steps.
+7. At the absolute end of your response, provide 3 relevant follow-up questions using: [FOLLOW_UPS: ["Q1", "Q2", "Q3"]].`;
 
             res.setHeader("Content-Type", "text/event-stream");
             res.setHeader("Cache-Control", "no-cache, no-transform");
