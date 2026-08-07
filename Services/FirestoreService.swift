@@ -301,6 +301,51 @@ public class FirestoreService: ObservableObject {
     @Published public var showingDiffViewerModal: Bool = false
     @Published public var showingReviewModal: Bool = false
     
+    // Raspberry Pi Centralized Neural Brain Binding
+    @Published public var raspberryPiBrainUrl: String = {
+        UserDefaults.standard.string(forKey: "unison_raspberry_pi_brain_url") ?? "http://unison-brain.local:3000"
+    }() {
+        didSet {
+            UserDefaults.standard.set(raspberryPiBrainUrl, forKey: "unison_raspberry_pi_brain_url")
+            self.logEvent(message: "Raspberry Pi Centralized Brain URL updated to \(raspberryPiBrainUrl)")
+        }
+    }
+    
+    @Published public var piBrainCpuTemp: Double? = nil
+    @Published public var piBrainActiveClients: Int = 0
+    @Published public var piBrainIsConnected: Bool = false
+
+    public func fetchRaspberryPiBrainStatus(completion: ((Bool, Double?, Int?) -> Void)? = nil) {
+        let baseUrl = raspberryPiBrainUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        let target = baseUrl.isEmpty ? self.webUrl : baseUrl
+        guard let url = URL(string: "\(target)/api/brain/info") else {
+            completion?(false, nil, nil)
+            return
+        }
+        
+        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+            guard let self = self else { return }
+            if let data = data,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let status = json["status"] as? String, status == "active" {
+                let temp = json["cpuTempCelsius"] as? Double
+                let activeCount = json["activeDevicesCount"] as? Int ?? 0
+                
+                DispatchQueue.main.async {
+                    self.piBrainIsConnected = true
+                    self.piBrainCpuTemp = temp
+                    self.piBrainActiveClients = activeCount
+                    completion?(true, temp, activeCount)
+                }
+            } else {
+                DispatchQueue.main.async {
+                    self.piBrainIsConnected = false
+                    completion?(false, nil, nil)
+                }
+            }
+        }.resume()
+    }
+    
     @Published public var userSupabaseUrl: String = {
         UserDefaults.standard.string(forKey: "unison_user_supabase_url") ?? "https://copravscnxxgyabaftgz.supabase.co"
     }() {

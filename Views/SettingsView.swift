@@ -2,6 +2,7 @@ import SwiftUI
 
 public struct SettingsView: View {
     @Binding var isPresented: Bool
+    @ObservedObject var db: FirestoreService = FirestoreService.shared
     
     @State private var selectedTab: SettingsTab = .general
     @State private var searchQuery: String = ""
@@ -236,6 +237,8 @@ public struct SettingsView: View {
                     appearanceSettingsContent
                 case .voice:
                     voiceSettingsContent
+                case .configuration:
+                    configurationSettingsContent
                 case .scheduledTasks:
                     scheduledTasksSettingsContent
                 case .computerUse:
@@ -703,6 +706,103 @@ public struct SettingsView: View {
             .padding(16)
             .background(Color(red: 0.137, green: 0.137, blue: 0.145))
             .cornerRadius(12)
+        }
+    }
+
+    private var configurationSettingsContent: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            // Raspberry Pi Centralized Brain Section
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Image(systemName: "cpu")
+                        .foregroundColor(.green)
+                    Text("Raspberry Pi Centralized Brain")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(db.piBrainIsConnected ? Color.green : Color.red)
+                            .frame(width: 8, height: 8)
+                        Text(db.piBrainIsConnected ? "Brain Connected" : "Disconnected")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(db.piBrainIsConnected ? .green : .red)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.black.opacity(0.3))
+                    .cornerRadius(12)
+                }
+                
+                VStack(spacing: 14) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Neural Brain Server URL / IP")
+                                .font(.system(size: 12.5, weight: .medium))
+                                .foregroundColor(.white)
+                            Text("Set your Raspberry Pi IP or local address (e.g. http://192.168.1.100:3000)")
+                                .font(.system(size: 11.5))
+                                .foregroundColor(.white.opacity(0.55))
+                        }
+                        Spacer()
+                    }
+                    
+                    HStack(spacing: 8) {
+                        TextField("http://unison-brain.local:3000", text: $db.raspberryPiBrainUrl)
+                            .textFieldStyle(PlainTextFieldStyle())
+                            .font(.system(size: 12.5, design: .monospaced))
+                            .foregroundColor(.white)
+                            .padding(10)
+                            .background(Color(white: 0.08))
+                            .cornerRadius(8)
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.12), lineWidth: 1))
+                        
+                        Button(action: {
+                            db.fetchRaspberryPiBrainStatus()
+                        }) {
+                            Text("Ping Pi")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+                                .background(Color.green)
+                                .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    
+                    if db.piBrainIsConnected {
+                        HStack(spacing: 16) {
+                            if let temp = db.piBrainCpuTemp {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "thermometer")
+                                        .foregroundColor(.orange)
+                                    Text("Pi Temp: \(String(format: "%.1f", temp))°C")
+                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                        .foregroundColor(.white.opacity(0.85))
+                                }
+                            }
+                            
+                            HStack(spacing: 4) {
+                                Image(systemName: "network")
+                                    .foregroundColor(.cyan)
+                                Text("Mesh Nodes: \(db.piBrainActiveClients)")
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(.white.opacity(0.85))
+                            }
+                            
+                            Spacer()
+                        }
+                        .padding(.top, 4)
+                    }
+                }
+                .padding(16)
+                .background(Color(red: 0.137, green: 0.137, blue: 0.145))
+                .cornerRadius(12)
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.08), lineWidth: 1))
+            }
         }
     }
     

@@ -2645,6 +2645,67 @@ export default function App() {
         res.json({ devices, totalMeshNodes: devices.length });
     });
 
+    // RASPBERRY PI NEURAL BRAIN & HARDWARE DIAGNOSTICS ENDPOINT
+    app.get("/api/brain/info", (req, res) => {
+        try {
+            let cpuTemp: number | null = null;
+            if (fs.existsSync("/sys/class/thermal/thermal_zone0/temp")) {
+                try {
+                    const raw = fs.readFileSync("/sys/class/thermal/thermal_zone0/temp", "utf-8");
+                    cpuTemp = parseFloat(raw.trim()) / 1000.0;
+                } catch (e) {}
+            }
+
+            const uptimeSeconds = process.uptime();
+            const memoryUsage = process.memoryUsage();
+            const devices = Array.from(activeDevicesMesh.values());
+
+            res.json({
+                brainName: "Unison Raspberry Pi Neural Brain",
+                architecture: process.arch,
+                platform: process.platform,
+                nodeVersion: process.version,
+                status: "active",
+                cpuTempCelsius: cpuTemp,
+                uptimeSeconds: Math.floor(uptimeSeconds),
+                memoryUsageMB: {
+                    rss: Math.round(memoryUsage.rss / 1024 / 1024),
+                    heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024),
+                    heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024)
+                },
+                activeDevicesCount: devices.length,
+                devices
+            });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // CROSS-DEVICE WORKFLOW HANDOFF ENDPOINT
+    app.post("/api/device/handoff", (req, res) => {
+        try {
+            const { targetDeviceId, conversationId, activePrompt } = req.body;
+            console.log(`[HANDOFF] Transferring workflow to target device: ${targetDeviceId || 'All Mesh Nodes'}`);
+
+            if (wss) {
+                wss.clients.forEach(client => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(JSON.stringify({
+                            type: 'DEVICE_HANDOFF_EVENT',
+                            targetDeviceId,
+                            conversationId,
+                            activePrompt,
+                            timestamp: new Date().toISOString()
+                        }));
+                    }
+                });
+            }
+            res.json({ success: true, handoffStatus: "dispatched" });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
     // Pull all study materials/courses filtered optionally by owner's UID (or email resolved to UID)
     app.get("/api/companion/study_materials", async (req, res) => {
         try {
