@@ -2682,31 +2682,65 @@ Required changes to my new portfolio:
                             if let data = jsonStr.data(using: .utf8),
                                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                                let candidates = json["candidates"] as? [[String: Any]],
-                               let firstCandidate = candidates.first,
-                               let content = firstCandidate["content"] as? [String: Any],
-                               let parts = content["parts"] as? [[String: Any]] {
+                               let firstCandidate = candidates.first {
                                 
-                                for part in parts {
-                                    // Gemini REST API: thought parts have { "thought": true, "text": "..." }
-                                    let isThoughtPart = part["thought"] as? Bool == true
-                                    if isThoughtPart, let thoughtText = part["text"] as? String {
-                                        DispatchQueue.main.async {
-                                            TokenStreamQueue.shared.isThinking = true
-                                            TokenStreamQueue.shared.thinkingText += thoughtText
+                                // Grounding Search Metadata Citation Parser
+                                if let gm = firstCandidate["groundingMetadata"] as? [String: Any] {
+                                    var sourceObjs: [[String: String]] = []
+                                    if let chunks = gm["groundingChunks"] as? [[String: Any]] {
+                                        for c in chunks {
+                                            if let web = c["web"] as? [String: Any],
+                                               let uri = web["uri"] as? String,
+                                               let title = web["title"] as? String {
+                                                sourceObjs.append([
+                                                    "title": title,
+                                                    "url": uri,
+                                                    "siteName": "Google Search"
+                                                ])
+                                            }
                                         }
-                                    } else if let thoughtText = (part["thought"] as? String) ?? (part["thinking"] as? String) {
-                                        DispatchQueue.main.async {
-                                            TokenStreamQueue.shared.isThinking = true
-                                            TokenStreamQueue.shared.thinkingText += thoughtText
+                                    }
+                                    if !sourceObjs.isEmpty,
+                                       let jsonBytes = try? JSONSerialization.data(withJSONObject: sourceObjs),
+                                       let jsonSourcesStr = String(data: jsonBytes, encoding: .utf8) {
+                                        let sourcesTag = "\n\n[SOURCES: \(jsonSourcesStr)]\n"
+                                        if !accumulated.contains("[SOURCES:") {
+                                            accumulated += sourcesTag
+                                            DispatchQueue.main.async {
+                                                onChunk(sourcesTag)
+                                            }
                                         }
-                                    } else if let deltaText = part["text"] as? String, !isThoughtPart {
-                                        // Standard text streaming
-                                        accumulated += deltaText
-                                        DispatchQueue.main.async {
-                                            TokenStreamQueue.shared.pushTextChunk(deltaText)
-                                            onChunk(deltaText)
-                                        }
-                                    } else if let fc = part["functionCall"] as? [String: Any],
+                                    }
+                                }
+                                
+                                if let content = firstCandidate["content"] as? [String: Any],
+                                   let parts = content["parts"] as? [[String: Any]] {
+                                    
+                                    for part in parts {
+                                        let isThoughtPart = part["thought"] as? Bool == true
+                                        let extractedThought: String? = {
+                                            if isThoughtPart, let text = part["text"] as? String { return text }
+                                            if let thought = part["thought"] as? String { return thought }
+                                            if let thinking = part["thinking"] as? String { return thinking }
+                                            return nil
+                                        }()
+                                        
+                                        if let thoughtText = extractedThought {
+                                            DispatchQueue.main.async {
+                                                TokenStreamQueue.shared.isThinking = true
+                                                TokenStreamQueue.shared.thinkingText += thoughtText
+                                                if let idx = self.messages.indices.last(where: { self.messages[$0].role == "model" }) {
+                                                    self.messages[idx].thoughts = (self.messages[idx].thoughts ?? "") + thoughtText
+                                                }
+                                            }
+                                        } else if let deltaText = part["text"] as? String, !isThoughtPart {
+                                            // Standard text streaming
+                                            accumulated += deltaText
+                                            DispatchQueue.main.async {
+                                                TokenStreamQueue.shared.pushTextChunk(deltaText)
+                                                onChunk(deltaText)
+                                            }
+                                        } else if let fc = part["functionCall"] as? [String: Any],
                                               let fcName = fc["name"] as? String {
                                         // FUNCTION CALL DETECTED — execute the tool locally
                                         let fcArgs = fc["args"] as? [String: Any] ?? [:]
@@ -2735,6 +2769,7 @@ Required changes to my new portfolio:
                             }
                         }
                     }
+                }
                     
                     DispatchQueue.main.async {
                         TokenStreamQueue.shared.isThinking = false
