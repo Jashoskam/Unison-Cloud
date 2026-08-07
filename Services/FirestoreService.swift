@@ -2717,11 +2717,13 @@ Required changes to my new portfolio:
                                    let parts = content["parts"] as? [[String: Any]] {
                                     
                                     for part in parts {
-                                        let isThoughtPart = part["thought"] as? Bool == true
+                                        let isThoughtFlag = part["thought"] as? Bool == true
+                                        let thoughtDict = part["thought"] as? [String: Any]
                                         let extractedThought: String? = {
-                                            if isThoughtPart, let text = part["text"] as? String { return text }
+                                            if isThoughtFlag, let text = part["text"] as? String { return text }
                                             if let thought = part["thought"] as? String { return thought }
                                             if let thinking = part["thinking"] as? String { return thinking }
+                                            if let dictText = thoughtDict?["text"] as? String { return dictText }
                                             return nil
                                         }()
                                         
@@ -2733,7 +2735,7 @@ Required changes to my new portfolio:
                                                     self.messages[idx].thoughts = (self.messages[idx].thoughts ?? "") + thoughtText
                                                 }
                                             }
-                                        } else if let deltaText = part["text"] as? String, !isThoughtPart {
+                                        } else if let deltaText = part["text"] as? String, !isThoughtFlag, extractedThought == nil {
                                             // Standard text streaming
                                             accumulated += deltaText
                                             DispatchQueue.main.async {
@@ -3782,9 +3784,21 @@ Required changes to my new portfolio:
     
     public func deduplicateMessages() {
         var deduped: [ChatMessage] = []
+        var seenModelTexts = Set<String>()
+        
         for msg in self.messages {
-            if let last = deduped.last, last.role == "model" && msg.role == "model" && (last.content == msg.content || msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
-                continue
+            if msg.role == "model" {
+                let trimmed = msg.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                // Remove empty model placeholders if a populated model response exists
+                if trimmed.isEmpty && deduped.contains(where: { $0.role == "model" && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                    continue
+                }
+                if !trimmed.isEmpty && seenModelTexts.contains(trimmed) {
+                    continue
+                }
+                if !trimmed.isEmpty {
+                    seenModelTexts.insert(trimmed)
+                }
             }
             deduped.append(msg)
         }
