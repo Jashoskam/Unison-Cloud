@@ -3098,11 +3098,17 @@ Required changes to my new portfolio:
         }
     }
     
+    private var lastPromptDispatchTimestamp: TimeInterval = 0
+    
     private func sendPromptAction(prompt: String, convoId: String) {
-        guard !isSendingMessage else {
-            logEvent(message: "[GUARD] Blocked duplicate sendPromptAction — message generation already in flight.")
+        // Lightweight deduplication: block if exact same prompt dispatched within 2 seconds
+        let now = Date().timeIntervalSince1970
+        if now - lastPromptDispatchTimestamp < 2.0 {
+            logEvent(message: "[GUARD] Blocked rapid duplicate sendPromptAction (within 2s window).")
             return
         }
+        lastPromptDispatchTimestamp = now
+        
         let lower = prompt.lowercased()
         
         // Intercept /help documentation command
