@@ -1069,7 +1069,7 @@ async function generateContentStreamWithFallback(params: any): Promise<any> {
                 const finalParams = { ...params };
                 if (finalParams.config) {
                     finalParams.config = { ...finalParams.config };
-                    if (finalParams.config.thinkingConfig && !modelName.startsWith("gemini-3")) {
+                    if (finalParams.config.thinkingConfig && !modelName.startsWith("gemini-3") && !modelName.startsWith("gemini-2.5")) {
                         console.log(`[GEMINI_PROXY] Removing thinkingConfig for fallback stream on model ${modelName}`);
                         delete finalParams.config.thinkingConfig;
                     }
@@ -3053,6 +3053,7 @@ CORE BEHAVIORAL RULES:
             let fullText = "";
             let fullThoughts = "";
             for await (const chunk of responseStream) {
+                console.log("[COMPANION_STREAM_CHUNK]", JSON.stringify(chunk).slice(0, 300));
                 const candidates = (chunk as any).candidates;
                 if (candidates && candidates[0] && candidates[0].content && candidates[0].content.parts) {
                     for (const part of candidates[0].content.parts) {

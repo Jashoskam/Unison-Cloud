@@ -2686,13 +2686,19 @@ Required changes to my new portfolio:
                                let parts = content["parts"] as? [[String: Any]] {
                                 
                                 for part in parts {
-                                    if let thoughtText = (part["thought"] as? String) ?? (part["thinking"] as? String) {
+                                    // Gemini REST API: thought parts have { "thought": true, "text": "..." }
+                                    let isThoughtPart = part["thought"] as? Bool == true
+                                    if isThoughtPart, let thoughtText = part["text"] as? String {
                                         DispatchQueue.main.async {
-                                            TokenStreamQueue.shared.pushThinkingChunk(thoughtText)
+                                            TokenStreamQueue.shared.isThinking = true
+                                            TokenStreamQueue.shared.thinkingText += thoughtText
                                         }
-                                    }
-                                    
-                                    if let deltaText = part["text"] as? String {
+                                    } else if let thoughtText = (part["thought"] as? String) ?? (part["thinking"] as? String) {
+                                        DispatchQueue.main.async {
+                                            TokenStreamQueue.shared.isThinking = true
+                                            TokenStreamQueue.shared.thinkingText += thoughtText
+                                        }
+                                    } else if let deltaText = part["text"] as? String, !isThoughtPart {
                                         // Standard text streaming
                                         accumulated += deltaText
                                         DispatchQueue.main.async {
@@ -2730,6 +2736,8 @@ Required changes to my new portfolio:
                     }
                     
                     DispatchQueue.main.async {
+                        TokenStreamQueue.shared.isThinking = false
+                        TokenStreamQueue.shared.isStreamingActive = false
                         completion(accumulated, toolExecutions)
                     }
                 } catch {
@@ -3091,6 +3099,10 @@ Required changes to my new portfolio:
     }
     
     private func sendPromptAction(prompt: String, convoId: String) {
+        guard !isSendingMessage else {
+            logEvent(message: "[GUARD] Blocked duplicate sendPromptAction — message generation already in flight.")
+            return
+        }
         let lower = prompt.lowercased()
         
         // Intercept /help documentation command
