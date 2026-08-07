@@ -2948,11 +2948,19 @@ public struct ExploredLogItem: Identifiable {
     }
 }
 
-public struct CommandLogItem: Identifiable {
+public struct CommandLogItem: Identifiable, Equatable {
     public let id = UUID()
     public let command: String
     public let cwd: String
     public let output: String?
+    public let durationSeconds: Int
+    
+    public init(command: String, cwd: String = "~/.../Unison", output: String? = nil, durationSeconds: Int = 0) {
+        self.command = command
+        self.cwd = cwd
+        self.output = output
+        self.durationSeconds = durationSeconds
+    }
 }
 
 public struct ParsedExecutionLog {
@@ -3288,28 +3296,30 @@ public struct DynamicThinkingBlockView: View {
     public var body: some View {
         let log = parseExecutionLog(thoughts)
         
-        VStack(alignment: .leading, spacing: 6) {
-            // Disclosure Header (Worked for 1m > / Worked for 23s v)
+        VStack(alignment: .leading, spacing: 8) {
+            // Header: "Thinking for 31s v" / "Worked for 49s v"
             Button(action: {
                 withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                     isWorkedExpanded.toggle()
                 }
             }) {
-                HStack(spacing: 5) {
-                    if isStreaming {
-                        ProgressView()
-                            .scaleEffect(0.55)
-                            .frame(width: 12, height: 12)
-                    }
+                HStack(spacing: 6) {
+                    let headerTitle: String = {
+                        if isStreaming {
+                            let duration = max(1, Int(streamQueue.thinkingDurationSeconds))
+                            return streamQueue.thinkingText.isEmpty ? "Reasoning & Analyzing Prompt..." : "Thinking for \(duration)s"
+                        } else {
+                            return "Worked for \(log.durationSeconds)s"
+                        }
+                    }()
                     
-                    Text(isStreaming ? (streamQueue.thinkingText.isEmpty ? "Reasoning & Analyzing Prompt..." : "Thought (\(String(format: "%.1f", streamQueue.thinkingDurationSeconds))s)") : "Worked for \(log.durationSeconds)s")
-                        .font(.system(size: 11.5, weight: .regular))
-                        .foregroundColor(.white.opacity(0.75))
-                        .realtimeShimmer(active: isStreaming)
+                    Text(headerTitle)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.white.opacity(0.85))
                     
                     Image(systemName: isWorkedExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.45))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.5))
                     
                     Spacer()
                 }
@@ -3317,18 +3327,23 @@ public struct DynamicThinkingBlockView: View {
             .buttonStyle(PlainButtonStyle())
             
             if isWorkedExpanded {
-                VStack(alignment: .leading, spacing: 6) {
-                    if isStreaming && !streamQueue.thinkingText.isEmpty {
-                        Text(streamQueue.thinkingText)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.7))
-                            .padding(8)
-                            .background(Color.white.opacity(0.04))
-                            .cornerRadius(6)
-                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.1), lineWidth: 1))
+                VStack(alignment: .leading, spacing: 10) {
+                    // 1. Thinking Text Block (matching Screenshot 2)
+                    let activeThoughts = !streamQueue.thinkingText.isEmpty ? streamQueue.thinkingText : (thoughts.isEmpty ? nil : thoughts)
+                    if let thoughtContent = activeThoughts, !thoughtContent.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(thoughtContent)
+                                .font(.system(size: 12.5, weight: .regular, design: .default))
+                                .foregroundColor(Color(red: 0.78, green: 0.8, blue: 0.85))
+                                .lineSpacing(4)
+                                .padding(10)
+                                .background(Color.white.opacity(0.03))
+                                .cornerRadius(8)
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.08), lineWidth: 1))
+                        }
                     }
                     
-                    // Explored Activity Feed Container (ONLY render if actual files or folders were explored)
+                    // 2. Explored Activity Row (matching Screenshot 1: "Explored 2 files, 1 search >")
                     if !log.exploredItems.isEmpty && (log.exploredFilesCount > 0 || log.exploredFoldersCount > 0) {
                         VStack(alignment: .leading, spacing: 4) {
                             Button(action: {
@@ -3336,17 +3351,18 @@ public struct DynamicThinkingBlockView: View {
                                     isExploredExpanded.toggle()
                                 }
                             }) {
-                                HStack(spacing: 5) {
-                                    Text("Explored ")
-                                        .font(.system(size: 11.5, weight: .regular))
-                                        .foregroundColor(.white.opacity(0.7))
-                                    + Text("\(log.exploredFilesCount) file\(log.exploredFilesCount == 1 ? "" : "s")\(log.exploredFoldersCount > 0 ? ", \(log.exploredFoldersCount) folder\(log.exploredFoldersCount == 1 ? "" : "s")" : "")")
-                                        .font(.system(size: 11.5, weight: .bold))
-                                        .foregroundColor(.white)
+                                HStack(spacing: 6) {
+                                    Text("Explored")
+                                        .font(.system(size: 12.5, weight: .regular))
+                                        .foregroundColor(.white.opacity(0.65))
+                                    
+                                    Text("\(log.exploredFilesCount) file\(log.exploredFilesCount == 1 ? "" : "s")\(log.exploredFoldersCount > 0 ? ", \(log.exploredFoldersCount) search" : "")")
+                                        .font(.system(size: 12.5, weight: .semibold))
+                                        .foregroundColor(.white.opacity(0.9))
                                     
                                     Image(systemName: isExploredExpanded ? "chevron.down" : "chevron.right")
-                                        .font(.system(size: 8, weight: .semibold))
-                                        .foregroundColor(.white.opacity(0.45))
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundColor(.white.opacity(0.5))
                                     
                                     Spacer()
                                 }
@@ -3358,11 +3374,6 @@ public struct DynamicThinkingBlockView: View {
                                     ForEach(Array(log.exploredItems.enumerated()), id: \.element.id) { index, item in
                                         let isCurrentActiveAction = isStreaming && (index == log.exploredItems.count - 1)
                                         ExploredLogItemView(item: item, isCurrentActiveAction: isCurrentActiveAction)
-                                            .transition(.asymmetric(
-                                                insertion: .move(edge: .top).combined(with: .opacity),
-                                                removal: .opacity
-                                            ))
-                                            .animation(.spring(response: 0.35, dampingFraction: 0.82).delay(Double(index) * 0.12), value: log.exploredItems.count)
                                     }
                                 }
                                 .padding(.leading, 12)
@@ -3370,74 +3381,36 @@ public struct DynamicThinkingBlockView: View {
                         }
                     }
                     
-                    // Command Block matching Screenshot 1
+                    // 3. Command & Tool Execution Feed (matching Screenshot 1: "Ran swift build 2>&1 >", "Ran git commit...")
                     if !log.commandItems.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Button(action: {
-                                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                                    isCommandsExpanded.toggle()
-                                }
-                            }) {
-                                HStack(spacing: 5) {
-                                    Text("Run ")
-                                        .font(.system(size: 11.5, weight: .regular))
-                                        .foregroundColor(.white.opacity(0.7))
-                                    
-                                    if let firstCmd = log.commandItems.first {
-                                        Text(firstCmd.command)
-                                            .font(.system(size: 11.5, weight: .bold, design: .monospaced))
-                                            .foregroundColor(.white)
-                                    }
-                                    
-                                    Image(systemName: isCommandsExpanded ? "chevron.down" : "chevron.right")
-                                        .font(.system(size: 8, weight: .semibold))
-                                        .foregroundColor(.white.opacity(0.45))
-                                    
-                                    Spacer()
-                                }
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            
-                            if isCommandsExpanded {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    ForEach(log.commandItems) { cmd in
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            HStack(spacing: 4) {
-                                                Text(cmd.cwd.hasPrefix("/") ? (cmd.cwd as NSString).lastPathComponent : "~/.../Unison")
-                                                    .font(.system(size: 10.5, design: .monospaced))
-                                                    .foregroundColor(.white.opacity(0.5))
-                                                Text("$")
-                                                    .font(.system(size: 10.5, weight: .bold, design: .monospaced))
-                                                    .foregroundColor(.white.opacity(0.5))
-                                                Text(cmd.command)
-                                                    .font(.system(size: 10.5, weight: .bold, design: .monospaced))
-                                                    .foregroundColor(.white)
-                                            }
-                                            
-                                            if let output = cmd.output, !output.isEmpty {
-                                                Text(output)
-                                                    .font(.system(size: 10.5, design: .monospaced))
-                                                    .foregroundColor(.white.opacity(0.7))
-                                            } else {
-                                                Text("Working...")
-                                                    .font(.system(size: 10.5, design: .monospaced))
-                                                    .foregroundColor(.white.opacity(0.5))
-                                            }
-                                        }
-                                        .padding(8)
-                                        .background(Color(red: 0.08, green: 0.08, blue: 0.09))
-                                        .cornerRadius(6)
-                                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.08), lineWidth: 1))
-                                    }
-                                }
-                                .padding(.leading, 12)
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(log.commandItems) { cmd in
+                                AccordionTerminalBlockView(
+                                    command: cmd.command,
+                                    logOutput: cmd.output ?? "",
+                                    durationSeconds: cmd.durationSeconds,
+                                    isRunning: isStreaming && cmd == log.commandItems.last
+                                )
                             }
                         }
                     }
                 }
+                .padding(.leading, 4)
+            }
+            
+            // Bottom "Working..." Status Indicator matching Screenshot 2
+            if isStreaming {
+                HStack(spacing: 6) {
+                    Text("Working...")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.white.opacity(0.6))
+                        .realtimeShimmer(active: true)
+                    Spacer()
+                }
+                .padding(.top, 4)
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 4)
     }
 }
 
