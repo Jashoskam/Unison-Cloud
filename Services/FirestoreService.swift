@@ -3600,6 +3600,10 @@ Required changes to my new portfolio:
         self.messages.append(placeholderMsg)
         self.isSendingMessage = true
         
+        DispatchQueue.main.async {
+            TokenStreamQueue.shared.reset()
+        }
+        
         let session = URLSession(configuration: .default)
         if #available(macOS 12.0, iOS 15.0, *) {
             Task {
@@ -3626,6 +3630,7 @@ Required changes to my new portfolio:
                                 if let type = json["type"] as? String {
                                     if type == "thought_delta", let thought = json["thought"] as? String {
                                         DispatchQueue.main.async {
+                                            TokenStreamQueue.shared.pushThinkingChunk(thought)
                                             if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
                                                 self.messages[idx].thoughts = (self.messages[idx].thoughts ?? "") + thought
                                             }
@@ -3655,6 +3660,9 @@ Required changes to my new portfolio:
                                 
                                 if !deltaText.isEmpty {
                                     accumulated += deltaText
+                                    DispatchQueue.main.async {
+                                        TokenStreamQueue.shared.pushTextChunk(deltaText)
+                                    }
                                     self.appendDeltaThrottled(delta: deltaText, assistantMsgId: assistantMsgId)
                                 }
                             }

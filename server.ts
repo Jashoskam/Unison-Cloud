@@ -3051,10 +3051,26 @@ CORE BEHAVIORAL RULES:
             });
 
             let fullText = "";
+            let fullThoughts = "";
             for await (const chunk of responseStream) {
-                if (chunk.text) {
+                const candidates = (chunk as any).candidates;
+                if (candidates && candidates[0] && candidates[0].content && candidates[0].content.parts) {
+                    for (const part of candidates[0].content.parts) {
+                        if (part.thought || part.thinking) {
+                            const thoughtStr = part.thought || part.thinking;
+                            fullThoughts += thoughtStr;
+                            res.write(`data: ${JSON.stringify({ type: "thought_delta", thought: thoughtStr, text: "" })}\n\n`);
+                            if (typeof res.flush === 'function') res.flush();
+                        }
+                        if (part.text) {
+                            fullText += part.text;
+                            res.write(`data: ${JSON.stringify({ type: "text_delta", text: part.text })}\n\n`);
+                            if (typeof res.flush === 'function') res.flush();
+                        }
+                    }
+                } else if (chunk.text) {
                     fullText += chunk.text;
-                    res.write(`data: ${JSON.stringify({ text: chunk.text })}\n\n`);
+                    res.write(`data: ${JSON.stringify({ type: "text_delta", text: chunk.text })}\n\n`);
                     if (typeof res.flush === 'function') res.flush();
                 }
             }
