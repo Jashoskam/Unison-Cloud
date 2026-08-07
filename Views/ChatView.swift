@@ -187,17 +187,6 @@ class ChatViewModel: ObservableObject {
         guard !text.isEmpty else { return }
         
         let db = FirestoreService.shared
-        if db.selectedConversationId == nil {
-            db.isNamingConversation = true
-            let titlePrefix = String(text.prefix(28))
-            db.newChatDraftTitle = titlePrefix
-            db.createWorkspaceConversation(title: titlePrefix, type: "chat") { newId in
-                db.selectedConversationId = newId
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                    db.isNamingConversation = false
-                }
-            }
-        }
         
         // Trigger computer use workflow if tool is attached or mentioned
         let activeTools = attachedTools
