@@ -1299,7 +1299,8 @@ Required changes to my new portfolio:
                         // 2. Append local messages if not already present or duplicated by content
                         for localMsg in self.messages {
                             if !finalMessages.contains(where: { $0.id == localMsg.id }) {
-                                if localMsg.role == "user" && finalMessages.contains(where: { $0.role == "user" && $0.content.trimmingCharacters(in: .whitespacesAndNewlines) == localMsg.content.trimmingCharacters(in: .whitespacesAndNewlines) }) {
+                                let trimmedLocal = localMsg.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if !trimmedLocal.isEmpty && finalMessages.contains(where: { $0.role == localMsg.role && $0.content.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedLocal }) {
                                     continue
                                 }
                                 finalMessages.append(localMsg)
@@ -3839,7 +3840,9 @@ Required changes to my new portfolio:
                         // Update current selection if it is matching the placeholder
                         if self.selectedConversationId == newId {
                             self.selectedConversationId = remoteId
-                            self.fetchLiveMessages(conversationId: remoteId)
+                            if !self.isSendingMessage {
+                                self.fetchLiveMessages(conversationId: remoteId)
+                            }
                         }
                     }
                 }
