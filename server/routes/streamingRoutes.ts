@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { GoogleGenAI } from "@google/genai";
+import { spawn, ChildProcess } from "child_process";
 import { AppError } from "../middleware/errorHandler";
 
 export const streamingRouter = Router();
@@ -14,6 +15,133 @@ const getGenAIClient = () => {
         }
     });
 };
+
+// Helper function to truncate stdout/stderr logs for Gemini Context (Head 20 + Tail 50)
+const truncateLogBufferForContext = (logs: string[]): string => {
+    if (logs.length <= 70) {
+        return logs.join("\n");
+    }
+    const head = logs.slice(0, 20);
+    const tail = logs.slice(logs.length - 50);
+    const omittedCount = logs.length - 70;
+    return [...head, `\n[... Omitted ${omittedCount} lines of build/terminal output for token preservation ...]\n`, ...tail].join("\n");
+};
+
+// Maximum agentic execution ceiling
+const MAX_AGENT_LOOPS = 15;
+
+streamingRouter.post("/agent-loop", async (req: Request, res: Response, next: NextFunction) => {
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    let activeSubprocess: ChildProcess | null = null;
+    let isClientConnected = true;
+
+    // Attach req.on('close') process cancellation listener (SIGTERM)
+    req.on("close", () => {
+        isClientConnected = false;
+        if (activeSubprocess && !activeSubprocess.killed) {
+            console.log(`[Agent Loop ${requestId}] Client disconnected. Terminating child process (SIGTERM)...`);
+            try {
+                activeSubprocess.kill("SIGTERM");
+                setTimeout(() => {
+                    if (activeSubprocess && !activeSubprocess.killed) {
+                        activeSubprocess.kill("SIGKILL");
+                    }
+                }, 2000);
+            } catch (e) {
+                console.error(`[Agent Loop ${requestId}] Error killing process:`, e);
+            }
+        }
+    });
+
+    try {
+        const { message, modelName, prompt, cwd } = req.body;
+        const textPrompt = prompt || message;
+        const workingDir = cwd || process.cwd();
+
+        if (!textPrompt) {
+            return next(new AppError("Field 'message' or 'prompt' is required", 400, true, "MISSING_PROMPT"));
+        }
+
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache, no-transform");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Accel-Buffering", "no");
+        if (typeof (res as any).flushHeaders === "function") {
+            (res as any).flushHeaders();
+        }
+
+        const targetModel = modelName || "gemini-2.5-flash";
+        const systemInstruction = `You are Unison OS Agentic Engineer, a world-class AI developer operating in an autonomous loop.
+You can execute shell commands, read files, write code, and debug issues.
+When thinking through complex code architectures, express your internal reasoning step by step.`;
+
+        const googleGenAI = getGenAIClient();
+        let loopCounter = 0;
+        let finalResponseText = "";
+
+        console.log(`[Agent Loop ${requestId}] Starting stream session with model: ${targetModel}`);
+
+        const responseStream = await googleGenAI.models.generateContentStream({
+            model: targetModel,
+            contents: textPrompt,
+            config: {
+                systemInstruction,
+                temperature: 0.7,
+                maxOutputTokens: 32768,
+                ...(targetModel.includes("2.5") ? { thinkingConfig: { thinkingBudget: 8192 } } : {})
+            }
+        });
+
+        for await (const chunk of responseStream) {
+            if (!isClientConnected) break;
+
+            const candidates = (chunk as any).candidates;
+            if (candidates && candidates[0] && candidates[0].content && candidates[0].content.parts) {
+                for (const part of candidates[0].content.parts) {
+                    // 1. Thinking / Reasoning delta
+                    if (part.thought || part.thinking) {
+                        const thoughtText = part.thought || part.thinking;
+                        res.write(`data: ${JSON.stringify({ type: "thought_delta", thought: thoughtText })}\n\n`);
+                        if (typeof (res as any).flush === 'function') (res as any).flush();
+                    }
+                    // 2. Standard Text output delta
+                    if (part.text) {
+                        finalResponseText += part.text;
+                        res.write(`data: ${JSON.stringify({ type: "text_delta", text: part.text })}\n\n`);
+                        if (typeof (res as any).flush === 'function') (res as any).flush();
+                    }
+                }
+            } else if (chunk.text) {
+                finalResponseText += chunk.text;
+                res.write(`data: ${JSON.stringify({ type: "text_delta", text: chunk.text })}\n\n`);
+                if (typeof (res as any).flush === 'function') (res as any).flush();
+            }
+        }
+
+        res.write(`data: ${JSON.stringify({ type: "done", fullText: finalResponseText })}\n\n`);
+        res.write(`data: [DONE]\n\n`);
+        res.end();
+
+    } catch (err: any) {
+        console.error(`[Agent Loop ${requestId}] Error:`, err);
+        const isQuotaError = err.message?.includes("429") || err.message?.includes("Quota") || err.message?.includes("RESOURCE_EXHAUSTED");
+        const payload = {
+            type: "quota_error",
+            code: isQuotaError ? 429 : 500,
+            message: err.message || "An unexpected error occurred during agentic loop execution."
+        };
+        if (!res.headersSent) {
+            res.setHeader("Content-Type", "text/event-stream");
+            res.write(`data: ${JSON.stringify(payload)}\n\n`);
+            res.write(`data: [DONE]\n\n`);
+            res.end();
+        } else {
+            res.write(`data: ${JSON.stringify(payload)}\n\n`);
+            res.write(`data: [DONE]\n\n`);
+            res.end();
+        }
+    }
+});
 
 streamingRouter.post("/chat", async (req: Request, res: Response, next: NextFunction) => {
     try {

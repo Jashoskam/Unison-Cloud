@@ -4862,3 +4862,196 @@ public struct DynamicThoughtTrajectoryView: View {
         #endif
     }
 }
+
+// MARK: - Collapsible Thought Accordion View ("Thought (26s) ˅")
+public struct CollapsibleThoughtView: View {
+    let thoughtText: String
+    let durationSeconds: Int
+    @State private var isExpanded: Bool = true
+    
+    public init(thoughtText: String, durationSeconds: Int = 0) {
+        self.thoughtText = thoughtText
+        self.durationSeconds = durationSeconds
+    }
+    
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded.toggle()
+                }
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "brain.head.profile")
+                        .font(.system(size: 11))
+                        .foregroundColor(.purple.opacity(0.9))
+                    
+                    Text("Thought")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.85))
+                    
+                    if durationSeconds > 0 {
+                        Text("(\(durationSeconds)s)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.purple.opacity(0.8))
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white.opacity(0.4))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.purple.opacity(0.12))
+                .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.purple.opacity(0.25), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            
+            if isExpanded {
+                Text(thoughtText)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundColor(.white.opacity(0.75))
+                    .fontDesign(.serif)
+                    .italic()
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.2))
+                    .cornerRadius(6)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Live Accordion Terminal Output Block ("Ran swift build 2>&1" / "Worked for 26s")
+public struct AccordionTerminalBlockView: View {
+    let command: String
+    let logOutput: String
+    let durationSeconds: Int
+    let isRunning: Bool
+    
+    @State private var isExpanded: Bool = true
+    
+    public init(command: String, logOutput: String, durationSeconds: Int = 0, isRunning: Bool = false) {
+        self.command = command
+        self.logOutput = logOutput
+        self.durationSeconds = durationSeconds
+        self.isRunning = isRunning
+    }
+    
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header Bar
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded.toggle()
+                }
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: isRunning ? "arrow.triangle.2.circlepath" : "terminal.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(isRunning ? .cyan : .green.opacity(0.9))
+                    
+                    Text("Ran \(command)")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.9))
+                        .lineLimit(1)
+                    
+                    Spacer()
+                    
+                    Text(isRunning ? "Working..." : "Worked for \(durationSeconds)s")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(isRunning ? .cyan : .white.opacity(0.5))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.white.opacity(0.06))
+                        .cornerRadius(6)
+                    
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white.opacity(0.4))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(red: 0.08, green: 0.08, blue: 0.1))
+            }
+            .buttonStyle(.plain)
+            
+            if isExpanded {
+                Divider()
+                    .background(Color.white.opacity(0.1))
+                
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: true) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(logOutput.isEmpty ? "[Output stream initializing...]" : logOutput)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(Color(red: 0.8, green: 0.85, blue: 0.9))
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .id("bottom_terminal_anchor")
+                        }
+                    }
+                    .frame(maxHeight: 220)
+                    .background(Color(red: 0.04, green: 0.04, blue: 0.06))
+                    .onChange(of: logOutput) { _ in
+                        withAnimation {
+                            proxy.scrollTo("bottom_terminal_anchor", anchor: .bottom)
+                        }
+                    }
+                }
+            }
+        }
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        )
+        .padding(.vertical, 6)
+    }
+}
+
+// MARK: - Glassmorphic Resilient Quota / Rate Limit Error Card
+public struct QuotaErrorCardView: View {
+    let errorCode: Int
+    let errorMessage: String
+    
+    public init(errorCode: Int = 429, errorMessage: String) {
+        self.errorCode = errorCode
+        self.errorMessage = errorMessage
+    }
+    
+    public var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 16))
+                .foregroundColor(.orange)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(errorCode == 429 ? "Quota / Rate Limit Exceeded (HTTP 429)" : "Network Service Event")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white)
+                
+                Text(errorMessage)
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.75))
+            }
+            
+            Spacer()
+        }
+        .padding(12)
+        .background(Color.orange.opacity(0.12))
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+        )
+        .padding(.vertical, 6)
+    }
+}

@@ -3555,6 +3555,28 @@ Required changes to my new portfolio:
         }
     }
     
+    // 50ms Time-Buffered Batch Queue for 60 FPS SwiftUI Stream Throttling
+    private var pendingDeltaBuffer: String = ""
+    private var batchFlushTimer: Timer?
+    
+    private func appendDeltaThrottled(delta: String, assistantMsgId: String) {
+        pendingDeltaBuffer += delta
+        if batchFlushTimer == nil {
+            batchFlushTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { [weak self] _ in
+                guard let self = self else { return }
+                let pending = self.pendingDeltaBuffer
+                self.pendingDeltaBuffer = ""
+                self.batchFlushTimer = nil
+                
+                DispatchQueue.main.async {
+                    if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
+                        self.messages[idx].content += pending
+                    }
+                }
+            }
+        }
+    }
+
     private func postChatMessageToServer(prompt: String, convoId: String) {
         guard let url = URL(string: "\(webUrl)/api/companion/stream") else { return }
         var request = URLRequest(url: url)
@@ -3601,6 +3623,22 @@ Required changes to my new portfolio:
                             if let data = jsonStr.data(using: .utf8),
                                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                                 
+                                if let type = json["type"] as? String {
+                                    if type == "thought_delta", let thought = json["thought"] as? String {
+                                        DispatchQueue.main.async {
+                                            if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
+                                                self.messages[idx].thoughts = (self.messages[idx].thoughts ?? "") + thought
+                                            }
+                                        }
+                                    } else if type == "quota_error", let errMsg = json["message"] as? String {
+                                        DispatchQueue.main.async {
+                                            if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
+                                                self.messages[idx].commandOutput = "⚠️ Quota/Rate Limit Event: \(errMsg)"
+                                            }
+                                        }
+                                    }
+                                }
+                                
                                 var deltaText = ""
                                 if let text = json["text"] as? String {
                                     deltaText = text
@@ -3617,11 +3655,7 @@ Required changes to my new portfolio:
                                 
                                 if !deltaText.isEmpty {
                                     accumulated += deltaText
-                                    DispatchQueue.main.async {
-                                        if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
-                                            self.messages[idx].content += deltaText
-                                        }
-                                    }
+                                    self.appendDeltaThrottled(delta: deltaText, assistantMsgId: assistantMsgId)
                                 }
                             }
                         }
