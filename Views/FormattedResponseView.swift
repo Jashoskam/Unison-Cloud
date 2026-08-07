@@ -3780,10 +3780,10 @@ public struct FormattedResponseView: View {
     }
     
     public var body: some View {
-        let currentText = isStreaming ? typewrittenText : text
+        let currentText = isStreaming ? (text.isEmpty ? typewrittenText : text) : text
         let (textWithoutThoughts, extractedThoughts) = extractThinkingBlock(currentText)
-        let finalThoughts = isStreaming ? typewrittenThoughts : (thoughts ?? extractedThoughts)
-        let synthesizedThoughts = synthesizeActivityFeed(rawThoughts: finalThoughts, currentText: currentText)
+        let activeThoughts = isStreaming ? (!TokenStreamQueue.shared.thinkingText.isEmpty ? TokenStreamQueue.shared.thinkingText : ((thoughts ?? "").isEmpty ? typewrittenThoughts : (thoughts ?? ""))) : (thoughts ?? extractedThoughts)
+        let synthesizedThoughts = synthesizeActivityFeed(rawThoughts: activeThoughts, currentText: currentText)
         let (textWithoutProject, projectNode) = extractProjectNode(textWithoutThoughts)
         let (textWithoutPlan, planNode) = extractPlanNode(textWithoutProject)
         let parsedResult = extractSources(textWithoutPlan)
