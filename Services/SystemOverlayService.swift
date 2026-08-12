@@ -207,6 +207,7 @@ public final class SystemOverlayService: ObservableObject {
 
     private func windowTitle(for app: NSRunningApplication) -> String {
         #if os(macOS)
+        guard AXIsProcessTrusted() else { return app.localizedName ?? "" }
         let systemElement = AXUIElementCreateSystemWide()
         var focusedWindow: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(systemElement, kAXFocusedWindowAttribute as CFString, &focusedWindow)
@@ -229,6 +230,7 @@ public final class SystemOverlayService: ObservableObject {
 
     private func extractSelectedText() -> String {
         #if os(macOS)
+        guard AXIsProcessTrusted() else { return "" }
         let systemWide = AXUIElementCreateSystemWide()
         var focusedElement: CFTypeRef?
         let copyFocused = AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedElement)

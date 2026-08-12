@@ -346,6 +346,27 @@ public class FirestoreService: ObservableObject {
         }.resume()
     }
     
+    // Local Voice Engine Selector: 'local_voice_v2', 'kyutai_moshi', or 'gemini_live'
+    @Published public var activeVoiceEngine: String = {
+        UserDefaults.standard.string(forKey: "unison_active_voice_engine") ?? "local_voice_v2"
+    }() {
+        didSet {
+            UserDefaults.standard.set(activeVoiceEngine, forKey: "unison_active_voice_engine")
+            self.logEvent(message: "Active voice engine updated to: \(activeVoiceEngine)")
+        }
+    }
+    
+    public func sendPromptToLocalVoiceV2(prompt: String) {
+        guard let url = URL(string: "http://127.0.0.1:8090/speak") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload: [String: String] = ["prompt": prompt]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        
+        URLSession.shared.dataTask(with: req).resume()
+    }
+
     @Published public var userSupabaseUrl: String = {
         UserDefaults.standard.string(forKey: "unison_user_supabase_url") ?? "https://copravscnxxgyabaftgz.supabase.co"
     }() {
@@ -2896,14 +2917,37 @@ Required changes to my new portfolio:
     
     private static var lastApiCallTimestamp: TimeInterval = 0
     
+    private func executeServerFallback(prompt: String, completion: @escaping (String?) -> Void) {
+        guard let url = URL(string: "\(webUrl)/api/gemini/chat-simple") else {
+            completion(nil)
+            return
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body: [String: Any] = ["prompt": prompt]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            if let data = data,
+               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let text = (dict["text"] as? String) ?? (dict["reply"] as? String) {
+                completion(text)
+            } else {
+                completion(nil)
+            }
+        }.resume()
+    }
+    
     private func executeWithFallback(models: [String], index: Int, prompt: String, history: [ChatMessage], completion: @escaping (String?) -> Void) {
         guard !effectiveApiKey.isEmpty else {
-            completion("⚠️ Gemini API Key Required\n\nTo enable AI responses, please enter your Gemini API key in **Settings → AI Model Configuration**.")
+            self.executeServerFallback(prompt: prompt, completion: completion)
             return
         }
         
         guard index < models.count else {
-            completion("Unison neural error: Failed all backup model pathways due to temporary High Demand on Google Gemini service capacity. Please retry inside Unison OS or check your API Key configuration.")
+            self.executeServerFallback(prompt: prompt, completion: completion)
             return
         }
         

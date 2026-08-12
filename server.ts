@@ -2645,6 +2645,38 @@ export default function App() {
         res.json({ devices, totalMeshNodes: devices.length });
     });
 
+    // LOCAL VOICE ASSISTANT & KYUTAI MOSHI ENGINE STATUS ENDPOINT
+    app.get("/api/voice/engines", async (req, res) => {
+        try {
+            const moshiInstalled = fs.existsSync("/Users/jashoskam/Desktop/moshi-main/moshi_mlx");
+            const voiceV2Installed = fs.existsSync("/Users/jashoskam/Desktop/voice-assistant/Voice_v2.py");
+
+            res.json({
+                success: true,
+                engines: [
+                    {
+                        id: "kyutai-moshi-mlx",
+                        name: "Kyutai Moshi MLX (Full-Duplex 80ms Voice)",
+                        type: "voice-to-voice",
+                        installed: moshiInstalled,
+                        localPort: 8998,
+                        statusUrl: "http://localhost:8998"
+                    },
+                    {
+                        id: "unison-voice-v2",
+                        name: "Unison Voice_v2 (DeepSeek-R1 + Moondream)",
+                        type: "stt-llm-tts",
+                        installed: voiceV2Installed,
+                        localPort: 8090,
+                        statusUrl: "http://localhost:8090/status"
+                    }
+                ]
+            });
+        } catch (err: any) {
+            res.status(500).json({ error: err.message });
+        }
+    });
+
     // RASPBERRY PI NEURAL BRAIN & HARDWARE DIAGNOSTICS ENDPOINT
     app.get("/api/brain/info", (req, res) => {
         try {
