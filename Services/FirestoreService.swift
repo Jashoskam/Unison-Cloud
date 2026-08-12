@@ -3418,6 +3418,79 @@ Required changes to my new portfolio:
         }
     }
 
+    private func anyPunctuation(_ text: String) -> Bool {
+        return text.contains(".") || text.contains("!") || text.contains("?") || text.contains("\n")
+    }
+
+    public func executeLocalOllamaVoicePipeline(prompt: String, assistantMsgId: String) {
+        guard let url = URL(string: "http://127.0.0.1:11434/api/generate") else {
+            self.sendPromptToLocalVoiceV2(prompt: prompt)
+            return
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let payload: [String: Any] = [
+            "model": "deepseek-r1:1.5b",
+            "prompt": prompt,
+            "stream": true
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        
+        let session = URLSession(configuration: .default)
+        if #available(macOS 12.0, iOS 15.0, *) {
+            Task {
+                do {
+                    let (asyncBytes, response) = try await session.bytes(for: req)
+                    guard let httpRes = response as? HTTPURLResponse, httpRes.statusCode == 200 else {
+                        self.sendPromptToLocalVoiceV2(prompt: prompt)
+                        return
+                    }
+                    
+                    var accumulatedText = ""
+                    var sentenceBuffer = ""
+                    
+                    for try await line in asyncBytes.lines {
+                        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty,
+                              let data = trimmed.data(using: .utf8),
+                              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                              let responseToken = json["response"] as? String else { continue }
+                        
+                        accumulatedText += responseToken
+                        sentenceBuffer += responseToken
+                        
+                        DispatchQueue.main.async {
+                            if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
+                                self.messages[idx].content = accumulatedText
+                            }
+                        }
+                        
+                        if self.anyPunctuation(sentenceBuffer) {
+                            let toSpeak = sentenceBuffer
+                            sentenceBuffer = ""
+                            DispatchQueue.main.async {
+                                SpeechManager.shared.speak(toSpeak)
+                            }
+                        }
+                    }
+                    
+                    DispatchQueue.main.async {
+                        self.isSendingMessage = false
+                        if !sentenceBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            SpeechManager.shared.speak(sentenceBuffer)
+                        }
+                    }
+                } catch {
+                    self.sendPromptToLocalVoiceV2(prompt: prompt)
+                }
+            }
+        } else {
+            self.sendPromptToLocalVoiceV2(prompt: prompt)
+        }
+    }
+
     public func sendVoicePromptToGeminiLive(prompt: String) {
         guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         
@@ -3434,100 +3507,8 @@ Required changes to my new portfolio:
             SpeechManager.shared.stop()
         }
         
-        // Trigger local voice assistant pipeline (Ollama DeepSeek-R1 / Moshi Engine)
-        self.sendPromptToLocalVoiceV2(prompt: prompt)
-        
-        // Direct Gemini neural streaming pipeline if API key is present
-        if !effectiveApiKey.isEmpty {
-            self.executeStreamingWithToolSupport(
-                models: ["gemini-2.5-flash", "gemini-1.5-flash"],
-                index: 0,
-                prompt: prompt,
-                history: self.messages,
-                onChunk: { [weak self] deltaText in
-                    guard let self = self else { return }
-                    if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
-                        self.messages[idx].content += deltaText
-                    }
-                },
-                completion: { [weak self] replyText, toolExecs in
-                    guard let self = self else { return }
-                    DispatchQueue.main.async {
-                        self.isSendingMessage = false
-                        if let reply = replyText, !reply.isEmpty {
-                            if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
-                                self.messages[idx].content = reply
-                                if !toolExecs.isEmpty {
-                                    self.messages[idx].toolExecutions = toolExecs
-                                }
-                            }
-                            self.saveMessagesToDefaults()
-                            SpeechManager.shared.speak(reply)
-                        } else {
-                            self.messages.removeAll(where: { $0.id == assistantMsgId })
-                        }
-                    }
-                }
-            )
-            return
-        }
-        
-        // Fallback to server endpoint
-        let serverUrlStr = "http://localhost:3000/api/streaming/live"
-        guard let url = URL(string: serverUrlStr) else {
-            DispatchQueue.main.async {
-                self.isSendingMessage = false
-                SpeechRecognizer.shared.errorMessage = "⚠️ Voice Stream Error: Invalid server URL"
-            }
-            return
-        }
-        
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let payload: [String: Any] = ["prompt": prompt]
-        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-        
-        URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
-            guard let self = self, let data = data, error == nil else {
-                DispatchQueue.main.async {
-                    self?.isSendingMessage = false
-                    SpeechRecognizer.shared.errorMessage = "⚠️ Voice Stream Notice: Re-routing to offline fallback"
-                    self?.executeStreamingWithToolSupport(models: ["gemini-2.5-flash", "gemini-1.5-flash"], index: 0, prompt: prompt, history: self?.messages ?? [], onChunk: { _ in }, completion: { reply, _ in
-                        if let r = reply {
-                            SpeechManager.shared.speak(r)
-                        }
-                    })
-                }
-                return
-            }
-            
-            let rawStr = String(data: data, encoding: .utf8) ?? ""
-            var accumulated = ""
-            let lines = rawStr.components(separatedBy: "\n")
-            for line in lines {
-                if line.starts(with: "data: ") {
-                    let jsonStr = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
-                    if jsonStr != "[DONE]", let dataObj = jsonStr.data(using: .utf8),
-                       let json = try? JSONSerialization.jsonObject(with: dataObj) as? [String: Any],
-                       let text = json["text"] as? String {
-                        accumulated += text
-                    }
-                }
-            }
-            
-            let finalOutput = accumulated.isEmpty ? "I am connected live to Unison OS. How can I assist your workspace?" : accumulated
-            
-            DispatchQueue.main.async {
-                self.isSendingMessage = false
-                if let idx = self.messages.firstIndex(where: { $0.id == assistantMsgId }) {
-                    self.messages[idx].content = finalOutput
-                }
-                self.deduplicateMessages()
-                self.saveMessagesToDefaults()
-                SpeechManager.shared.speak(finalOutput)
-            }
-        }.resume()
+        // Execute 100% Local Ollama DeepSeek R1 & Moshi Voice Pipeline
+        self.executeLocalOllamaVoicePipeline(prompt: prompt, assistantMsgId: assistantMsgId)
     }
 
     public func processDynamicWorkspaceFiles(reply: String, prompt: String) {
