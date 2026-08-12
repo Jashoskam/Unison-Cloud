@@ -185,19 +185,19 @@ public final class SystemOverlayService: ObservableObject {
         
         globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             guard let self = self else { return }
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            let isOptionSpace = flags.contains(.option) && (event.keyCode == 49 || event.charactersIgnoringModifiers == " ")
-            if isOptionSpace {
-                self.toggleSpotlight()
+            if event.keyCode == 49 && event.modifierFlags.contains(.option) {
+                DispatchQueue.main.async {
+                    self.toggleSpotlight()
+                }
             }
         }
         
         _ = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             guard let self = self else { return event }
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            let isOptionSpace = flags.contains(.option) && (event.keyCode == 49 || event.charactersIgnoringModifiers == " ")
-            if isOptionSpace {
-                self.toggleSpotlight()
+            if event.keyCode == 49 && event.modifierFlags.contains(.option) {
+                DispatchQueue.main.async {
+                    self.toggleSpotlight()
+                }
                 return nil
             }
             return event

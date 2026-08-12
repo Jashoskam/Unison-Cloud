@@ -3434,6 +3434,9 @@ Required changes to my new portfolio:
             SpeechManager.shared.stop()
         }
         
+        // Trigger local voice assistant pipeline (Ollama DeepSeek-R1 / Moshi Engine)
+        self.sendPromptToLocalVoiceV2(prompt: prompt)
+        
         // Direct Gemini neural streaming pipeline if API key is present
         if !effectiveApiKey.isEmpty {
             self.executeStreamingWithToolSupport(
